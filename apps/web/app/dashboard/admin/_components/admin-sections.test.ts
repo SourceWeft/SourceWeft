@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 
 import {
   ADMIN_DEFAULT_HREF,
+  ADMIN_OVERVIEW_SECTION,
   ADMIN_SECTION_GROUPS,
   isAdminSectionActive,
   legacyMarketTabHref,
@@ -28,21 +29,30 @@ test("a missing or unknown tab leads to the default section", () => {
 });
 
 test("a section is current on its own address and below it, not on a sibling", () => {
+  const skills = { href: "/dashboard/admin/market/skills" };
+  expect(isAdminSectionActive("/dashboard/admin/market/skills", skills)).toBe(true);
   expect(
-    isAdminSectionActive(
-      "/dashboard/admin/market/skills",
-      "/dashboard/admin/market/skills",
-    ),
+    isAdminSectionActive("/dashboard/admin/blog/42", { href: "/dashboard/admin/blog" }),
   ).toBe(true);
-  expect(
-    isAdminSectionActive("/dashboard/admin/blog/42", "/dashboard/admin/blog"),
-  ).toBe(true);
-  expect(
-    isAdminSectionActive(
-      "/dashboard/admin/market/skill-review",
-      "/dashboard/admin/market/skills",
-    ),
-  ).toBe(false);
+  expect(isAdminSectionActive("/dashboard/admin/market/skill-review", skills)).toBe(false);
+});
+
+test("the overview is current only on the admin home address", () => {
+  expect(isAdminSectionActive("/dashboard/admin", ADMIN_OVERVIEW_SECTION)).toBe(true);
+  expect(isAdminSectionActive("/dashboard/admin/blog", ADMIN_OVERVIEW_SECTION)).toBe(false);
+});
+
+test("the skill review section counts both of its queues", () => {
+  const overview = {
+    pending: { mcpReview: 1, skillReview: 2, skillListing: 3, reports: 4 },
+    blog: { drafts: 0, published: 0 },
+  };
+  const pending = Object.fromEntries(
+    ADMIN_SECTION_GROUPS.flatMap((group) => group.sections)
+      .filter((section) => section.pending)
+      .map((section) => [section.key, section.pending!(overview)]),
+  );
+  expect(pending).toEqual({ mcpReview: 1, skillReview: 5, reports: 4 });
 });
 
 test("section addresses are unique", () => {

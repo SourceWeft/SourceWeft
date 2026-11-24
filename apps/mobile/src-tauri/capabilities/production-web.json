@@ -4,12 +4,18 @@
   "description": "Native mobile commands for the production SourceWeft web app loaded in the Android and iOS webviews.",
   "platforms": ["android", "iOS"],
   "windows": ["main"],
-  "remote": { "urls": ["https://sourceweft.com/*"] },
+  "remote": {
+    "urls": ["https://sourceweft.com/*"]
+  },
   "permissions": [
     "core:default",
     "apple-sign-in:default",
     "google-auth:default",
     "allow-mobile-info",
-    "allow-open-external-url"
+    "allow-open-external-url",
+    "allow-take-launch-elapsed-ms",
+    "allow-set-session-hint",
+    "allow-log-sign-in-failure",
+    "allow-retry-launch"
   ]
 }

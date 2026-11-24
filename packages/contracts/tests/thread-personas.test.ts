@@ -36,7 +36,13 @@ const baseThread = {
 };
 
 test("a thread carries its parent link, persona, and origin", () => {
-  assert.deepEqual(threadOriginSchema.options, ["user", "subagent"]);
+  assert.deepEqual(threadOriginSchema.options, [
+    "user",
+    "subagent",
+    "scheduled",
+    "assistant_router",
+    "assistant_ticket",
+  ]);
   const child = threadSchema.parse({
     ...baseThread,
     id: "thread_2",

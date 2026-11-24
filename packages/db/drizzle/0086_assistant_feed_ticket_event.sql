@@ -1,0 +1,2 @@
+ALTER TABLE "assistant_feed_items" ADD COLUMN "ticket_event" text;--> statement-breakpoint
+ALTER TABLE "assistant_feed_items" ADD CONSTRAINT "assistant_feed_items_ticket_event_check" CHECK ("assistant_feed_items"."ticket_event" is null or "assistant_feed_items"."ticket_event" in ('created', 'ready', 'dropped', 'failed', 'blocked', 'waiting'));

@@ -47,6 +47,7 @@ const run: ChatThreadRunRecord = {
   startedAt: "2026-08-28T00:00:00.000Z",
   heartbeatAt: "2026-08-28T00:00:00.000Z",
   finishedAt: null,
+  consumedCredits: null,
   createdAt: "2026-08-28T00:00:00.000Z",
   updatedAt: "2026-08-28T00:00:00.000Z",
 };

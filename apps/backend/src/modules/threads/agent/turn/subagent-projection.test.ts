@@ -481,6 +481,34 @@ test("a paused task writes only its brief and resumes in the same child thread w
   );
 });
 
+test("a run that ends interrupted pauses the delegates still open, not the finished ones", async () => {
+  // @langchain/langgraph 1.6: a paused `task` reports nothing on the tools
+  // stream, so the runner pauses whatever is still open once the run stops.
+  const { projector, briefs, persisted } = createPausableProjector({});
+
+  projector.startTask({
+    taskCallId: "task-done",
+    namespace: ["tools:branch-a"],
+    input: PAUSED_TASK_INPUT,
+  });
+  projector.startTask({
+    taskCallId: "task-waiting",
+    namespace: ["tools:branch-b"],
+    input: PAUSED_TASK_INPUT,
+  });
+  await projector.finishTask({ taskCallId: "task-done", report: "sent" });
+
+  projector.pauseOpenTasks();
+  projector.pauseOpenTasks();
+  await projector.flush();
+
+  assert.deepEqual(
+    briefs.map((brief) => (brief as { taskCallId: string }).taskCallId),
+    ["task-waiting"],
+  );
+  assert.equal(persisted.length, 1);
+});
+
 test("a task resumed in a later run continues the child thread its paused run opened", async () => {
   const { projector, created, found, briefs, persisted } =
     createPausableProjector({
@@ -511,4 +539,139 @@ test("a task resumed in a later run continues the child thread its paused run op
   assert.equal(persisted.length, 1);
   assert.equal(persisted[0]?.childThreadId, "thread_paused_child");
   assert.equal(persisted[0]?.briefPersisted, true);
+});
+
+test("a task call that fails before its delegate does anything opens no child thread", async () => {
+  // The `task` tool rejected the call (an unknown sub-agent type, say): no
+  // delegate ran, so there is no conversation to keep.
+  const { projector, created, briefs, persisted } = createPausableProjector({});
+
+  projector.startTask({
+    taskCallId: "task-1",
+    namespace: ["tools:branch-a"],
+    input: { description: "Do the thing.", subagent_type: "false" },
+  });
+  assert.equal(
+    await projector.finishTask({
+      taskCallId: "task-1",
+      report: null,
+      failed: true,
+    }),
+    null,
+  );
+  await projector.flush();
+
+  assert.equal(created.length, 0);
+  assert.equal(briefs.length, 0);
+  assert.equal(persisted.length, 0);
+});
+
+test("a delegate that worked and then failed keeps its child thread and transcript", async () => {
+  const { projector, created, persisted } = createPausableProjector({});
+
+  projector.startTask({
+    taskCallId: "task-1",
+    namespace: ["tools:branch-a"],
+    input: PAUSED_TASK_INPUT,
+  });
+  projector.observeMessages(["tools:branch-a", "model_request:m1"], {
+    event: "message-start",
+  });
+  assert.equal(
+    await projector.finishTask({
+      taskCallId: "task-1",
+      report: null,
+      failed: true,
+    }),
+    "thread_child",
+  );
+  await projector.flush();
+
+  assert.equal(created.length, 1);
+  assert.equal(persisted.length, 1);
+  assert.equal(persisted[0]?.childThreadId, "thread_child");
+  assert.equal(persisted[0]?.report, null);
+});
+
+test("a resumed call that fails at once still closes the child thread its paused run opened", async () => {
+  const { projector, created, persisted } = createPausableProjector({
+    existing: { id: "thread_paused_child", parentThreadId: "thread_parent" },
+  });
+
+  projector.startTask({
+    taskCallId: "task-1",
+    namespace: ["tools:branch-a"],
+    input: PAUSED_TASK_INPUT,
+  });
+  assert.equal(
+    await projector.finishTask({
+      taskCallId: "task-1",
+      report: null,
+      failed: true,
+    }),
+    "thread_paused_child",
+  );
+  await projector.flush();
+
+  assert.equal(created.length, 0);
+  assert.equal(persisted.length, 1);
+  assert.equal(persisted[0]?.briefPersisted, true);
+});
+
+test("the child thread is opened when the delegate first does something, not when the call starts", async () => {
+  const { projector, created } = createPausableProjector({});
+
+  projector.startTask({
+    taskCallId: "task-1",
+    namespace: ["tools:branch-a"],
+    input: PAUSED_TASK_INPUT,
+  });
+  await projector.flush();
+  assert.equal(created.length, 0);
+
+  projector.observeTool(["tools:branch-a", "tools:t1"], {
+    event: "on_tool_start",
+    name: "echo",
+    toolCallId: "echo-1",
+    input: { text: "hi" },
+  });
+  projector.observeMessages(["tools:branch-a", "model_request:m1"], {
+    event: "message-start",
+  });
+  await projector.flush();
+  assert.equal(created.length, 1);
+});
+
+test("a failed lookup of a paused run's child thread opens no second thread", async () => {
+  const created: unknown[] = [];
+  const projector = createSubagentProjector({
+    prepared: createPrepared(),
+    toolTraces: new Map(),
+    seedCheckpoint: async () => null,
+    findChildThread: async () => {
+      throw new Error("db down");
+    },
+    createChildThread: async (input) => {
+      created.push(input);
+      return { id: "thread_child", parentThreadId: "thread_parent" } as never;
+    },
+    persist: async () => {
+      throw new Error("must not be called");
+    },
+  });
+
+  projector.startTask({
+    taskCallId: "task-1",
+    namespace: ["tools:branch-a"],
+    input: PAUSED_TASK_INPUT,
+  });
+  projector.observeMessages(["tools:branch-a", "model_request:m1"], {
+    event: "message-start",
+  });
+  assert.equal(
+    await projector.finishTask({ taskCallId: "task-1", report: "done" }),
+    null,
+  );
+  await projector.flush();
+  assert.equal(created.length, 0);
 });

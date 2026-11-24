@@ -1,6 +1,8 @@
-import { ConnectorAccessPolicy } from "./access-policy";
 import { ConnectorError } from "./errors";
 import { validateObjectWithJsonSchema } from "./config-validation";
+import { comparableConfig } from "./json-compare";
+import { withoutSyncReadinessMetadata } from "./sync-readiness-metadata";
+import { ConnectorOAuthService } from "./oauth-service";
 import { requireConnectorWorkspace } from "./permissions";
 import {
   archiveConnectorSources,
@@ -21,20 +23,94 @@ import {
   updateSourceConnectorRecord,
 } from "./repository";
 import { ConnectorRegistry, connectorRegistry } from "./registry";
-import type { ConnectorStatus } from "./types";
+import type { ConnectorStatus, ConnectorSyncReadinessResult } from "./types";
 
 export class ConnectorService {
   constructor(
     private readonly registry: ConnectorRegistry = connectorRegistry,
-    private readonly access = new ConnectorAccessPolicy(undefined, registry),
+    private readonly oauthService: ConnectorOAuthService = new ConnectorOAuthService(
+      registry,
+    ),
   ) {}
 
-  async listManifests(userId: string) {
-    const items = this.registry.listManifests();
-    const allowed = await Promise.all(
-      items.map((item) => this.access.isAvailable(item.type, userId)),
-    );
-    return { items: items.filter((_, index) => allowed[index]) };
+  /**
+   * Runs the adapter's readiness check against a configuration that is not
+   * yet (or not yet newly) stored. Only credential-free connectors can be
+   * checked this way: an OAuth connector has no usable credential until an
+   * account is attached.
+   */
+  private async evaluateConfigReadiness(input: {
+    teamId: string;
+    workspaceId: string;
+    connectorType: string;
+    connectorId: string;
+    connectorName?: string;
+    configJson: Record<string, unknown>;
+  }): Promise<ConnectorSyncReadinessResult> {
+    const adapter = this.registry.getAdapter(input.connectorType);
+    if (!adapter.checkSyncReadiness) {
+      return { ready: true };
+    }
+    return adapter.checkSyncReadiness({
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+      connectorId: input.connectorId,
+      connectorType: input.connectorType,
+      connectorName: input.connectorName,
+      config: input.configJson,
+      accessToken: "",
+    });
+  }
+
+  private async requireConfigReady(
+    input: Parameters<ConnectorService["evaluateConfigReadiness"]>[0],
+  ) {
+    const readiness = await this.evaluateConfigReadiness(input);
+    if (!readiness.ready) {
+      throw new ConnectorError(
+        400,
+        "CONNECTOR_CONFIG_NOT_READY",
+        readiness.message ?? "The connector configuration is not ready",
+        { reason: readiness.reason },
+      );
+    }
+  }
+
+  async checkConfigReadiness(input: {
+    workspaceId: string;
+    userId: string;
+    connectorType: string;
+    configJson: Record<string, unknown>;
+  }): Promise<ConnectorSyncReadinessResult> {
+    const { workspace } = await requireConnectorWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      permission: "connector.manage",
+    });
+    const manifest = this.registry.getManifest(input.connectorType);
+    if (manifest.auth?.kind !== "none") {
+      throw new ConnectorError(
+        400,
+        "CONNECTOR_CHECK_UNSUPPORTED",
+        "This connector does not support a configuration check",
+      );
+    }
+    validateObjectWithJsonSchema({
+      schema: manifest.configSchema,
+      value: input.configJson,
+      label: "configJson",
+    });
+    return this.evaluateConfigReadiness({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      connectorType: input.connectorType,
+      connectorId: "pending",
+      configJson: input.configJson,
+    });
+  }
+
+  listManifests() {
+    return { items: this.registry.listManifests() };
   }
 
   async listAccounts(input: {
@@ -71,8 +147,15 @@ export class ConnectorService {
       userId: input.userId,
       permission: "connector.manage",
     });
-    await this.access.requireAvailable(input.connectorType, input.userId);
     const manifest = this.registry.getManifest(input.connectorType);
+    const isNone = manifest.auth?.kind === "none";
+    if (isNone && input.oauthAccountId != null) {
+      throw new ConnectorError(
+        400,
+        "CONNECTOR_OAUTH_ACCOUNT_NOT_ALLOWED",
+        "This connector does not use an OAuth account",
+      );
+    }
     const configJson = input.configJson ?? {};
     validateObjectWithJsonSchema({
       schema: manifest.configSchema,
@@ -101,6 +184,33 @@ export class ConnectorService {
         "A connector with this name already exists",
         { connectorId: existingConnector.id },
       );
+    }
+
+    if (isNone) {
+      // A credential-free connector has no account to make two of them
+      // distinct, so the configuration is its identity.
+      // The platform's own readiness marker is not part of the identity.
+      const identity = (config: Record<string, unknown>) =>
+        comparableConfig(withoutSyncReadinessMetadata(config));
+      const wanted = identity(configJson);
+      const siblings = await listSourceConnectorRecords({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        includeDisabled: true,
+      });
+      const duplicate = siblings.find(
+        (sibling) =>
+          sibling.connectorType === input.connectorType &&
+          identity(sibling.configJson) === wanted,
+      );
+      if (duplicate) {
+        throw new ConnectorError(
+          409,
+          "CONNECTOR_ALREADY_EXISTS",
+          "A connector with the same configuration already exists in this workspace",
+          { connectorId: duplicate.id },
+        );
+      }
     }
 
     if (input.oauthAccountId) {
@@ -156,6 +266,16 @@ export class ConnectorService {
         "CONNECTOR_SYNC_FREQUENCY_TOO_FAST",
         `Minimum sync frequency is ${manifest.sync.minFrequencyMinutes} minutes`,
       );
+    }
+    if (isNone) {
+      await this.requireConfigReady({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        connectorType: input.connectorType,
+        connectorId: "pending",
+        connectorName: input.name,
+        configJson,
+      });
     }
     const connector = await createSourceConnectorRecord({
       teamId: workspace.organizationId,
@@ -236,7 +356,6 @@ export class ConnectorService {
         "Connector not found",
       );
     }
-    await this.access.requireConnection(current, input.userId);
     if (
       input.oauthAccountId &&
       input.oauthAccountId !== current.oauthAccountId
@@ -320,6 +439,16 @@ export class ConnectorService {
         "CONNECTOR_SYNC_FREQUENCY_TOO_FAST",
         `Minimum sync frequency is ${manifest.sync.minFrequencyMinutes} minutes`,
       );
+    }
+    if (input.configJson !== undefined && manifest.auth?.kind === "none") {
+      await this.requireConfigReady({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        connectorType: current.connectorType,
+        connectorId: current.id,
+        connectorName: input.name ?? current.name,
+        configJson: nextConfig,
+      });
     }
     const connector = await updateSourceConnectorRecord({
       teamId: workspace.organizationId,
@@ -441,6 +570,17 @@ export class ConnectorService {
           "Connector OAuth account is attached to another connector",
         );
       }
+
+      // Revoke at the provider before any local row is removed: a failure
+      // here must leave the connector, its sources and the account intact.
+      const account = await findOAuthAccountRecord({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        accountId: current.oauthAccountId,
+      });
+      if (account) {
+        await this.oauthService.revokeStoredAuthorization(account);
+      }
     }
 
     const result = await hardDeleteSourceConnectorRecord({
@@ -506,6 +646,9 @@ export class ConnectorService {
         },
       );
     }
+
+    // Revoke at the provider before the row is removed: abort on failure.
+    await this.oauthService.revokeStoredAuthorization(account);
 
     const deleted = await deleteOAuthAccountRecord({
       teamId: workspace.organizationId,

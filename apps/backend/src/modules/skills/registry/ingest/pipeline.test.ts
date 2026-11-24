@@ -132,10 +132,7 @@ function skillsRead(names: string[]) {
   });
   for (const name of names) {
     mocks.analyze.mockReturnValueOnce(
-      analyzed(
-        name,
-        name.startsWith("flagged") ? ["egress:pipe-to-shell"] : [],
-      ),
+      analyzed(name, name.startsWith("flagged") ? ["something:new"] : []),
     );
   }
 }

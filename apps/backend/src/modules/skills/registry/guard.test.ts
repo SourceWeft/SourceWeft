@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { type RegistryExistingEntry, triageRegistrySubmission } from "./guard";
+import {
+  describeRefusal,
+  type RegistryExistingEntry,
+  triageRegistrySubmission,
+} from "./guard";
 
 const CLEAN = { reviewRequired: false, flags: [] as string[] };
 
@@ -15,15 +19,48 @@ test("clean + new → indexed / published", () => {
   assert.equal(decision.definitionStatus, "active");
 });
 
-test("a flagged scan queues for review", () => {
+test("a scan flag the registry does not know queues for review", () => {
   const decision = triageRegistrySubmission({
     existing: null,
     submitterId: "me",
-    scan: { reviewRequired: true, flags: ["egress:pipe-to-shell"] },
+    scan: { reviewRequired: true, flags: ["something:new"] },
   });
   assert.equal(decision.outcome, "queued");
+  assert.ok("versionStatus" in decision);
   assert.equal(decision.versionStatus, "draft");
-  assert.ok(decision.reasons.includes("egress:pipe-to-shell"));
+  assert.deepEqual(decision.reasons, ["something:new"]);
+});
+
+test("the attack itself is refused, not queued", () => {
+  for (const flag of [
+    "egress:pipe-to-shell",
+    "egress:base64-exec",
+    "injection:override",
+  ]) {
+    assert.deepEqual(
+      triageRegistrySubmission({
+        existing: null,
+        submitterId: "me",
+        scan: { reviewRequired: false, flags: ["tool:sensitive", flag] },
+      }),
+      { outcome: "refused", reasons: [flag] },
+      flag,
+    );
+  }
+});
+
+test("flags that describe what a skill does are published, with the flags kept", () => {
+  const decision = triageRegistrySubmission({
+    existing: null,
+    submitterId: "me",
+    scan: {
+      reviewRequired: false,
+      flags: ["secrets:env-access", "egress:external-post", "tool:sensitive"],
+    },
+  });
+  assert.equal(decision.outcome, "indexed");
+  assert.ok("versionStatus" in decision);
+  assert.equal(decision.versionStatus, "published");
 });
 
 test("another submitter's clean commit of the same repository indexes", () => {
@@ -47,14 +84,14 @@ test("another submitter's clean commit of the same repository indexes", () => {
       reasons: [],
     },
   );
-  // Sticky review holds for them exactly as for the owner.
+  // A person's decision holds for them exactly as for the owner.
   assert.equal(
     triageRegistrySubmission({
-      existing: { ...existing, currentVersionStatus: "draft" },
+      existing: { ...existing, currentVersionStatus: "disabled" },
       submitterId: "someone-else",
       scan: CLEAN,
     }).outcome,
-    "queued",
+    "refused",
   );
 });
 
@@ -72,39 +109,55 @@ test("the owner may re-submit their own clean entry and re-index", () => {
   assert.equal(decision.outcome, "indexed");
 });
 
-test("sticky: an in-review (draft) entry cannot auto-index on a clean re-submit", () => {
-  const existing: RegistryExistingEntry = {
-    ownerUserId: "me",
-    definitionStatus: "active",
-    currentVersionStatus: "draft",
-  };
+test("a draft is the scan's own hold: a clean later commit answers it", () => {
   const decision = triageRegistrySubmission({
-    existing,
+    existing: {
+      ownerUserId: "me",
+      definitionStatus: "active",
+      currentVersionStatus: "draft",
+    },
     submitterId: "me",
     scan: CLEAN,
   });
-  assert.equal(decision.outcome, "queued");
-  assert.ok(decision.reasons.includes("sticky-review"));
+  assert.equal(decision.outcome, "indexed");
 });
 
-test("sticky: a deprecated version or archived definition stays queued", () => {
-  for (const existing of [
-    {
-      ownerUserId: "me",
-      definitionStatus: "active",
-      currentVersionStatus: "deprecated",
-    },
-    {
-      ownerUserId: "me",
-      definitionStatus: "archived",
-      currentVersionStatus: "published",
-    },
+test("sticky: what an admin took down stays down, and says which", () => {
+  for (const [existing, reason] of [
+    [
+      {
+        ownerUserId: "me",
+        definitionStatus: "active",
+        currentVersionStatus: "deprecated",
+      },
+      "held:deprecated",
+    ],
+    [
+      {
+        ownerUserId: "me",
+        definitionStatus: "active",
+        currentVersionStatus: "disabled",
+      },
+      "held:disabled",
+    ],
+    [
+      {
+        ownerUserId: "me",
+        definitionStatus: "archived",
+        currentVersionStatus: "published",
+      },
+      "held:archived",
+    ],
   ] as const) {
     const decision = triageRegistrySubmission({
       existing,
       submitterId: "me",
       scan: CLEAN,
     });
-    assert.equal(decision.outcome, "queued");
+    assert.deepEqual(decision, { outcome: "refused", reasons: [reason] });
+    assert.match(
+      describeRefusal(decision.reasons),
+      new RegExp(reason.slice("held:".length)),
+    );
   }
 });

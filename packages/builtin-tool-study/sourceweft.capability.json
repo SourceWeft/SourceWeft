@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 1,
+  "id": "sourceweft/study-tool",
+  "kind": "tool",
+  "name": "Study",
+  "version": "1.0.0",
+  "entry": "./src/index.ts",
+  "tools": [
+    {
+      "id": "generate_flashcards",
+      "title": "Flashcards",
+      "description": "Queue flashcards from the conversation's sources, every card backed by a quote from its source.",
+      "inputSchema": {
+        "type": "object"
+      },
+      "outputSchema": {
+        "type": "object"
+      },
+      "risk": "write",
+      "options": [],
+      "command": {
+        "title": "Flashcards",
+        "aliases": [
+          "flashcards"
+        ],
+        "category": "Artifacts",
+        "visibleWhen": "enabled",
+        "workflow": {
+          "execution": "agent",
+          "initialToolPolicy": "auto",
+          "promptIntro": "Make flashcards for spaced-repetition review from this conversation's sources. generate_flashcards queues the deck; the cards are written in the background from the source text, each backed by a quote.",
+          "defaultTools": [
+            "generate_flashcards"
+          ],
+          "permissionOverrides": {},
+          "successCriteria": {
+            "kind": "none"
+          },
+          "additionalPromptLines": [
+            "The flashcards cover the sources the user @mentioned, otherwise the sources selected for this conversation; folders count as the documents in them. generate_flashcards reads them itself: pass no source names, paths or ids.",
+            "Call generate_flashcards without asking first. Pass only what the user asked for: a size (fewer, standard or more) or an exact number of cards, a difficulty (easy, mixed or hard), a focus in the user's own words, and an output language if they named one. Leave everything else out.",
+            "If generate_flashcards reports that there are no sources, do not call it again: ask the user to select or @mention the sources to make flashcards from, then run /flashcards again.",
+            "If generate_flashcards reports too many sources, do not call it again: tell the user the limit it gives and ask them to narrow the selection or @mention the sources to make flashcards from, then run /flashcards again.",
+            "After generate_flashcards returns, follow its nextStep: the flashcards are being generated and will appear in the Hub's Artifacts tab, or they are already there. Do not write any cards yourself."
+          ]
+        }
+      }
+    },
+    {
+      "id": "generate_quiz",
+      "title": "Quiz",
+      "description": "Queue a quiz from the conversation's sources, every question backed by a quote from its source.",
+      "inputSchema": {
+        "type": "object"
+      },
+      "outputSchema": {
+        "type": "object"
+      },
+      "risk": "write",
+      "options": [],
+      "command": {
+        "title": "Quiz",
+        "aliases": [
+          "quiz"
+        ],
+        "category": "Artifacts",
+        "visibleWhen": "enabled",
+        "workflow": {
+          "execution": "agent",
+          "initialToolPolicy": "auto",
+          "promptIntro": "Make a quiz from this conversation's sources. generate_quiz queues it; the questions are written in the background from the source text, each backed by a quote.",
+          "defaultTools": [
+            "generate_quiz"
+          ],
+          "permissionOverrides": {},
+          "successCriteria": {
+            "kind": "none"
+          },
+          "additionalPromptLines": [
+            "The quiz covers the sources the user @mentioned, otherwise the sources selected for this conversation; folders count as the documents in them. generate_quiz reads them itself: pass no source names, paths or ids.",
+            "Call generate_quiz without asking first. Pass only what the user asked for: a size (fewer, standard or more) or an exact number of questions, a difficulty (easy, mixed or hard), a focus in the user's own words, and an output language if they named one. Leave everything else out.",
+            "If generate_quiz reports that there are no sources, do not call it again: ask the user to select or @mention the sources to make a quiz from, then run /quiz again.",
+            "If generate_quiz reports too many sources, do not call it again: tell the user the limit it gives and ask them to narrow the selection or @mention the sources to make a quiz from, then run /quiz again.",
+            "After generate_quiz returns, follow its nextStep: the quiz is being generated and will appear in the Hub's Artifacts tab, or it is already there. Do not write any questions or answers yourself."
+          ]
+        }
+      }
+    },
+    {
+      "id": "generate_mindmap",
+      "title": "Mind Map",
+      "description": "Queue a mind map of the conversation's sources, every branch backed by a quote from its source.",
+      "inputSchema": {
+        "type": "object"
+      },
+      "outputSchema": {
+        "type": "object"
+      },
+      "risk": "write",
+      "options": [],
+      "command": {
+        "title": "Mind Map",
+        "aliases": [
+          "mindmap"
+        ],
+        "category": "Artifacts",
+        "visibleWhen": "enabled",
+        "workflow": {
+          "execution": "agent",
+          "initialToolPolicy": "auto",
+          "promptIntro": "Make a mind map of this conversation's sources: a tree of their main topics and sub-points. generate_mindmap queues it; the nodes are written in the background from the source text, each backed by a quote.",
+          "defaultTools": [
+            "generate_mindmap"
+          ],
+          "permissionOverrides": {},
+          "successCriteria": {
+            "kind": "none"
+          },
+          "additionalPromptLines": [
+            "The mind map covers the sources the user @mentioned, otherwise the sources selected for this conversation; folders count as the documents in them. generate_mindmap reads them itself: pass no source names, paths or ids.",
+            "Call generate_mindmap without asking first. Pass only what the user asked for: a size (fewer, standard or more) or an exact number of nodes, a focus in the user's own words, and an output language if they named one. Leave everything else out.",
+            "If generate_mindmap reports that there are no sources, do not call it again: ask the user to select or @mention the sources to make a mind map from, then run /mindmap again.",
+            "If generate_mindmap reports too many sources, do not call it again: tell the user the limit it gives and ask them to narrow the selection or @mention the sources to make a mind map from, then run /mindmap again.",
+            "After generate_mindmap returns, follow its nextStep: the mind map is being generated and will appear in the Hub's Artifacts tab, or it is already there. Do not write any nodes or branches yourself."
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -220,6 +220,53 @@ export function adaptToolsEvent(
 }
 
 /**
+ * Tell assistant-authored `messages` events from the rest.
+ *
+ * The v3 stream carries every message a graph node returns, not only model
+ * output. A middleware that adds a HumanMessage to the conversation — Deep
+ * Agents pinning an invoked skill's SKILL.md is the case in production — streams
+ * it as `message-start { role: "human" }` followed by ordinary text deltas.
+ * Only `message-start` names the author; the deltas that follow share its
+ * `run_id` (the namespace is the fallback key when a stream omits it).
+ *
+ * The returned predicate is stateful: feed it every `messages` event in order.
+ * It answers false for all events of a message whose author is not the model,
+ * so that text never reaches the assistant's answer or a delegate's transcript.
+ * A `message-start` without a role is treated as the model's, as before.
+ */
+export function createAssistantMessageFilter(): (
+  namespace: unknown,
+  data: unknown,
+) => boolean {
+  const foreignMessages = new Set<string>();
+  return (namespace, data) => {
+    const record = toObjectRecord(data);
+    if (!record) {
+      return true;
+    }
+    const key =
+      typeof record.run_id === "string" && record.run_id.length > 0
+        ? `run:${record.run_id}`
+        : `ns:${JSON.stringify(Array.isArray(namespace) ? namespace : [])}`;
+    if (record.event === "message-start") {
+      if (record.role === "human" || record.role === "system") {
+        foreignMessages.add(key);
+        return false;
+      }
+      foreignMessages.delete(key);
+      return true;
+    }
+    if (!foreignMessages.has(key)) {
+      return true;
+    }
+    if (record.event === "message-finish" || record.event === "error") {
+      foreignMessages.delete(key);
+    }
+    return false;
+  };
+}
+
+/**
  * Translate a v3 `messages` ProtocolEvent's `data` (content-block protocol) into
  * zero or more synthetic AIMessageChunk-like `[chunk, meta]` payloads for
  * {@link handleMessagesStreamChunk}. Only text and reasoning deltas surface here;
@@ -263,44 +310,87 @@ export function adaptMessagesEvent(
 }
 
 /**
- * Extract a streaming tool-call argument fragment from a v3 `messages`
- * content-block-delta. These are the partial tool_call_chunks
- * ({@link adaptMessagesEvent} intentionally leaves them for this dedicated path)
- * that carry the call's partial arg JSON (under @langchain/core the block's
- * accumulated args so far, keyed by `index`). The runner accumulates these to
- * surface incremental write_file `content` before the authoritative
- * fully-formed call arrives via the `tools` method. Returns null for any non
- * tool_call_chunk delta.
+ * A streamed fragment of one tool call's arguments.
+ *
+ * - `start`: a tool-call block opened; carries the call's id and name.
+ * - `append`: the next slice of the args string (no id, no name).
+ * - `snapshot`: the args string accumulated so far, with id and name.
  */
-export function adaptToolArgDelta(
-  data: unknown,
-): { index: number; id?: string; name?: string; args: string } | null {
+export type ToolArgDelta = {
+  kind: "start" | "append" | "snapshot";
+  index: number;
+  id?: string;
+  name?: string;
+  args: string;
+};
+
+/**
+ * Extract a streaming tool-call argument fragment from a v3 `messages`
+ * event ({@link adaptMessagesEvent} intentionally leaves them for this
+ * dedicated path). The runner accumulates them per block `index` to surface
+ * incremental write_file `content` before the authoritative fully-formed call
+ * arrives via the `tools` method. Returns null for anything that is not part
+ * of a tool call's arguments.
+ */
+export function adaptToolArgDelta(data: unknown): ToolArgDelta | null {
   const record = toObjectRecord(data);
-  if (!record || record.event !== "content-block-delta") {
+  if (!record) {
     return null;
   }
-  const delta = toObjectRecord(record.delta);
-  if (!delta || delta.type !== "block-delta") {
-    return null;
-  }
-  const fields = toObjectRecord(delta.fields);
-  if (!fields || fields.type !== "tool_call_chunk") {
-    return null;
-  }
-  const blockIndex =
+  const blockIndex = (fields?: Record<string, unknown> | null) =>
     typeof record.index === "number"
       ? record.index
-      : typeof fields.index === "number"
+      : typeof fields?.index === "number"
         ? fields.index
         : 0;
-  return {
-    index: blockIndex,
+  const identity = (fields: Record<string, unknown>) => ({
     ...(typeof fields.id === "string" && fields.id.length > 0
       ? { id: fields.id }
       : {}),
     ...(typeof fields.name === "string" && fields.name.length > 0
       ? { name: fields.name }
       : {}),
+  });
+
+  if (record.event === "content-block-start") {
+    // @langchain/core >= 1.3: the call's id and name arrive here, once, and
+    // the args follow as `tool-call-delta` slices that carry neither.
+    const content = toObjectRecord(record.content);
+    if (!content || content.type !== "tool_call_chunk") {
+      return null;
+    }
+    return {
+      kind: "start",
+      index: blockIndex(content),
+      ...identity(content),
+      args: typeof content.args === "string" ? content.args : "",
+    };
+  }
+  if (record.event !== "content-block-delta") {
+    return null;
+  }
+  const delta = toObjectRecord(record.delta);
+  if (!delta) {
+    return null;
+  }
+  if (delta.type === "tool-call-delta") {
+    return typeof delta.args === "string" && delta.args.length > 0
+      ? { kind: "append", index: blockIndex(), args: delta.args }
+      : null;
+  }
+  if (delta.type !== "block-delta") {
+    return null;
+  }
+  // Producers that still send the args accumulated so far on every delta
+  // (Google and Ollama in @langchain/core 1.3, everything before it).
+  const fields = toObjectRecord(delta.fields);
+  if (!fields || fields.type !== "tool_call_chunk") {
+    return null;
+  }
+  return {
+    kind: "snapshot",
+    index: blockIndex(fields),
+    ...identity(fields),
     args: typeof fields.args === "string" ? fields.args : "",
   };
 }

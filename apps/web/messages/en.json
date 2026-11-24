@@ -147,7 +147,7 @@
         },
         "create": {
           "title": "Create work you can build on",
-          "description": "Turn your material into reports, presentations, study guides, and more. Review the output, ask for changes, and return to saved conversations and files to keep working.",
+          "description": "Turn your material into reports, presentations, study guides, comparison tables, and more. Review the output, ask for changes, and return to saved conversations and files to keep working.",
           "bullets": [
             "Reports, presentations, and creative outputs",
             "Review and refine generated results",
@@ -237,7 +237,7 @@
         },
         "artifacts": {
           "title": "AI should help people make durable artifacts",
-          "body": "Beyond chat, SourceWeft is designed to turn source material into study guides, FAQs, timelines, briefings, and audio overviews you can revisit."
+          "body": "Beyond chat, SourceWeft is designed to turn source material into study guides, FAQs, timelines, briefings, comparison tables, and audio overviews you can revisit."
         }
       }
     },
@@ -1006,7 +1006,9 @@
       "chat": "Chat",
       "more": "More",
       "me": "Me",
-      "mainNavigation": "Main navigation"
+      "mainNavigation": "Main navigation",
+      "scheduled": "Scheduled",
+      "assistant": "Assistant"
     },
     "sidebar": {
       "newChat": "New chat",
@@ -1041,13 +1043,42 @@
       "all": "All chats",
       "shared": "Shared",
       "private": "Private",
+      "scheduled": "Scheduled",
+      "assistant": "Assistant",
       "archived": "Archived",
       "clearFilter": "Clear {filter} filter",
       "openActions": "Open chat actions",
       "makePrivate": "Make private",
       "makeVisible": "Make visible to workspace",
       "archive": "Archive",
+      "unarchive": "Unarchive",
+      "archiveError": "Could not archive this chat.",
+      "unarchiveError": "Could not unarchive this chat.",
+      "rename": "Rename",
+      "renameLabel": "Chat title",
+      "renameError": "Could not rename this chat.",
+      "pin": "Pin",
+      "unpin": "Unpin",
+      "pinError": "Could not update the pin.",
+      "pinLimit": "You can pin up to {count} chats. Unpin one first.",
+      "pinned": "Pinned",
+      "archivedBadge": "Archived",
+      "searching": "Searching…",
+      "searchEmpty": "No chats match.",
+      "searchError": "Search failed. Try again.",
+      "export": "Export as Markdown",
+      "exporting": "Preparing export…",
+      "exportError": "Couldn't export this chat.",
+      "share": "Share",
       "delete": "Delete",
+      "deleteDialog": {
+        "title": "Delete this chat?",
+        "description": "“{title}” will be deleted permanently, along with its messages and any sub-agent chats it started. If it has a public link, the link stops working. This can't be undone.",
+        "cancel": "Cancel",
+        "confirm": "Delete",
+        "deleting": "Deleting…",
+        "error": "Couldn't delete this chat."
+      },
       "nowPrivate": "Chat is now private",
       "nowVisible": "Chat is now visible to the workspace",
       "visibilityError": "Could not change who can see this chat.",
@@ -1065,6 +1096,8 @@
       "filterEmpty": {
         "shared": "No shared chats.",
         "private": "No private chats.",
+        "scheduled": "No scheduled results.",
+        "assistant": "No assistant tickets.",
         "archived": "No archived chats."
       },
       "loading": "Loading...",
@@ -1080,7 +1113,23 @@
       "clearAllButton": "Clear all",
       "addSubagent": "Add sub-agent",
       "openInNewWindow": "Open in new window",
-      "openBesideParent": "Open beside parent"
+      "openBesideParent": "Open beside parent",
+      "shareDialog": {
+        "title": "Share chat",
+        "notSharedDescription": "Anyone with the link can see this chat as it is now. Later messages stay private until you update the link.",
+        "createLink": "Create link",
+        "copy": "Copy",
+        "copied": "Copied",
+        "updateLink": "Update link",
+        "stopSharing": "Stop sharing",
+        "stopSharingConfirm": "Stop sharing this chat? The link will stop working.",
+        "snapshotFrom": "Snapshot from {date}",
+        "allowSearchEngines": "Allow search engines",
+        "allowSearchEnginesOff": "Off: only people with the link can find it.",
+        "views": "{count, plural, one {# view} other {# views}}",
+        "updateError": "Couldn't update sharing.",
+        "forbidden": "Only the chat's creator or a workspace admin can share it."
+      }
     },
     "account": {
       "accountAndSettings": "Account and settings",
@@ -1105,36 +1154,27 @@
     "mobileMe": {
       "signOut": "Sign out",
       "signingOut": "Signing out...",
-      "endSession": "End this session",
-      "observeDescription": "LLM traces, metrics, and timeline",
       "panels": {
         "account": {
-          "label": "Profile",
-          "description": "Account, avatar, theme, and preferences"
+          "label": "Profile"
         },
         "team": {
-          "label": "Team",
-          "description": "Team switcher, members, and invitations"
+          "label": "Team"
         },
         "workspace": {
-          "label": "Workspace",
-          "description": "Who can see and work in this workspace"
+          "label": "Workspace"
         },
         "usage": {
-          "label": "Usage",
-          "description": "Plan usage and recent activity"
+          "label": "Usage"
         },
         "billing": {
-          "label": "Billing",
-          "description": "Subscription, plan, and billing portal"
+          "label": "Billing"
         },
         "approvals": {
-          "label": "Approvals",
-          "description": "Actions you chose to always allow"
+          "label": "Approvals"
         },
         "about": {
-          "label": "About",
-          "description": "Version and build details"
+          "label": "About"
         }
       }
     },
@@ -1683,6 +1723,124 @@
       "logo": "{name} logo"
     }
   },
+  "dashboardAssistant": {
+    "page": {
+      "title": "Workspace assistant",
+      "subtitle": "Ask for work in one shared feed. The assistant opens a ticket for each request and reports back here.",
+      "loading": "Loading the assistant…",
+      "loadError": "Could not load the assistant.",
+      "feedHeading": "Activity",
+      "ticketsHeading": "Tickets",
+      "steward": "Steward: {name}"
+    },
+    "status": {
+      "active": "Active",
+      "paused": "Paused"
+    },
+    "statusReason": {
+      "steward_left": "Paused because its steward left the workspace. An admin can choose a new steward, then resume it.",
+      "by_admin": "Paused by a workspace member."
+    },
+    "enable": {
+      "title": "The assistant is not enabled",
+      "body": "Once enabled, members ask for work in a shared feed and the assistant runs each request as its own ticket, paid for by whoever asked.",
+      "button": "Enable assistant",
+      "askAdmin": "Ask a workspace admin to enable the assistant."
+    },
+    "feed": {
+      "empty": "No messages yet. Ask the assistant for something below.",
+      "loadError": "Could not load the activity.",
+      "loadOlder": "Load earlier messages",
+      "showMore": "Show more",
+      "showLess": "Show less",
+      "you": "You",
+      "assistant": "Assistant",
+      "formerMember": "A former member",
+      "ticket": "Ticket: {title}",
+      "openConversation": "Open conversation",
+      "event": {
+        "created": "New ticket",
+        "ready": "Done",
+        "waiting": "Needs an answer",
+        "blocked": "Blocked",
+        "failed": "Failed",
+        "dropped": "Dropped"
+      }
+    },
+    "composer": {
+      "label": "Message the assistant",
+      "placeholder": "Ask the assistant for something…",
+      "send": "Send",
+      "sending": "Sending…",
+      "hint": "Press {shortcut} to send.",
+      "paused": "The assistant is paused, so it is not taking new messages.",
+      "readOnly": "You can read this feed but cannot send messages in this workspace.",
+      "tooLong": "Messages are limited to {max} characters.",
+      "sendFailed": "Your message was not sent. It is still in the box; try again."
+    },
+    "tickets": {
+      "groups": {
+        "needsPerson": "Needs a person",
+        "inProgress": "In progress",
+        "idle": "Idle"
+      },
+      "empty": "No open tickets.",
+      "loadError": "Could not load the tickets.",
+      "requestedBy": "Requested by {name}",
+      "retry": "Retry",
+      "close": "Close",
+      "openConversation": "Open conversation",
+      "stage": {
+        "queued": "Queued",
+        "working": "Working",
+        "waiting_person": "Waiting for a person",
+        "idle": "Idle",
+        "ended": "Ended"
+      },
+      "blockedReason": {
+        "credit_cap": "Stopped: it reached its credit cap.",
+        "insufficient_credits": "Stopped: the requester is out of credits.",
+        "repeated_failure": "Stopped after repeated failed runs."
+      }
+    },
+    "menu": {
+      "open": "Assistant actions",
+      "pause": "Pause",
+      "resume": "Resume",
+      "changeSteward": "Change steward",
+      "viewWorkLog": "View work log"
+    },
+    "steward": {
+      "title": "Change steward",
+      "body": "The steward is told when the assistant cannot handle messages. Choose someone who can access this workspace.",
+      "label": "Steward",
+      "save": "Save",
+      "cancel": "Cancel"
+    },
+    "toasts": {
+      "enabled": "Assistant enabled.",
+      "paused": "Assistant paused.",
+      "resumed": "Assistant resumed.",
+      "stewardChanged": "Steward changed.",
+      "retried": "Ticket sent back to work.",
+      "closed": "Ticket closed."
+    },
+    "errors": {
+      "ASSISTANT_ALREADY_ENABLED": "The assistant is already enabled.",
+      "ASSISTANT_FORBIDDEN": "You do not have permission to do that.",
+      "ASSISTANT_NOT_FOUND": "The assistant is not enabled in this workspace.",
+      "ASSISTANT_TICKET_NOT_FOUND": "This ticket no longer exists.",
+      "ASSISTANT_TICKET_NOT_PAYER": "Only the member who pays for this ticket can retry it.",
+      "ASSISTANT_PAUSED": "The assistant is paused.",
+      "ASSISTANT_VERSION_CONFLICT": "Someone else changed the assistant just now. Try again.",
+      "generic": "Something went wrong. Try again."
+    },
+    "threadNotice": {
+      "router": "This is the assistant's work log. It runs on its own and does not take messages here.",
+      "ticket": "This conversation belongs to an assistant ticket and does not take messages here.",
+      "open": "Talk to the assistant"
+    }
+  },
   "dashboardChat": {
     "common": {
       "files": "Files",
@@ -2012,6 +2170,19 @@
       "collapse": "Collapse",
       "show": "Show",
       "addImage": "Add image",
+      "dictation": {
+        "start": "Dictate",
+        "stop": "Stop dictation",
+        "transcribing": "Transcribing…",
+        "permissionDenied": "Microphone access was refused. Allow it for this site in your browser or system settings, then try again.",
+        "noDevice": "No microphone was found.",
+        "insufficientCredits": "Not enough credits to keep dictating.",
+        "failed": "Transcription failed. Your text so far is kept.",
+        "rateLimited": "Dictation is going too fast. Try again in a moment.",
+        "silenceTimeout": "Dictation stopped after a minute without speech.",
+        "maxDuration": "Dictation stopped after 10 minutes.",
+        "deviceLost": "The microphone was disconnected."
+      },
       "draftSaveFailedNoRefresh": "Failed to save your draft. Please do not refresh yet.",
       "draftRestoreFailed": "Unable to restore your draft.",
       "retry": "Retry",
@@ -3055,9 +3226,25 @@
       "completed": "completed {date}",
       "public": "Public",
       "awaitingApproval": "Waiting for approval",
+      "status": {
+        "pending": "Queued",
+        "running": "Generating",
+        "ready": "Ready",
+        "failed": "Failed",
+        "archived": "Archived"
+      },
       "couldNotLoad": "Could not load the artifact.",
       "loadFailed": "Failed to load artifacts.",
-      "loadMoreFailed": "Failed to load more artifacts."
+      "loadMoreFailed": "Failed to load more artifacts.",
+      "types": {
+        "audio_overview": "Audio",
+        "video_overview": "Video",
+        "video_presentation": "Video presentation",
+        "table": "Table",
+        "flashcards": "Flashcards",
+        "quiz": "Quiz",
+        "mindmap": "Mind map"
+      }
     },
     "skills": {
       "gallery": "Skills gallery",
@@ -3177,12 +3364,22 @@
       "readinessNoPages": "Connected · No pages shared",
       "readinessSetupRequired": "Connected · Setup required",
       "readinessNotReady": "Connector is not ready to sync.",
+      "readiness": {
+        "feed_blocked_address": "This feed points to an address SourceWeft cannot fetch from. Use a public https feed URL.",
+        "feed_timeout": "The feed server took too long to respond.",
+        "feed_too_large": "The feed is too large to index.",
+        "feed_not_a_feed": "This address does not serve an RSS or Atom feed.",
+        "feed_http_error": "The feed server returned an error.",
+        "feed_unreachable": "The feed server could not be reached.",
+        "feed_https_required": "Feed URLs must start with https://."
+      },
       "cta": {
         "connecting": "Connecting...",
         "connected": "Connected",
         "configure": "Configure",
         "connect": "Connect",
-        "reconnect": "Reconnect"
+        "reconnect": "Reconnect",
+        "addFeed": "Add feed"
       },
       "detail": {
         "syncing": "A connector operation is running.",
@@ -3194,7 +3391,8 @@
         "lastSync": "Last sync {date}",
         "connectedAutoCreate": "Authorization exists without an active connector. Reconnect to create a connector.",
         "connectedConfigure": "OAuth is connected. Configure this connector to enable syncing.",
-        "available": "Ready to connect with {name} OAuth."
+        "available": "Ready to connect with {name} OAuth.",
+        "availableAddFeed": "Add the URL of a public RSS or Atom feed."
       },
       "syncBlock": {
         "pagesLimit": "Ingestion pages are used up. The last run indexed {count} items before pausing; syncing resumes automatically when pages are available.",
@@ -3223,6 +3421,21 @@
         "Communication": "Communication"
       },
       "settingsDescription": "Connector settings, execution history, and provider events.",
+      "rss": {
+        "feedUrl": "Feed URL",
+        "dialog": {
+          "description": "Enter the URL of a public RSS or Atom feed. SourceWeft checks it first, then indexes its posts and keeps them in sync.",
+          "nameLabel": "Name (optional)",
+          "check": "Check feed",
+          "checking": "Checking...",
+          "found": "Feed found",
+          "itemCount": "{count, plural, one {# item} other {# items}}",
+          "invalidUrl": "Enter an https:// feed URL without a username or password.",
+          "checkFailed": "Could not check this feed. Try again.",
+          "nameConflict": "A connector with this name or this feed already exists in this workspace. Change the name, or use the existing one.",
+          "addFailed": "Failed to add the feed."
+        }
+      },
       "gmail": {
         "modeTitle": "Choose how to use Gmail",
         "modeDescription": "Choose a starting mode before connecting. You can change it later in connector settings.",
@@ -3243,6 +3456,10 @@
         "modeScopeNote": "Google will request read and send permissions in all modes. Sending always requires review of each message.",
         "modeCancel": "Cancel",
         "modeContinue": "Continue to Google",
+        "brokerNoticeTitle": "Connect Gmail through Composio",
+        "brokerNoticeBody": "SourceWeft connects to Gmail through Composio. Google will show Composio's name and ask for access to your whole mailbox. SourceWeft only searches your mail and reads the messages you ask about, and sends a message only after you approve it. Mail content that passes through is kept by Composio for up to one year.",
+        "brokerNoticeContinue": "Continue to Google",
+        "toolsOnlyCardDescription": "Search and read mail, and send messages you approve.",
         "liveSearch": "Live Gmail search",
         "indexMail": "Index selected mail in this workspace",
         "indexNotice": "Indexing stores selected message content in workspace sources. Disabling it hides retained mail from agent search; deleting the connector removes the stored copies. Scheduled sync is a separate choice.",
@@ -3283,6 +3500,150 @@
           "empty_content": "No readable content",
           "unreadable": "File could not be read",
           "unknown": "Skipped for an unknown reason"
+        }
+      },
+      "selection": {
+        "count": "{count} / {limit}",
+        "missing": "No longer exists",
+        "remove": "Remove {name}",
+        "lastSynced": "Synced {date}",
+        "limitReached": "You can select at most {limit} items. Remove some before adding more.",
+        "containerIndexedCount": "{count, plural, one {# file indexed} other {# files indexed}}",
+        "untitled": "Untitled",
+        "nameUnavailable": "Name unavailable",
+        "browser": {
+          "title": "Choose from {provider}",
+          "breadcrumbLabel": "Path",
+          "searchLabel": "Search {provider} by name",
+          "searchPlaceholder": "Search {provider}",
+          "emptyContainer": "Nothing here.",
+          "noResults": "Nothing matches your search.",
+          "loadMore": "Load more",
+          "refresh": "Refresh",
+          "select": "Select {name}",
+          "alreadyAdded": "Already added",
+          "selectedCount": "{count} selected",
+          "cancel": "Cancel",
+          "add": "Add"
+        },
+        "error": {
+          "reconnect": "Your {provider} account needs reconnecting. Reconnect it, then try again.",
+          "notFound": "This connector is unavailable. Refresh and try again.",
+          "notFoundItem": "This item no longer exists in {provider}.",
+          "tryLater": "{provider} is busy right now. Try again in a moment.",
+          "reopen": "The listing changed. Reopen it to continue.",
+          "generic": "{provider} could not be reached. Try again."
+        },
+        "state": {
+          "skipped": "Skipped",
+          "indexed": "Indexed",
+          "processing": "Syncing",
+          "failed": "Failed",
+          "waiting": "Waiting for sync",
+          "unavailable": "Deleted in {provider} or access was lost"
+        },
+        "skipReason": {
+          "unsupported_type": "Unsupported file type",
+          "too_large": "File is too large to index",
+          "needs_ocr": "Scanned PDFs are not supported yet",
+          "export_too_large": "Export is too large to index",
+          "empty_content": "No readable content",
+          "unreadable": "File could not be read",
+          "unknown": "Skipped for an unknown reason"
+        },
+        "disabledReason": {
+          "unknown": "This item cannot be selected"
+        },
+        "default": {
+          "itemsTitle": "Selected items",
+          "itemsDescription": "Choose what this connector can reach.",
+          "choose": "Choose",
+          "empty": "Nothing selected yet.",
+          "browser": {
+            "description": "Open an item to look inside, then tick what to include."
+          }
+        },
+        "byType": {
+          "dropbox": {
+            "itemsTitle": "Files and folders",
+            "itemsDescription": "Choose Dropbox files and folders to index. Everything selected is kept in sync on the connector's schedule.",
+            "choose": "Choose files",
+            "empty": "Nothing selected yet. Choose files or folders to index them.",
+            "kinds": {
+              "folder": "Folders",
+              "file": "Files"
+            },
+            "disabledReason": {
+              "unsupported": "This file type cannot be indexed"
+            },
+            "browser": {
+              "description": "Open a folder to look inside, then tick the files and folders to index.",
+              "root": "Dropbox",
+              "note": "Folders sync up to 1,000 files in total",
+              "emptyContainer": "This folder is empty."
+            }
+          },
+          "github": {
+            "itemsTitle": "Repositories",
+            "itemsDescription": "Agents of every member of this workspace can search and read issues, pull requests and discussions in these repositories, and only these.",
+            "choose": "Choose repositories",
+            "empty": "Nothing selected yet. Agents cannot read anything from GitHub until you choose repositories.",
+            "kinds": {
+              "account": "Accounts",
+              "repository": "Repositories"
+            },
+            "helpLink": {
+              "add_repositories": "Add repositories on GitHub"
+            },
+            "browser": {
+              "description": "Open an account to see the repositories the app is installed on, then tick the ones agents may search and read.",
+              "root": "GitHub",
+              "emptyRoot": "The app is not installed on any account yet. Add repositories on GitHub, then press Refresh."
+            }
+          },
+          "linear": {
+            "itemsTitle": "Teams and projects",
+            "itemsDescription": "Agents of every member of this workspace can search and read issues in the teams and projects you choose, and only those. Choosing a team includes all of its issues and projects.",
+            "choose": "Choose teams and projects",
+            "empty": "Nothing selected yet. Agents cannot read anything from Linear until you choose teams or projects.",
+            "kinds": {
+              "team": "Teams",
+              "project": "Projects"
+            },
+            "browser": {
+              "description": "Open a team to see its projects, then tick the teams and projects to include.",
+              "root": "Linear"
+            }
+          },
+          "jira": {
+            "itemsTitle": "Projects",
+            "itemsDescription": "Agents of every member of this workspace can search and read issues in the projects you choose, and only those.",
+            "choose": "Choose projects",
+            "empty": "Nothing selected yet. Nothing can be searched until you choose at least one project.",
+            "kinds": {
+              "site": "Sites",
+              "project": "Projects"
+            },
+            "browser": {
+              "description": "Open a site to see its projects, then tick the projects to include.",
+              "root": "Jira sites"
+            }
+          },
+          "confluence": {
+            "itemsTitle": "Spaces and pages",
+            "itemsDescription": "Agents of every member of this workspace can search and read the spaces and pages you choose, and only those. A page includes its child pages.",
+            "choose": "Choose spaces and pages",
+            "empty": "Nothing selected yet. Nothing can be searched until you choose at least one space or page.",
+            "kinds": {
+              "site": "Sites",
+              "space": "Spaces",
+              "page": "Pages"
+            },
+            "browser": {
+              "description": "Open a site, then a space, to see its pages. Tick the spaces and pages to include.",
+              "root": "Confluence sites"
+            }
+          }
         }
       },
       "settingsTab": {
@@ -3366,6 +3727,7 @@
       "deleteOption": "Delete connector and all indexed content",
       "deleteOptionDesc": "Permanently deletes this connector, its local authorization, and all content imported by it. This cannot be undone.",
       "disconnectNote": "SourceWeft will not revoke access in the third-party provider.",
+      "disconnectNoteComposio": "Deleting also removes the connection at Composio, which ends access to this account. Disabling keeps the connection.",
       "deleting": "Deleting...",
       "disabling": "Disabling...",
       "deleteConfirm": "Delete connector and content",
@@ -3404,12 +3766,15 @@
         "reason": "Reason",
         "requestPreview": "Request",
         "riskLevel": "Risk",
+        "skippedCount": "Skipped",
         "source": "Source",
         "targetExternalIds": "Targets",
         "targetExternalIdCount": "Target count",
         "targeted": "Targeted",
         "syncRunId": "Linked sync",
-        "triggerType": "Trigger"
+        "triggerType": "Trigger",
+        "unchangedCount": "Unchanged",
+        "updatedCount": "Updated"
       }
     },
     "sourceGuide": {
@@ -3468,6 +3833,38 @@
         "team": "Your team has reached its hourly limit for finding sources. It clears at {time} (in {wait})."
       },
       "add": "Discover"
+    },
+    "youtube": {
+      "dialogTitle": "Add YouTube videos",
+      "playlist": "Playlist",
+      "channel": "Channel",
+      "byChannel": "by {channel}",
+      "videoCount": "{count, plural, one {# video} other {# videos}}",
+      "loading": "Loading videos…",
+      "empty": "There are no videos to add from this link.",
+      "transcriptNote": "Videos are transcribed by AI from their audio, so transcripts may contain mistakes.",
+      "costNote": "Transcribing a video uses credits.",
+      "import": "Import {count, plural, one {# video} other {# videos}}",
+      "imported": "{count, plural, one {# video added} other {# videos added}}",
+      "retry": "Try again",
+      "errorBusy": "Listing videos is unavailable for a moment. Try again shortly.",
+      "rateLimited": "You have reached the limit for listing videos, which is shared with finding sources. You can try again in {wait}, at {time}.",
+      "chooseVideos": "Choose videos",
+      "collectionHint": "This is a YouTube {kind, select, playlist {playlist link} other {channel link}}. Next, choose which videos to add.",
+      "videoHint": "SourceWeft will transcribe this video with AI and index the transcript for search. Transcribing a video uses credits.",
+      "aiTranscription": "AI transcription",
+      "aiTranscriptionHint": "Transcribed by AI from the video's audio. It may contain mistakes.",
+      "error": {
+        "YOUTUBE_URL_UNSUPPORTED": "This YouTube link is not supported. Use a link to a video, playlist or channel.",
+        "YOUTUBE_COLLECTION_URL": "This link is a playlist or channel. Choose the videos to add from it.",
+        "YOUTUBE_TRANSCRIPTION_NOT_CONFIGURED": "YouTube transcription is not available on this server.",
+        "YOUTUBE_VIDEO_UNAVAILABLE": "This video is private, removed or otherwise unavailable.",
+        "YOUTUBE_NO_SPEECH": "No speech was found in this video, so there is no transcript.",
+        "YOUTUBE_TRANSCRIPT_FAILED": "The video could not be transcribed. Try again later.",
+        "YOUTUBE_LISTING_FAILED": "The videos could not be listed. Try again in a moment.",
+        "YOUTUBE_CHANNEL_NOT_FOUND": "This channel could not be found.",
+        "YOUTUBE_PLAYLIST_NOT_FOUND": "This playlist could not be found."
+      }
     },
     "noteOrigin": {
       "title": "Saved note",
@@ -3610,6 +4007,7 @@
         "disabledConflict": "A disabled connector with this name already exists. Enable it or delete it before reconnecting.",
         "enableFailed": "Failed to enable {name} connector.",
         "authFailed": "{name} authorization failed.",
+        "setupIncomplete": "{name} was authorized, but setup could not finish. Connect it again.",
         "connectionCanceled": "{name} connection canceled.",
         "webhookCopied": "Webhook URL copied.",
         "webhookCopyFailed": "Could not copy webhook URL.",
@@ -3627,6 +4025,54 @@
         "disabledCanReenable": "Connector disabled. You can enable it again later.",
         "oauthAccountInUse": "This authorization is attached to another connector and cannot be deleted safely.",
         "removeFailed": "Failed to remove connector."
+      }
+    },
+    "generate": {
+      "button": "Generate",
+      "menu": "Generate from the selected sources",
+      "needsSelection": "Select sources to generate from",
+      "needsThread": "Start a conversation to generate from sources",
+      "openFailed": "Generation started, but the result couldn't be opened. Find it under Artifacts.",
+      "table": "Data table",
+      "flashcards": "Flashcards",
+      "quiz": "Quiz",
+      "mindmap": "Mind map"
+    },
+    "research": {
+      "add": "Research",
+      "title": "Deep research",
+      "description": "Describe a topic. SourceWeft searches the web, reads pages and writes a cited report in the background.",
+      "topicPlaceholder": "e.g. solid-state battery commercialization",
+      "costNote": "Deep research uses your credits and can take several minutes. You can close this window while it runs.",
+      "start": "Start research",
+      "starting": "Starting…",
+      "startFailed": "Could not start the research. Try again in a moment.",
+      "cancel": "Cancel",
+      "cancelled": "This research was cancelled.",
+      "progress": "{searches, plural, one {# search} other {# searches}} · {pages, plural, one {# page read} other {# pages read}}",
+      "phase": {
+        "planning": "Planning",
+        "searching": "Searching",
+        "reading": "Reading pages",
+        "reporting": "Writing the report"
+      },
+      "saveNote": "Save report as a note",
+      "saved": "Report saved as a note",
+      "saveFailed": "Could not save the report. Try again.",
+      "sources": "Pages the report used",
+      "importSources": "{count, plural, =0 {Import selected sources} one {Import # selected source} other {Import # selected sources}}",
+      "savedLabel": "Saved",
+      "image": "Image",
+      "newResearch": "New research",
+      "error": {
+        "WEB_PROVIDER_UNAVAILABLE": "Web search is not available right now.",
+        "NO_RESULTS": "The search found no usable pages for this topic. Try describing it differently.",
+        "RESEARCH_QUALITY_TOO_LOW": "The findings were not reliable enough to write a report. Try a more specific topic.",
+        "INSUFFICIENT_CREDITS": "You do not have enough credits to run this research.",
+        "MODEL_UNAVAILABLE": "The research model is unavailable right now. Try again later.",
+        "TIME_LIMIT": "The research reached its time limit before it could finish.",
+        "ACCESS_LOST": "You no longer have access to this workspace, so the research was stopped.",
+        "UNKNOWN": "The research failed."
       }
     }
   },
@@ -3706,6 +4152,7 @@
         "system": "System"
       },
       "items": {
+        "overview": "Overview",
         "mcpReview": "MCP review",
         "skillReview": "Skill review",
         "reports": "Reports",
@@ -3714,7 +4161,8 @@
         "blog": "Blog",
         "marketSettings": "Market settings"
       },
-      "backToApp": "Back to app"
+      "backToApp": "Back to app",
+      "pending": "{count} waiting"
     },
     "checkingAccess": "Checking admin access…",
     "accessCheckFailed": "Could not check admin access. Please try again.",
@@ -3746,7 +4194,25 @@
       "chmodExec": "chmod +x",
       "internalAddress": "Internal / metadata address"
     },
-    "footer": "Only users listed in <code>MARKET_ADMIN_USER_IDS</code> can access this page. Approval and rejection actions use the same allowlist."
+    "footer": "Only users listed in <code>MARKET_ADMIN_USER_IDS</code> can access this page. Approval and rejection actions use the same allowlist.",
+    "overview": {
+      "title": "Overview",
+      "description": "What is waiting for a decision, section by section.",
+      "refresh": "Reload the numbers",
+      "retry": "Try again",
+      "loading": "Loading the numbers…",
+      "loadFailed": "Could not load the numbers. The sections still work.",
+      "summary": "{count, plural, =0 {Nothing is waiting for you.} one {# item is waiting for a decision.} other {# items are waiting for a decision.}}",
+      "queues": "Work queues",
+      "content": "Content",
+      "hints": {
+        "mcpReview": "Flagged MCP submissions",
+        "skillReview": "{review} new submissions · {listing} listing decisions",
+        "reports": "Open reports"
+      },
+      "blogDrafts": "{count, plural, one {# draft version} other {# draft versions}}",
+      "blogPublished": "{count, plural, one {# published version} other {# published versions}}"
+    }
   },
   "dashboardObservability": {
     "notices": {
@@ -3883,7 +4349,9 @@
       "sessionPrefix": "Session: {value}",
       "emptyNoTraces": "No traces found.",
       "emptyNoMatch": "No traces match the current search.",
-      "loadOlder": "Load older traces",
+      "previousPage": "Previous",
+      "nextPage": "Next",
+      "pageNumber": "Page {page}",
       "columns": {
         "timestamp": "Timestamp",
         "name": "Name",
@@ -4341,7 +4809,9 @@
       "secrets:env-access": "Reads environment variables",
       "scope:other-skill-file": "Reads another skill's files",
       "tool:sensitive": "Requests code-execution tools",
-      "binary:executable": "Ships an executable binary"
+      "binary:executable": "Ships an executable binary",
+      "capability:undeclared-scripts": "Ships scripts its instructions never mention",
+      "script:out-of-bundle-path": "A script reaches files outside the skill"
     },
     "community": {
       "overview": {
@@ -4736,7 +5206,10 @@
       "publish": "Approve and publish",
       "reject": "Reject",
       "footnote": "Skill review uses the same admin allowlist as the MCP market.",
-      "flagCount": "{count, plural, =0 {No flags} one {# flag} other {# flags}}"
+      "flagCount": "{count, plural, =0 {No flags} one {# flag} other {# flags}}",
+      "loadMore": "Load more",
+      "loadMoreFailed": "Could not load more of the queue.",
+      "shownOf": "Showing {shown} of {total}"
     },
     "ownerListing": {
       "label": "Allow on the public market",
@@ -4813,6 +5286,8 @@
       "scope:other-skill-file": "Reads another skill's files",
       "tool:sensitive": "Requests code-execution tools",
       "binary:executable": "Ships an executable binary",
+      "capability:undeclared-scripts": "Ships scripts its instructions never mention",
+      "script:out-of-bundle-path": "A script reaches files outside the skill",
       "sticky-review": "Held for review: an earlier version is unresolved"
     },
     "escalation": {
@@ -4947,7 +5422,9 @@
         "gateway_config_unavailable": "The global model gateway configuration has not been synchronized.",
         "provider_not_found": "Provider “{provider}” is not in the global model gateway configuration.",
         "provider_capability_missing": "Provider “{provider}” does not declare chat and json_schema support.",
-        "provider_credential_headers": "Provider “{provider}” sends credential headers of its own, which the system model does not reuse."
+        "provider_credential_headers": "Provider “{provider}” sends credential headers of its own, which the system model does not reuse.",
+        "provider_routing_invalid": "SYSTEM_MODEL_PROVIDER_ONLY has an empty entry.",
+        "provider_routing_unsupported": "SYSTEM_MODEL_PROVIDER_ONLY is set, but Provider “{provider}” is not an OpenRouter Provider."
       },
       "failed": "Could not save.",
       "loadFailed": "Could not load the overview settings.",
@@ -5368,7 +5845,6 @@
       "or": "OR",
       "namePlaceholder": "Full name",
       "emailPlaceholder": "Personal or work email",
-      "appleComingSoon": "Apple sign-in is coming soon.",
       "termsNotice": "By continuing, you agree to SourceWeft's <terms>Terms</terms> and acknowledge our <privacy>Privacy Policy</privacy>.",
       "signUpSuccessNoSession": "Account created, but we could not start your session. Please sign in.",
       "signInErrorNoSession": "Signed in, but your session was not available. Please try again.",
@@ -5460,7 +5936,14 @@
         "invalid_token": "Your sign-in link is invalid or has expired.",
         "account_not_linked": "This account is not linked yet. Try signing in a different way.",
         "email_not_verified": "Please verify your email before signing in.",
-        "user_not_found": "We could not find an account for this sign-in."
+        "user_not_found": "We could not find an account for this sign-in.",
+        "SSO_ACCOUNT_LINK_DENIED": "This sign-in cannot be linked to an existing account. Contact your administrator.",
+        "SSO_SEAT_LIMIT": "Your team has no seats left. Ask your administrator to add seats.",
+        "SSO_PROVISIONING_FAILED": "We couldn't add you to your team. Try again, or contact your administrator.",
+        "SSO_DOMAIN_NOT_VERIFIED": "This domain has not been verified yet. Ask your administrator to finish setup.",
+        "SSO_PROVIDER_NOT_FOUND": "No single sign-on is set up for this email address.",
+        "SSO_SAML_ALGORITHM_NOT_ALLOWED": "Your identity provider's SAML response uses signature settings that aren't supported. Ask your administrator to sign with SHA-256 and to send unencrypted assertions.",
+        "SSO_ORGANIZATION_REQUIRED": "Single sign-on isn't available for this team right now. Contact your administrator."
       }
     },
     "guestInvite": {
@@ -5712,8 +6195,359 @@
       "approvalAsk": "This version asks to read and change <strong>shared data</strong> that everyone who can open it sees. It cannot use shared data until it is approved."
     }
   },
+  "table": {
+    "summary": "{sources, plural, one {# source} other {# sources}} · {columns, plural, one {# column} other {# columns}}",
+    "source": "Source",
+    "region": "Comparison table",
+    "empty": "This table has no rows.",
+    "cell": {
+      "notFound": "Not mentioned",
+      "unverified": "Could not be verified",
+      "unverifiedHint": "An answer was proposed, but the source text could not confirm it, so no value is shown.",
+      "missing": "No value"
+    },
+    "row": {
+      "failed": "This source could not be processed. Regenerate the table to try again.",
+      "notIndexed": "This source is not indexed yet, so it was skipped.",
+      "stale": "Source changed",
+      "sourceDeleted": "Source deleted"
+    },
+    "sort": {
+      "label": "Sort by {column}"
+    },
+    "columns": {
+      "button": "Columns",
+      "label": "Columns to show",
+      "showAll": "Show all"
+    },
+    "toolbar": {
+      "regenerate": "Regenerate"
+    },
+    "evidence": {
+      "show": "Show source quote",
+      "hide": "Hide source quote",
+      "sourceChanged": "The source text has changed since this table was generated. The quote shown is the original.",
+      "openSource": "Open in source"
+    },
+    "stale": {
+      "message": "A source changed after this table was generated. Regenerate to refresh it.",
+      "sourceDeleted": "A source was deleted. The table is still available.",
+      "regenerate": "Regenerate"
+    },
+    "status": {
+      "queued": "Waiting to start…",
+      "generating": "Completed {completed} of {total} sources"
+    },
+    "error": {
+      "generateAgain": "To try again, select the sources in the source hub and generate a new table.",
+      "cannotDisplay": "This table can't be displayed.",
+      "code": {
+        "INSUFFICIENT_CREDITS": "Not enough credits to generate this table.",
+        "INPUT_TOO_LARGE": "The selected sources are too large for one table. Choose fewer or shorter sources.",
+        "NO_INDEXED_SOURCES": "None of the selected sources is indexed yet.",
+        "MODEL_UNAVAILABLE": "The model is unavailable right now. Try again later.",
+        "GENERATION_QUALITY_TOO_LOW": "Too many answers could not be verified against the sources, so the table was not created.",
+        "SOURCE_NOT_READABLE": "A selected source could not be read.",
+        "UNKNOWN": "The table could not be generated."
+      }
+    },
+    "export": {
+      "menu": "Export",
+      "csv": "Download CSV",
+      "csvWithEvidence": "Download CSV with source quotes",
+      "markdown": "Copy as Markdown",
+      "copied": "Copied",
+      "source": "Source",
+      "evidenceSuffix": "source quote"
+    },
+    "editor": {
+      "label": "Columns",
+      "name": "Column {position} name",
+      "namePlaceholder": "Column name, e.g. Price",
+      "description": "Column {position} description",
+      "descriptionPlaceholder": "What to look for in each source (optional)",
+      "type": "Column {position} value type",
+      "types": {
+        "text": "Text",
+        "number": "Number",
+        "date": "Date",
+        "boolean": "Yes / no"
+      },
+      "add": "Add column",
+      "remove": "Remove column {position}",
+      "max": "A table has at most {max} columns."
+    },
+    "generate": {
+      "title": "Generate a data table",
+      "regenerateTitle": "Adjust and regenerate",
+      "description": "One row per source and one column per question. Every value comes with a quote from its source.",
+      "sources": "{count, plural, one {# source} other {# sources}}",
+      "addSource": "Add source",
+      "searchSources": "Search sources",
+      "noSources": "No matching sources.",
+      "moreResults": "Show more",
+      "sourcesLimit": "A table compares at most {max} sources.",
+      "untitledSource": "Untitled source",
+      "unavailableSource": "Unavailable source",
+      "instruction": "What do you want to compare? (optional)",
+      "instructionPlaceholder": "e.g. Compare pricing and warranty terms",
+      "columns": "Columns",
+      "suggest": "Suggest columns",
+      "suggesting": "Suggesting…",
+      "problems": {
+        "noSources": "Add at least one source.",
+        "none": "Add at least one column.",
+        "nameMissing": "Every column needs a name.",
+        "tooMany": "A table has at most {max} columns.",
+        "tooManySources": "A table compares at most {max} sources. Select fewer sources.",
+        "tooManyCells": "{sources} sources × {columns} columns is {cells} cells; a table holds at most {max}. Use fewer sources or columns."
+      },
+      "estimate": {
+        "loading": "Estimating the size…",
+        "summary": "{sources, plural, one {# source} other {# sources}} · {cells, plural, one {# cell} other {# cells}} to fill",
+        "regenerateSummary": "{sources, plural, one {# source} other {# sources}} · {columns, plural, one {# column} other {# columns}}; unchanged cells are reused",
+        "skipped": "{count, plural, one {# source is} other {# sources are}} not indexed yet and will be skipped.",
+        "exceedsLimit": "The selected sources are too large for one table. Choose fewer or shorter sources.",
+        "failed": "Couldn't estimate the size of this table."
+      },
+      "submit": "Generate table",
+      "regenerateSubmit": "Regenerate",
+      "cancel": "Cancel",
+      "started": "Generating the table. It will also appear under Artifacts.",
+      "reused": "This table is already being generated.",
+      "regenerating": "Regenerating the table. The current version stays until the new one is ready.",
+      "errors": {
+        "TABLE_TOO_MANY_RUNNING": "Too many tables and study sets are generating at once. Wait for one to finish.",
+        "TABLE_NOT_READY": "Only a finished table can be regenerated.",
+        "TABLE_CONTENT_UNREADABLE": "This table can't be read, so it can't be regenerated.",
+        "TABLE_REGENERATION_IN_PROGRESS": "This table is already being regenerated.",
+        "VALIDATION_ERROR": "Check the columns and sources, then try again.",
+        "THREAD_NOT_FOUND": "This conversation is no longer available.",
+        "ARTIFACT_NOT_FOUND": "This table no longer exists.",
+        "recipeUnavailable": "This table can't be adjusted. Generate a new table from the source hub.",
+        "loadFailed": "Couldn't open this table for regeneration.",
+        "suggestFailed": "Couldn't suggest columns. Try again.",
+        "generic": "Couldn't generate the table. Try again."
+      }
+    },
+    "regenerationFailed": {
+      "message": "The last regeneration failed, so this is still the previous table."
+    }
+  },
+  "study": {
+    "status": {
+      "queued": "Waiting to start…",
+      "generating": "Working… {completed} of {total} steps done"
+    },
+    "error": {
+      "generateAgain": "To try again, select the sources in the source hub and generate it again.",
+      "cannotDisplay": "This study set can't be displayed.",
+      "code": {
+        "INSUFFICIENT_CREDITS": "Not enough credits to generate this.",
+        "INPUT_TOO_LARGE": "The selected sources are too large for one study set. Choose fewer or shorter sources.",
+        "NO_INDEXED_SOURCES": "None of the selected sources is indexed yet.",
+        "MODEL_UNAVAILABLE": "The model is unavailable right now. Try again later.",
+        "GENERATION_QUALITY_TOO_LOW": "Too few items could be verified against the sources, so nothing was created.",
+        "SOURCE_NOT_READABLE": "A selected source could not be read.",
+        "UNKNOWN": "This could not be generated."
+      }
+    },
+    "evidence": {
+      "show": "Show source quote",
+      "hide": "Hide source quote",
+      "sourceChanged": "The source has changed since this was generated. The quote below is from that time.",
+      "openSource": "Open in source"
+    },
+    "stale": {
+      "message": "A source changed after this was generated. Regenerate to update it.",
+      "sourceDeleted": "A source was deleted. This set still works.",
+      "regenerate": "Regenerate"
+    },
+    "flashcards": {
+      "label": "Flashcards",
+      "mode": {
+        "browse": "Browse",
+        "review": "Review"
+      },
+      "progress": "{current} / {total}",
+      "exportAnki": "Export for Anki (CSV)",
+      "showFront": "Show the front",
+      "showBack": "Show the answer",
+      "showingFront": "Showing the front",
+      "showingBack": "Showing the answer",
+      "gradeFailed": "Your answer couldn't be saved. Try again.",
+      "nothingDue": "Nothing is due for review right now.",
+      "done": "Session done: {graded, plural, one {# card} other {# cards}} reviewed out of {total}.",
+      "restart": "Start again",
+      "previous": "Previous card",
+      "next": "Next card",
+      "hintFlip": "Space or Enter to flip",
+      "hintGrade": "1–4 to rate how well you knew it",
+      "gradeLabel": "How well did you know it?",
+      "grade": {
+        "again": "Again",
+        "hard": "Hard",
+        "good": "Good",
+        "easy": "Easy"
+      },
+      "hintBrowse": "Switch to Review to grade cards",
+      "summary": "{new} new · {learning} learning · {learned} learned",
+      "status": {
+        "new": "New",
+        "learning": "Learning",
+        "learned": "Learned"
+      },
+      "due": {
+        "now": "due now",
+        "minutes": "due in {count, plural, one {# minute} other {# minutes}}",
+        "hours": "due in {count, plural, one {# hour} other {# hours}}",
+        "days": "due in {count, plural, one {# day} other {# days}}"
+      },
+      "nextDue": "Next card {when}."
+    },
+    "quiz": {
+      "loading": "Loading the quiz…",
+      "intro": "{total, plural, one {# question} other {# questions}}. Answers are checked when you submit.",
+      "start": "Start",
+      "saveFailed": "Your answers couldn't be saved. They are kept on this page.",
+      "questionOf": "Question {current} of {total}",
+      "previous": "Previous",
+      "submit": "Submit",
+      "next": "Next",
+      "true": "True",
+      "false": "False",
+      "chooseOne": "Choose one answer",
+      "chooseAll": "Choose every correct answer",
+      "yourAnswer": "Your answer",
+      "referenceAnswer": "Reference answer",
+      "showReference": "Show the reference answer",
+      "selfGrade": {
+        "knew": "I got it",
+        "missed": "I missed it"
+      },
+      "result": {
+        "score": "{correct} of {total} correct",
+        "selfGraded": "Open questions: you got {knew} of {total}"
+      },
+      "practiceMistakes": "Practise the mistakes",
+      "mistakesToCards": "Make flashcards from mistakes",
+      "mistakesToCardsDone": "Made {count, plural, one {# flashcard} other {# flashcards}} from your mistakes.",
+      "mistakesToCardsOpen": "Open the deck",
+      "mistakesToCardsFailed": "The flashcards couldn't be made. Try again.",
+      "restart": "Start again",
+      "verdict": {
+        "correct": "Correct",
+        "wrong": "Wrong",
+        "self": {
+          "knew": "You said you got it",
+          "missed": "You said you missed it",
+          "none": "Not graded"
+        }
+      },
+      "correctAnswer": "Answer:"
+    },
+    "mindmap": {
+      "view": {
+        "map": "Map",
+        "outline": "Outline"
+      },
+      "exportMarkdown": "Export Markdown",
+      "exportJson": "Export JSON",
+      "detailLabel": "Selected idea",
+      "askPrompt": "Tell me more about \"{label}\" from my sources.",
+      "askInChat": "Ask in chat",
+      "expand": "Expand",
+      "collapse": "Collapse",
+      "outlineLabel": "Mind map outline"
+    },
+    "generate": {
+      "title": {
+        "flashcards": "Generate flashcards",
+        "quiz": "Generate a quiz",
+        "mindmap": "Generate a mind map"
+      },
+      "description": {
+        "flashcards": "Cards for spaced-repetition review. Each card cites the passage it comes from.",
+        "quiz": "Questions with explanations. Each question cites the passage it comes from.",
+        "mindmap": "The main ideas and how they connect. Each idea cites the passage it comes from."
+      },
+      "regenerateTitle": "Adjust and regenerate",
+      "regenerateSources": "From the same {count, plural, one {# source} other {# sources}} as the current version.",
+      "sources": "{count, plural, one {# source} other {# sources}}",
+      "addSource": "Add source",
+      "searchSources": "Search sources",
+      "noSources": "No matching sources.",
+      "moreResults": "Show more",
+      "sourcesLimit": "Use at most {max} sources.",
+      "untitledSource": "Untitled source",
+      "unavailableSource": "Unavailable source",
+      "size": {
+        "label": "Amount",
+        "fewer": "Fewer",
+        "standard": "Standard",
+        "more": "More",
+        "flashcards": "{size} · {count} cards",
+        "quiz": "{size} · {count} questions",
+        "mindmap": "{size} · up to {count} ideas"
+      },
+      "difficulty": {
+        "label": "Difficulty",
+        "easy": "Easy",
+        "mixed": "Mixed",
+        "hard": "Hard"
+      },
+      "focus": {
+        "label": "Focus (optional)",
+        "placeholder": "e.g. Definitions and key dates",
+        "counter": "{used} / {max}",
+        "tooLong": "Keep the focus to {max} characters or fewer."
+      },
+      "language": {
+        "label": "Language",
+        "follow": "Same as the sources"
+      },
+      "problems": {
+        "noSources": "Add at least one source.",
+        "tooManySources": "Use at most {max} sources. Select fewer sources."
+      },
+      "estimate": {
+        "loading": "Estimating the size…",
+        "summary": {
+          "flashcards": "Up to {count, plural, one {# card} other {# cards}} from {sources, plural, one {# source} other {# sources}}",
+          "quiz": "Up to {count, plural, one {# question} other {# questions}} from {sources, plural, one {# source} other {# sources}}",
+          "mindmap": "Up to {count, plural, one {# idea} other {# ideas}} from {sources, plural, one {# source} other {# sources}}"
+        },
+        "parts": "Long sources are read in {groups} parts, so this takes a little longer.",
+        "exceedsLimit": "The selected sources are too large for one study set. Choose fewer or shorter sources.",
+        "failed": "Couldn't estimate the size."
+      },
+      "submit": "Generate",
+      "regenerateSubmit": "Regenerate",
+      "cancel": "Cancel",
+      "started": "Generating. It will also appear under Artifacts.",
+      "reused": "This is already being generated.",
+      "regenerating": "Regenerating. The current version stays until the new one is ready.",
+      "manageBilling": "Manage billing",
+      "errors": {
+        "STUDY_TOO_MANY_RUNNING": "Too many tables and study sets are generating at once. Wait for one to finish.",
+        "STUDY_NOT_READY": "Only a finished study set can be regenerated.",
+        "STUDY_CONTENT_UNREADABLE": "This study set can't be read, so it can't be regenerated.",
+        "STUDY_REGENERATION_IN_PROGRESS": "This study set is already being regenerated.",
+        "VALIDATION_ERROR": "Check the options and sources, then try again.",
+        "THREAD_NOT_FOUND": "This conversation is no longer available.",
+        "ARTIFACT_NOT_FOUND": "This study set no longer exists.",
+        "recipeUnavailable": "This study set can't be adjusted. Generate a new one from the source hub.",
+        "loadFailed": "Couldn't open this study set for regeneration.",
+        "generic": "Couldn't generate this. Try again."
+      }
+    },
+    "regenerationFailed": {
+      "message": "The last regeneration failed, so this is still the previous version."
+    }
+  },
   "mobileRouteSheet": {
-    "supplementaryPage": "Supplementary SourceWeft page"
+    "supplementaryPage": "Supplementary SourceWeft page",
+    "loading": "Loading…"
   },
   "authLocale": {
     "core": {
@@ -5872,6 +6706,122 @@
       }
     },
     "plugins": {
+      "sso": {
+        "signInWithSso": "Sign in with SSO",
+        "ssoTitle": "Single sign-on",
+        "ssoDescription": "Enter your work email to continue with your company's sign-in.",
+        "workEmail": "Work email",
+        "continue": "Continue",
+        "backToSignIn": "Back to sign in",
+        "ssoEmailRequired": "Enter your work email address.",
+        "ssoRateLimited": "Too many attempts. Please wait a minute and try again.",
+        "ssoNoSetup": "No single sign-on is set up for this email address.",
+        "orgTabLabel": "Single sign-on",
+        "orgTitle": "Single sign-on",
+        "orgDescription": "Let members of a verified email domain sign in through your identity provider.",
+        "orgTeamsOnly": "Single sign-on is available for teams.",
+        "orgNoPermission": "Only team owners and admins can manage single sign-on.",
+        "orgAddProvider": "Add identity provider",
+        "orgProviderLimitReached": "You can add up to 5 identity providers per team.",
+        "orgEmptyTitle": "No identity providers yet",
+        "orgEmptyDescription": "Connect an identity provider (OIDC or SAML) and verify the email domain you control to let members sign in with SSO.",
+        "orgColumnProvider": "Provider",
+        "orgColumnDomain": "Domain",
+        "orgColumnType": "Type",
+        "orgColumnStatus": "Status",
+        "orgColumnActions": "Actions",
+        "orgStatusVerified": "Verified",
+        "orgStatusPending": "Pending verification",
+        "orgProtocolOidc": "OIDC",
+        "orgProtocolSaml": "SAML",
+        "orgDetails": "Details",
+        "orgEdit": "Edit",
+        "orgDelete": "Delete",
+        "orgCreateTitle": "Add identity provider",
+        "orgEditTitle": "Edit identity provider",
+        "orgCreateDescription": "Register an OIDC or SAML identity provider for a domain your team controls.",
+        "orgEditDescription": "Update this identity provider. Leave secrets blank to keep the current values.",
+        "orgProtocol": "Sign-in protocol",
+        "orgProviderId": "Provider ID",
+        "orgProviderIdHint": "Lowercase letters, digits and hyphens, 3–47 characters.",
+        "orgProviderIdImmutableHint": "The provider ID cannot be changed after creation.",
+        "orgDomain": "Email domain",
+        "orgDomainChangeWarning": "Changing the domain requires verifying it again and blocks sign-in until it is verified.",
+        "orgIssuer": "Issuer URL",
+        "orgIssuerHint": "We discover the OIDC endpoints from the issuer. Internal/private issuers are rejected.",
+        "orgClientId": "Client ID",
+        "orgClientIdKeepHint": "Leave blank to keep the current client ID.",
+        "orgClientSecret": "Client secret",
+        "orgClientSecretKeepHint": "Leave blank to keep the current secret.",
+        "orgScopes": "Scopes",
+        "orgScopesHint": "Space-separated. Defaults to openid email profile.",
+        "orgSamlConfigHint": "Enter the IdP sign-on URL, signing certificate and entity ID below, or paste the IdP metadata XML to fill them.",
+        "orgEntryPoint": "IdP sign-on URL",
+        "orgIdpEntityId": "IdP entity ID / issuer",
+        "orgCertificate": "IdP signing certificate",
+        "orgCertificateHint": "Paste the PEM certificate, or fill it from the metadata below.",
+        "orgSamlMetadata": "Auto-fill from IdP metadata XML",
+        "orgSamlMetadataHint": "Paste the IdP metadata XML to fill the fields above. The metadata itself is not stored.",
+        "orgSamlKeepHint": "Leave blank to keep the current value.",
+        "orgRoleAttribute": "Role attribute (optional)",
+        "orgRoleAttributeHint": "The claim (OIDC) or attribute (SAML) that carries the member's role.",
+        "orgAdminRoleValue": "Admin role value (optional)",
+        "orgAdminRoleValueHint": "Members whose role attribute equals this value become admins; anyone who doesn't match is set to member at each sign-in. Owners are never changed.",
+        "orgSamlSecurityNote": "Your identity provider must sign the SAML assertion with RSA-SHA256 or RSA-SHA512 using a SHA-256 or SHA-512 digest, and send it unencrypted.",
+        "orgSave": "Save",
+        "orgCancel": "Cancel",
+        "orgCreateSuccess": "Identity provider added.",
+        "orgUpdateSuccess": "Identity provider updated.",
+        "orgFieldRequired": "This field is required.",
+        "orgProviderIdInvalid": "Use 3–47 lowercase letters, digits or hyphens.",
+        "orgEntryPointInvalid": "Enter a valid sign-on URL.",
+        "orgCertificateInvalid": "Enter a PEM certificate or a base64 value.",
+        "orgMetadataTooLarge": "The metadata XML is too large (max 100 KB).",
+        "orgMetadataParseError": "Could not read the metadata XML. Check it and paste again, or fill the fields manually.",
+        "orgMetadataNoEntryPoint": "Could not read the sign-on URL from the metadata — enter it manually.",
+        "orgMetadataNoEntityId": "Could not read the entity ID from the metadata — enter it manually.",
+        "orgMetadataNoCert": "Could not read the IdP signing certificate from the metadata — paste it manually.",
+        "orgMetadataMultipleCerts": "This IdP publishes more than one signing certificate; the first is used — confirm it is the active one.",
+        "orgSamlNeedsConfig": "Provide the sign-on URL, signing certificate and entity ID, or paste metadata XML.",
+        "orgRateLimited": "Too many attempts. Please wait a minute and try again.",
+        "orgProviderIdTaken": "A provider with this ID already exists. Choose a different one.",
+        "orgProviderIdReserved": "This provider ID is reserved. Choose a different one.",
+        "orgIssuerInvalid": "Enter a valid issuer URL starting with http:// or https://.",
+        "orgIssuerUnreachable": "SourceWeft couldn't reach this issuer. An OIDC identity provider must be reachable from the SourceWeft server over the public internet and expose a valid discovery document. For an internal identity provider, use SAML instead.",
+        "orgIdentityLocked": "These settings can't be changed after members have signed in with this provider. To change them, delete the provider and add it again.",
+        "orgIdentityLockedHint": "The issuer, client ID, and the SAML sign-on URL, certificate and entity ID can't be changed after members have signed in. To change them, delete the provider and add it again.",
+        "orgRoleMappingIncomplete": "Fill in both the role attribute and the admin role value, or leave both empty.",
+        "orgErrDomainVerificationFailed": "We couldn't find the TXT record yet. DNS changes can take a few minutes — wait a little and verify again.",
+        "orgErrNoPendingVerification": "This verification request has expired. Request a new TXT record and verify again.",
+        "orgErrInvalidDomain": "This domain can't be verified. Check the email domain set on the provider.",
+        "orgErrIdentifierTooLong": "The provider ID is too long to create a DNS record for it.",
+        "orgErrProviderChanged": "This provider changed while the request was in progress. Reload the page and try again.",
+        "orgServiceProviderPending": "The service-provider details appear once you set a provider ID.",
+        "orgDirectSignInDescription": "Share this link to send members straight to single sign-on for this team.",
+        "orgDirectSignInNone": "Once a provider's domain is verified, members can sign in with single sign-on.",
+        "orgDirectSignInMany": "With more than one verified provider, members choose \"Sign in with SSO\" and enter their work email.",
+        "orgDomainVerification": "Verify domain ownership",
+        "orgDomainVerificationDescription": "Add this TXT record to the DNS for {domain} to prove you control it:",
+        "orgTxtRecordHost": "TXT record name",
+        "orgTxtRecordValue": "TXT record value",
+        "orgDnsPropagationNote": "DNS changes can take a few minutes to take effect.",
+        "orgVerify": "Verify",
+        "orgVerifying": "Verifying…",
+        "orgVerifySuccess": "Domain verified.",
+        "orgCopy": "Copy",
+        "orgCopied": "Copied",
+        "orgServiceProviderInfo": "Service provider details",
+        "orgServiceProviderDescription": "Give these to your identity provider administrator.",
+        "orgOidcRedirectUri": "OIDC redirect URI",
+        "orgSamlAcsUrl": "SAML ACS URL",
+        "orgSamlMetadataUrl": "SAML SP metadata URL",
+        "orgSamlEntityId": "SAML SP entity ID",
+        "orgDirectSignInLink": "Direct sign-in link",
+        "orgDeleteTitle": "Delete identity provider",
+        "orgDeleteDescription": "Members who sign in on this domain will no longer be able to use SSO. This cannot be undone.",
+        "orgDeleteConfirm": "Delete provider",
+        "orgDeleteSuccess": "Identity provider deleted."
+      },
       "magicLink": {
         "magicLink": "Magic Link",
         "sendMagicLink": "Send Magic Link",
@@ -6169,5 +7119,243 @@
     "privacyPolicy": "Privacy Policy",
     "agree": "Agree and continue",
     "decline": "Decline and sign out"
+  },
+  "dashboardScheduled": {
+    "rule": {
+      "manual": "Runs only when you start it",
+      "daily": "Every day at {time}",
+      "weekdays": "Weekdays at {time}",
+      "weekly": "Every {days} at {time}",
+      "cron": "Cron {expr}",
+      "once": "Once, {at}"
+    },
+    "status": {
+      "draft": "Draft",
+      "active": "Active",
+      "paused": "Paused",
+      "blocked": "Blocked",
+      "completed": "Done",
+      "archived": "Deleted"
+    },
+    "statusReason": {
+      "user_paused": "Paused by you.",
+      "owner_left": "Paused because the owner left this workspace.",
+      "repeated_failure": "Paused after repeated failures. Check the history, then resume.",
+      "insufficient_credits": "Blocked: not enough credits to run.",
+      "tools_unavailable": "Blocked: a source or MCP server this task uses is no longer available.",
+      "auth_expired": "Blocked: a connected account needs to be signed in again."
+    },
+    "runStatus": {
+      "pending": "Waiting",
+      "dispatching": "Starting",
+      "queued": "Running",
+      "succeeded": "Succeeded",
+      "failed": "Failed",
+      "skipped": "Skipped",
+      "blocked": "Blocked",
+      "cancelled": "Cancelled"
+    },
+    "skipReason": {
+      "missed_platform_down": "Missed while the platform was down.",
+      "previous_run_active": "The previous run was still going.",
+      "user_concurrency_limit": "Too many of your tasks were running at once.",
+      "user_daily_cap": "Daily limit of scheduled runs reached.",
+      "insufficient_credits": "Not enough credits.",
+      "owner_left": "The owner left this workspace.",
+      "tools_unavailable": "A source or MCP server was unavailable.",
+      "auth_expired": "A connected account needs to be signed in again.",
+      "rate_limited": "Too many runs in a short time."
+    },
+    "trigger": {
+      "schedule": "Scheduled",
+      "manual": "Run now",
+      "api": "API",
+      "event": "Event"
+    },
+    "errors": {
+      "generic": "Something went wrong. Please try again.",
+      "AGENT_TASK_LIMIT_REACHED": "Your plan's limit of active scheduled tasks is reached. Pause or delete one first.",
+      "AGENT_TASK_RUN_RATE_LIMITED": "Too many manual runs this hour. Try again later.",
+      "AGENT_TASK_RUN_CONFLICT": "This task is already running.",
+      "AGENT_TASK_INVALID_STATE": "That action is not available for this task right now.",
+      "AGENT_TASK_VERSION_CONFLICT": "This task was changed elsewhere. Reopen it and try again.",
+      "AGENT_TASK_NOT_FOUND": "This task no longer exists.",
+      "AGENT_TASK_SCHEDULE_INVALID": "This schedule is not valid. Runs must be at least one hour apart and in the future."
+    },
+    "toasts": {
+      "runStarted": "Run started",
+      "paused": "Task paused",
+      "resumed": "Task resumed",
+      "enabled": "Task enabled",
+      "deleted": "Task deleted",
+      "saved": "Task saved",
+      "created": "Task created"
+    },
+    "frequency": {
+      "daily": "Every day",
+      "weekdays": "Weekdays",
+      "weekly": "Certain days of the week",
+      "once": "Once",
+      "cron": "Cron expression",
+      "manual": "Only when I run it"
+    },
+    "form": {
+      "title": "New scheduled task",
+      "editTitle": "Edit scheduled task",
+      "description": "A saved prompt that runs on a schedule as you, and puts the result in a new chat.",
+      "name": "Name",
+      "namePlaceholder": "Morning digest",
+      "prompt": "Prompt",
+      "promptPlaceholder": "What should the assistant do each time?",
+      "promptHint": "Runs with no one watching, so it can read and summarize but not change anything.",
+      "frequency": "Repeat",
+      "time": "Time",
+      "runAt": "Run at",
+      "cron": "Cron expression (5 fields)",
+      "days": "Days",
+      "timezone": "Time zone",
+      "manualHint": "This task has no schedule. Save it, then use Run now whenever you want.",
+      "nextRuns": "Next runs",
+      "previewLoading": "Checking the schedule…",
+      "previewEmpty": "Fill in the schedule to see the next runs.",
+      "offsetHint": "A run may start up to {minutes} min after the time shown.",
+      "webAccess": "Allow web search",
+      "webAccessHint": "Lets the task search and read public web pages.",
+      "notifyOnSuccess": "Notify me when a run succeeds",
+      "notifyEmail": "Also email me about problems",
+      "notifyEmailHint": "Failures, pauses and blocked runs.",
+      "mcp": "MCP servers",
+      "mcpHint": "Only read-only tools of these servers are used.",
+      "readOnlyNote": "Scheduled runs are read-only: they cannot write files, publish artifacts or ask you questions.",
+      "cancel": "Cancel",
+      "save": "Save",
+      "saveDraft": "Save as draft",
+      "createAndEnable": "Create and enable",
+      "sources": "Sources",
+      "sourcesHint": "The run reads only these sources. Leave empty to run without workspace sources.",
+      "addSource": "Add source",
+      "searchSources": "Search sources",
+      "noSources": "No sources found.",
+      "sourcesLimit": "At most {count} sources.",
+      "untitledSource": "Untitled source",
+      "unavailableSource": "Source no longer available",
+      "skills": "Skills",
+      "skillsHint": "The run may use only these skills.",
+      "addSkill": "Add skill",
+      "searchSkills": "Search skills",
+      "noSkills": "No skills available.",
+      "skillsLimit": "At most {count} skills.",
+      "unavailableSkill": "Skill no longer available",
+      "showMore": "Show more"
+    },
+    "actions": {
+      "open": "Actions for {name}",
+      "runNow": "Run now",
+      "pause": "Pause",
+      "resume": "Resume",
+      "enable": "Enable",
+      "edit": "Edit",
+      "delete": "Delete"
+    },
+    "delete": {
+      "title": "Delete \"{name}\"?",
+      "body": "The task stops running. Its past runs and chats stay."
+    },
+    "list": {
+      "nextRun": "Next run {at}"
+    },
+    "page": {
+      "title": "Scheduled tasks",
+      "subtitle": "Prompts that run on a schedule and leave their results in a chat.",
+      "new": "New task",
+      "tabTasks": "Tasks",
+      "tabInbox": "Notifications",
+      "loading": "Loading…",
+      "loadError": "Could not load scheduled tasks.",
+      "emptyTitle": "No scheduled tasks yet",
+      "emptyBody": "Save a prompt once and let it run every morning, every Monday, or at a time you pick."
+    },
+    "detail": {
+      "back": "All tasks",
+      "notFound": "This task was not found.",
+      "prompt": "Prompt",
+      "history": "Run history",
+      "noRuns": "No runs yet.",
+      "catchUp": "catch-up",
+      "openResult": "Open result"
+    },
+    "inbox": {
+      "loading": "Loading…",
+      "loadError": "Could not load notifications.",
+      "empty": "No notifications.",
+      "repeated": "{count} times",
+      "loadMore": "Load more",
+      "markAllRead": "Mark all read"
+    },
+    "bell": {
+      "label": "Notifications",
+      "labelUnread": "Notifications, {count} unread",
+      "title": "Notifications",
+      "viewAll": "View all"
+    },
+    "notification": {
+      "task_run_succeeded": "\"{taskName}\" finished.",
+      "task_run_failed": "\"{taskName}\" failed.",
+      "task_run_catch_up": "\"{taskName}\" ran late to make up for a missed slot.",
+      "task_blocked_quota": "\"{taskName}\" could not run: not enough credits.",
+      "task_needs_approval": "\"{taskName}\" needs your approval.",
+      "task_paused_owner_left": "\"{taskName}\" was paused because its owner left.",
+      "task_tools_unavailable": "\"{taskName}\" cannot run: a source or MCP server it uses is unavailable.",
+      "task_blocked_auth": "\"{taskName}\" cannot run: a connected account needs to be signed in again.",
+      "task_paused_repeated_failure": "\"{taskName}\" was paused after repeated failures.",
+      "research_ready": "Your research on \"{topic}\" is ready.",
+      "research_failed": "Your research on \"{topic}\" could not be completed.",
+      "artifact_generation_failed": "\"{title}\" could not be generated. Open it in the Hub's Artifacts tab to see why.",
+      "artifact_regeneration_failed": "\"{title}\" could not be regenerated. The previous version is kept; open it to see why.",
+      "assistant_reply": "The assistant replied to your message.",
+      "assistant_question": "\"{taskName}\" has a question for you.",
+      "assistant_ticket_blocked": "\"{taskName}\" stopped: {reason, select, credit_cap {it reached its credit cap} insufficient_credits {you are out of credits} other {its runs kept failing}}.",
+      "assistant_messages_blocked": "Your messages to the assistant are waiting: you are out of credits.",
+      "assistant_unavailable": "The assistant could not handle {count, plural, one {# message} other {# messages}}.",
+      "unknown": "Update about \"{taskName}\"."
+    },
+    "composer": {
+      "schedule": "Run on a schedule"
+    },
+    "threadNotice": {
+      "from": "From the scheduled task “{name}”.",
+      "open": "Open task",
+      "problem": {
+        "failed": "This scheduled run did not finish.",
+        "timedOut": "This scheduled run took too long and was stopped.",
+        "cancelled": "This scheduled run was stopped.",
+        "needsApproval": "This scheduled run needs your approval, which a scheduled run cannot ask for."
+      }
+    }
+  },
+  "sharedChat": {
+    "sharedOnAsOf": "Shared on SourceWeft · as of {date}",
+    "user": "User",
+    "assistant": "Assistant",
+    "stopped": "Stopped",
+    "madeWith": "Made with SourceWeft",
+    "unavailable": "This share isn't available",
+    "sources": "Sources",
+    "artifactKinds": {
+      "file": "File",
+      "html": "Page",
+      "report": "Report",
+      "slides": "Slides",
+      "mindmap": "Mind map",
+      "podcast": "Podcast",
+      "audio_overview": "Audio overview",
+      "video_overview": "Video overview",
+      "video_presentation": "Video presentation",
+      "flashcards": "Flashcards",
+      "quiz": "Quiz",
+      "table": "Table",
+      "infographic": "Infographic",
+      "image": "Image"
+    }
   }
 }

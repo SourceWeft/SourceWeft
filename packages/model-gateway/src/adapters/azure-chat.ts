@@ -1,4 +1,5 @@
 import { sdkRetryOptions } from "./gateway-caller";
+import { noAmbientOpenAIIdentity } from "../auth-headers";
 import { AzureChatOpenAI } from "@langchain/openai";
 import type { ChatAdapter } from "./types";
 
@@ -20,7 +21,7 @@ export class AzureChatAdapter implements ChatAdapter {
       azureOpenAIEndpoint: target.baseUrl,
       configuration: {
         fetch: options?.fetch,
-        adminAPIKey: null,
+        ...noAmbientOpenAIIdentity,
         ignoreEnvironmentHeaders: true,
       },
       deploymentName: target.providerModel,

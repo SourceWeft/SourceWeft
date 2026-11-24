@@ -87,11 +87,12 @@ const nextConfig: NextConfig = {
             value: "max-age=31536000; includeSubDomains",
           },
           { key: "X-Content-Type-Options", value: "nosniff" },
-          // Nothing in the app asks for these; the only media API in use is
-          // screen capture (`getDisplayMedia`), which is `display-capture`.
+          // The composer's dictation asks for the microphone on our own origin;
+          // camera and geolocation stay off; screen capture is `display-capture` and
+          // is not listed.
           {
             key: "Permissions-Policy",
-            value: "camera=(), microphone=(), geolocation=()",
+            value: "camera=(), microphone=(self), geolocation=()",
           },
         ],
       },
@@ -121,6 +122,12 @@ const nextConfig: NextConfig = {
         // (`/api/source-file` a `sandbox` CSP, `/api/artifact-file` its own
         // CSP and `no-referrer` for tokened URLs), and Next drops a handler's
         // header when the config already set the same key.
+        // The iOS app's service worker: always revalidated, so a fix reaches
+        // the app on its next launch.
+        source: "/sw.js",
+        headers: [{ key: "Cache-Control", value: "no-cache" }],
+      },
+      {
         source: "/((?!api/).*)",
         headers: [
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
@@ -150,14 +157,42 @@ const nextConfig: NextConfig = {
       // The auth UI moved from `/account/*` to `/settings/*`, and renamed two
       // organization segments. Keep bookmarks and emailed links working.
       { source: "/account", destination: "/settings/account", permanent: true },
-      { source: "/account/profile", destination: "/settings/account", permanent: true },
-      { source: "/account/security", destination: "/settings/security", permanent: true },
+      {
+        source: "/account/profile",
+        destination: "/settings/account",
+        permanent: true,
+      },
+      {
+        source: "/account/security",
+        destination: "/settings/security",
+        permanent: true,
+      },
       // API keys are a card inside the security view now, not a view of their own.
-      { source: "/account/keys", destination: "/settings/security", permanent: true },
-      { source: "/account/organizations", destination: "/settings/organizations", permanent: true },
-      { source: "/account/teams", destination: "/settings/organizations", permanent: true },
-      { source: "/organization/members", destination: "/organization/people", permanent: true },
-      { source: "/organization/keys", destination: "/organization/settings", permanent: true },
+      {
+        source: "/account/keys",
+        destination: "/settings/security",
+        permanent: true,
+      },
+      {
+        source: "/account/organizations",
+        destination: "/settings/organizations",
+        permanent: true,
+      },
+      {
+        source: "/account/teams",
+        destination: "/settings/organizations",
+        permanent: true,
+      },
+      {
+        source: "/organization/members",
+        destination: "/organization/people",
+        permanent: true,
+      },
+      {
+        source: "/organization/keys",
+        destination: "/organization/settings",
+        permanent: true,
+      },
     ];
   },
   turbopack: {

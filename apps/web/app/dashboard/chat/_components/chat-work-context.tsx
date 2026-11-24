@@ -79,7 +79,6 @@ export function useChatCreationContext() {
   const [devicesError, setDevicesError] = useState<string | null>(null);
   const [devicesLoading, setDevicesLoading] = useState(false);
   const requested = query.get("computer");
-  const ready = readyFor === requested;
   const queryDraft = query.get("draft");
   useEffect(() => {
     if (!draftNonce.current) draftNonce.current = crypto.randomUUID();
@@ -123,6 +122,16 @@ export function useChatCreationContext() {
     }
   }, [folderStorageKey, t]);
 
+  // In the desktop app a new chat runs on this computer unless Cloud is chosen. While this
+  // computer cannot be used yet the chat has no run location: it is never moved to Cloud on
+  // its own. Only a computer that can never run anything (not supported) leaves Cloud as the
+  // one place to run.
+  const desktop = desktopBridge.isAvailable();
+  const localUnsupported =
+    hostStatus?.platformSupported === false ||
+    hostStatus?.readiness?.state === "unsupported";
+  const localPending = desktop && !requested && !nativeId && !localUnsupported;
+  const ready = readyFor === requested && !localPending;
   const folderId = query.get("folder");
   const target = useMemo<ThreadExecutionTarget | null>(
     () =>
@@ -266,6 +275,12 @@ export function useChatCreationContext() {
      * or local execution is not supported on it. `deviceId` is its identity when it has one.
      */
     localSetup,
+    /**
+     * Set while a new chat in the desktop app waits for this computer, its default run
+     * location, to become usable. The chat has no run location until then or until Cloud is
+     * chosen.
+     */
+    localPending,
     error: invalid
       ? t("work.computerUnavailableChooseAnother")
       : (draftMetadataError ?? error),
@@ -326,14 +341,29 @@ export function ChatWorkContext({
   const checking = Boolean(threadId) && localStatus.status === "checking";
   const contextError =
     error || (threadId && !checking && localStatus.message) || creation?.error;
+  const localSetup = creation?.localSetup ?? null;
+  const install = useSandboxInstallState();
+  // A new chat waits for this computer: say where it will run and what it needs, not Cloud.
+  const waitingLabel =
+    !threadId && !target && creation?.localPending && !contextError
+      ? localSetup?.state === "needsSetup"
+        ? `${t("work.thisComputer")} · ${
+            install.phase === "installing" || localSetup.kind === "installing"
+              ? t("work.preparing")
+              : t("work.needsSetup")
+          }`
+        : null
+      : null;
   const label =
     target?.kind === "cloud"
       ? t("work.cloud")
-      : device
-        ? `${device.name}${contextError ? ` · ${t("work.statusUnavailable")}` : device.online ? "" : ` · ${t("work.offline")}`}`
-        : contextError || (info && target?.kind === "local")
-          ? t("work.computerUnavailable")
-          : t("work.connecting");
+      : waitingLabel
+        ? waitingLabel
+        : device
+          ? `${device.name}${contextError ? ` · ${t("work.statusUnavailable")}` : device.online ? "" : ` · ${t("work.offline")}`}`
+          : contextError || (info && target?.kind === "local")
+            ? t("work.computerUnavailable")
+            : t("work.connecting");
   const workingDirectory =
     threadId && target?.kind === "local" ? info?.workingDirectory : null;
   const directoryLabel = workingDirectory
@@ -345,8 +375,6 @@ export function ChatWorkContext({
   const triggerClassName = compact
     ? "-ml-1 flex h-6 min-w-0 max-w-full items-center gap-1 rounded-md px-1 text-xs leading-4 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50"
     : "flex h-10 min-w-0 max-w-full items-center gap-1 rounded-md px-1 text-xs leading-4 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50 sm:-ml-1 sm:h-6";
-  const localSetup = creation?.localSetup ?? null;
-  const install = useSandboxInstallState();
   const openLocalSettings = () => {
     setOpen(false);
     requestDashboardSettings("local");

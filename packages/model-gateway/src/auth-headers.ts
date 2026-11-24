@@ -55,6 +55,18 @@ export function assertUnauthenticatedProviderConfig(
   }
 }
 
+/**
+ * OpenAI account identity that LangChain and the SDK would otherwise read from
+ * the process environment (OPENAI_ADMIN_KEY, OPENAI_ORGANIZATION,
+ * OPENAI_ORG_ID, OPENAI_PROJECT_ID). A request carries only what its own
+ * Provider declares, so every OpenAI SDK adapter spreads this.
+ */
+export const noAmbientOpenAIIdentity = {
+  adminAPIKey: null,
+  organization: null,
+  project: null,
+} as const;
+
 export function isUnauthenticatedSystemTarget(target: ResolvedRequestTarget) {
   return (
     target.allowUnauthenticated === true &&
@@ -72,9 +84,7 @@ export function unauthenticatedOpenAIConfiguration(
   return {
     allowUnauthenticated: true,
     apiKey: null,
-    adminAPIKey: null,
-    organization: null,
-    project: null,
+    ...noAmbientOpenAIIdentity,
   };
 }
 

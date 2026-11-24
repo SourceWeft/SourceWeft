@@ -45,6 +45,7 @@ import {
   type SourceTreeNode,
 } from "../source-tree";
 import { TypeBadge } from "../type-badge";
+import { asYouTubeErrorCode } from "../youtube/errors";
 import type { SourceItem } from "../../source-types";
 
 const SOURCE_TREE_INDENT_PX = 16;
@@ -234,10 +235,17 @@ const SourceRow = memoComponent(function SourceRow({
   const isSelected = selectionState === true;
   const isPartiallySelected = selectionState === "indeterminate";
   const canSelect = isSelectable && !isBusy && !isEditing;
+  const youTubeErrorCode = isFailed
+    ? asYouTubeErrorCode(source.errorCode)
+    : null;
   const metaLabel =
     isDirectory && childCount > 0
       ? t("sources.row.itemCount", { count: childCount })
-      : source.meta;
+      : youTubeErrorCode
+        ? t(`youtube.error.${youTubeErrorCode}`)
+        : source.meta;
+  const isAiTranscript =
+    getRecordValue(source.metadata, "transcriptOrigin") === "ai_transcription";
 
   function handleRowClick(event: MouseEvent<HTMLDivElement>) {
     if (!canSelect) {
@@ -374,6 +382,7 @@ const SourceRow = memoComponent(function SourceRow({
                       ? "text-red-600 dark:text-red-400"
                       : "text-muted-foreground",
                   )}
+                  title={youTubeErrorCode ? metaLabel : undefined}
                 >
                   {metaLabel}
                 </span>
@@ -382,6 +391,17 @@ const SourceRow = memoComponent(function SourceRow({
                   source={source}
                 />
                 <TypeBadge label={source.type} />
+                {isAiTranscript ? (
+                  <span
+                    data-ai-transcription-badge
+                    title={t("youtube.aiTranscriptionHint")}
+                  >
+                    <TypeBadge label={t("youtube.aiTranscription")} />
+                    <span className="sr-only">
+                      {t("youtube.aiTranscriptionHint")}
+                    </span>
+                  </span>
+                ) : null}
               </div>
             ) : null}
           </>

@@ -2,6 +2,7 @@ import { sdkRetryOptions } from "./gateway-caller";
 import { ObservedOpenAIEmbeddings } from "./observed-embeddings";
 import {
   buildOpenAICompatibleDefaultHeaders,
+  noAmbientOpenAIIdentity,
   unauthenticatedOpenAIConfiguration,
 } from "../auth-headers";
 import type { EmbeddingsAdapter } from "./types";
@@ -24,7 +25,7 @@ export class OpenAICompatibleEmbeddingsAdapter implements EmbeddingsAdapter {
       configuration: {
         ignoreEnvironmentHeaders: true,
         fetch: options?.fetch,
-        adminAPIKey: null,
+        ...noAmbientOpenAIIdentity,
         baseURL: target.baseUrl,
         defaultHeaders: buildOpenAICompatibleDefaultHeaders(target),
         ...unauthenticatedOpenAIConfiguration(target),

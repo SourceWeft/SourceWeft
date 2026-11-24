@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<rss version="2.0">
+  <channel>
+    <title>Dupes</title>
+    <item>
+      <title>Original</title>
+      <guid>same-guid</guid>
+      <description>first</description>
+    </item>
+    <item>
+      <title>Repeat</title>
+      <guid> same-guid </guid>
+      <description>second</description>
+    </item>
+  </channel>
+</rss>

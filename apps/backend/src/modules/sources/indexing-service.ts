@@ -47,6 +47,36 @@ type StaleIndexingResult = {
  */
 type PageAdmissionMode = "check" | "checked_by_caller";
 
+/**
+ * Refuses with `PAGES_LIMIT_EXCEEDED` when the payer cannot take `pages` more
+ * ingestion pages. Shared by indexing and by any parse step that would pay
+ * for work (a model call) before indexing ever reaches its own check.
+ */
+export async function admitIngestionPages(
+  billing: ContentBillingPort,
+  teamId: string,
+  userId: string,
+  pages: number,
+) {
+  const state = await billing.getExecutionState(teamId, userId);
+  if (
+    state.kind === "metered" &&
+    state.ingestionPages.enforced &&
+    pages > state.ingestionPages.available
+  ) {
+    throw new BillingError(
+      "PAGES_LIMIT_EXCEEDED",
+      402,
+      "Ingestion pages limit exceeded",
+      {
+        teamId,
+        requested: pages,
+        available: state.ingestionPages.available,
+      },
+    );
+  }
+}
+
 export class SourceIndexingService {
   constructor(private readonly billing: ContentBillingPort) {}
 
@@ -454,23 +484,7 @@ export class SourceIndexingService {
   }
 
   private async admitPages(teamId: string, userId: string, pages: number) {
-    const state = await this.billing.getExecutionState(teamId, userId);
-    if (
-      state.kind === "metered" &&
-      state.ingestionPages.enforced &&
-      pages > state.ingestionPages.available
-    ) {
-      throw new BillingError(
-        "PAGES_LIMIT_EXCEEDED",
-        402,
-        "Ingestion pages limit exceeded",
-        {
-          teamId,
-          requested: pages,
-          available: state.ingestionPages.available,
-        },
-      );
-    }
+    await admitIngestionPages(this.billing, teamId, userId, pages);
   }
 
   private handleStaleRevision(

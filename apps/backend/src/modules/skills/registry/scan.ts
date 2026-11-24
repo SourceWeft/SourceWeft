@@ -43,29 +43,77 @@ export type RegistrySkillScanInput = {
 export const EXECUTABLE_BINARY_FLAG = "binary:executable";
 
 /**
- * Flags that are recorded and shown, but do not by themselves hold a version
- * back for review.
+ * Flags that make a submission worthless to catalogue, whoever sent it: it
+ * fetches and runs remote code, runs an encoded command, or tells the model to
+ * ignore its instructions. These are not "a human should look" — each is the
+ * attack itself, and the pattern is narrow enough that a legitimate skill does
+ * not match it by accident. The submission is refused, not queued: nobody
+ * should have to read it, and the submitter is told why.
+ */
+const REFUSED_SCAN_FLAGS: ReadonlySet<string> = new Set([
+  "egress:pipe-to-shell",
+  "egress:base64-exec",
+  "injection:override",
+]);
+
+/**
+ * Flags that describe what a skill DOES rather than that it is hostile: it
+ * reads credentials or environment variables, posts to or fetches from a host,
+ * asks for code-execution tools, links to a sibling skill's files, mentions the
+ * system prompt, ships scripts its text never mentions or that reach outside
+ * the bundle, or ships a compiled binary. A skill that teaches an API does all
+ * of these. Sampling the review queue found them in documentation for ordinary
+ * services, so they are recorded and shown, but do not hold a version back for
+ * review: nobody could read thousands of them, and the page says what was
+ * found.
  *
  * A skill's code only ever runs inside the isolated cloud sandbox — never on
- * the user's machine or ours — so a bundled binary is no more dangerous to the
- * person who imported it than the scripts next to it, which were never gated.
- * Queueing it meant someone could not install their own skill until an admin
- * looked. What the flag is for is the decision to show a skill to OTHER people:
- * making a skill public is an explicit admin action, and the flag is in front
- * of them when they take it. It also still counts as an escalation when a
- * workspace switches to a version that newly carries it.
+ * the user's machine or ours — so none of this is more dangerous to the person
+ * who imported a skill than the scripts next to it, which were never gated.
+ * Each flag still counts as an escalation when a public skill's new version
+ * newly carries it.
  */
 const ADVISORY_SCAN_FLAGS: ReadonlySet<string> = new Set([
   EXECUTABLE_BINARY_FLAG,
+  "secrets:read-credentials",
+  "secrets:env-access",
+  "scope:other-skill-file",
+  "tool:sensitive",
+  "egress:external-post",
+  "egress:fetch",
+  "injection:system-prompt",
+  "capability:undeclared-scripts",
+  "script:out-of-bundle-path",
 ]);
+
+/**
+ * The advisory flags a skill may carry and still list itself publicly. A
+ * bundled binary is the exception: opaque code cannot be read, so showing it to
+ * other people stays an admin's call, made with the flag in front of them.
+ */
+const AUTO_LISTABLE_SCAN_FLAGS: ReadonlySet<string> = new Set(
+  [...ADVISORY_SCAN_FLAGS].filter((flag) => flag !== EXECUTABLE_BINARY_FLAG),
+);
 
 /** Whether these flags hold a version back for an admin. */
 export function scanFlagsRequireReview(flags: Iterable<string>): boolean {
   for (const flag of flags) {
-    if (!ADVISORY_SCAN_FLAGS.has(flag)) return true;
+    if (!ADVISORY_SCAN_FLAGS.has(flag) && !REFUSED_SCAN_FLAGS.has(flag)) {
+      return true;
+    }
   }
   return false;
 }
+
+/** The flags, if any, that get a submission refused outright. */
+export function refusedScanFlags(flags: Iterable<string>): string[] {
+  return [...flags].filter((flag) => REFUSED_SCAN_FLAGS.has(flag));
+}
+
+/** Advisory flags a skill may carry and still be listed without an admin. */
+export const AUTO_LISTABLE_FLAGS: readonly string[] = [
+  ...AUTO_LISTABLE_SCAN_FLAGS,
+];
 
 /**
  * Extensions that mean "loadable code" whatever the bytes look like: native

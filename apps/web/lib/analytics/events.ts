@@ -216,6 +216,33 @@ export function trackSourceAdded(input: {
   });
 }
 
+export function trackMobileLaunch(input: {
+  source: "network" | "cache";
+  surface: "sign_in" | "dashboard" | "other";
+  launchMs: number;
+  ttfbMs: number | undefined;
+  startMs?: number;
+  pageMs?: number;
+  scriptsMs?: number;
+  runMs?: number;
+}) {
+  const phases = {
+    start_ms: input.startMs,
+    page_ms: input.pageMs,
+    scripts_ms: input.scriptsMs,
+    run_ms: input.runMs,
+  };
+  trackEvent("mobile_launch", {
+    source: input.source,
+    surface: input.surface,
+    launch_ms: input.launchMs,
+    ...(input.ttfbMs === undefined ? {} : { ttfb_ms: input.ttfbMs }),
+    ...Object.fromEntries(
+      Object.entries(phases).filter(([, value]) => value !== undefined),
+    ),
+  });
+}
+
 export function trackArtifactShared() {
   trackEvent("artifact_shared", {});
 }

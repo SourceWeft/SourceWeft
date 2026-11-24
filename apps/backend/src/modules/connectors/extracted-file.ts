@@ -6,7 +6,7 @@ import type {
 import { isConnectorItemSkipError } from "./types";
 import {
   classifySourceFile,
-  type SourceFileKind,
+  CONNECTOR_FILE_KINDS,
 } from "../sources/source-file-classifier";
 import {
   DocumentNeedsOcrError,
@@ -42,16 +42,6 @@ const defaultDeps: ExtractedFileDeps = {
   parseDocument: startDocumentParse,
   getTextParser: getSourceParser,
 };
-
-/** Fail closed: only these classifier kinds are resolvable by a connector sync.
- * Anything else — image, audio, transcript, or an unknown future kind — is
- * skipped before any download is attempted. */
-const SUPPORTED_CLASSIFIER_KINDS = new Set<SourceFileKind>([
-  "document",
-  "text",
-  "table",
-  "json",
-]);
 
 /** The non-document branch admits only the plain-text and JSON parsers. The
  * shared registry also holds the OCR document provider, the paid-ASR audio
@@ -154,7 +144,7 @@ export async function resolveExtractedFile(input: {
 
   if (
     !classification.supported ||
-    !SUPPORTED_CLASSIFIER_KINDS.has(classification.kind)
+    !CONNECTOR_FILE_KINDS.has(classification.kind)
   ) {
     return skipped("unsupported_type");
   }

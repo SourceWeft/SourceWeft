@@ -13,6 +13,7 @@ export type ChatThreadLike = {
   executionTarget?: ThreadExecutionTarget;
   parentThreadId?: string | null;
   personaId?: string | null;
+  origin?: ChatItem["origin"] | null;
   children?: ChatThreadLike[] | null;
 };
 
@@ -42,6 +43,7 @@ export function mapThreadToChatItem(item: ChatThreadLike): ChatItem {
     status: "ready",
     parentThreadId: item.parentThreadId ?? null,
     personaId: item.personaId ?? null,
+    ...(item.origin ? { origin: item.origin } : {}),
     // The sidebar nests one level, so a child's own children are dropped. The
     // key is only set when the response carried children: a single-thread
     // response has none, and spreading it over a list item must keep the
@@ -101,6 +103,38 @@ export function removeChatItem(items: ChatItem[], id: string): ChatItem[] {
 }
 
 /**
+ * The conversations a chat's own delegations opened. The server deletes them
+ * together with the chat; a sub-agent conversation a member created under it
+ * is kept.
+ */
+export function delegatedChildChatIds(
+  items: readonly ChatItem[],
+  id: string,
+): string[] {
+  const parent = items.find((item) => item.id === id);
+  return (parent?.children ?? [])
+    .filter((child) => child.origin === "subagent")
+    .map((child) => child.id);
+}
+
+/**
+ * Whether deleting the chats `deletedIds` takes `chatId` away as well: it is
+ * one of them, or one of the conversations their delegations opened.
+ */
+export function chatDeletionRemovesChat(
+  items: readonly ChatItem[],
+  deletedIds: readonly string[],
+  chatId: string,
+): boolean {
+  if (!chatId) {
+    return false;
+  }
+  return deletedIds.some(
+    (id) => id === chatId || delegatedChildChatIds(items, id).includes(chatId),
+  );
+}
+
+/**
  * Nests `child` under its parent, newest first, replacing an earlier copy.
  * Returns null when the parent is not in `items`, so the caller can decide
  * where an orphan should show instead.
@@ -130,4 +164,37 @@ export function insertChildChatItem(
 /** Every chat in display order, parents followed by their children. */
 export function flattenChatItems(items: readonly ChatItem[]): ChatItem[] {
   return items.flatMap((item) => [item, ...(item.children ?? [])]);
+}
+
+/**
+ * Puts a top-level chat into a list in activity order, newest first, replacing
+ * any row it already has there. The server orders every chat list this way.
+ */
+export function insertChatByActivity(
+  items: ChatItem[],
+  chat: ChatItem,
+): ChatItem[] {
+  const activity = new Date(chat.updatedAt).getTime();
+  const others = items.filter((item) => item.id !== chat.id);
+  const index = others.findIndex(
+    (item) => new Date(item.updatedAt).getTime() < activity,
+  );
+  return index === -1
+    ? [...others, chat]
+    : [...others.slice(0, index), chat, ...others.slice(index)];
+}
+
+/**
+ * Adds the viewer's pinned chats to a page of the main list (which leaves
+ * them out), each in activity order. A pinned chat already on the page keeps
+ * one row.
+ */
+export function mergePinnedChats(
+  items: ChatItem[],
+  pinned: readonly ChatItem[],
+): ChatItem[] {
+  return pinned.reduce(
+    (merged, chat) => insertChatByActivity(merged, chat),
+    items,
+  );
 }

@@ -324,6 +324,7 @@ test("model-call-begin drops an earlier call's tool-arg slots, so a retry names 
   Array.from(
     handleToolArgDeltaChunk({
       delta: {
+        kind: "snapshot",
         index: 0,
         id: "old-call",
         name: "write_file",
@@ -352,6 +353,7 @@ test("model-call-begin drops an earlier call's tool-arg slots, so a retry names 
   const deltas = [
     ...handleToolArgDeltaChunk({
       delta: {
+        kind: "snapshot",
         index: 0,
         id: "new-call",
         name: "write_file",

@@ -1,4 +1,3 @@
-import { ConnectorAccessPolicy } from "./access-policy";
 import { createHash } from "node:crypto";
 import { ConnectorError, toConnectorError } from "./errors";
 import { validateObjectWithJsonSchema } from "./config-validation";
@@ -13,6 +12,7 @@ import {
   updateActionRunRecord,
 } from "./repository";
 import { enqueueConnectorSyncJob } from "../content/queue";
+import { resolveCredential } from "./credential";
 import { ConnectorOAuthService } from "./oauth-service";
 import { ConnectorRegistry, connectorRegistry } from "./registry";
 import { buildRequestPreview, redactConnectorSecrets } from "./security";
@@ -146,7 +146,6 @@ export class ConnectorActionRunner {
   constructor(
     private readonly registry: ConnectorRegistry = connectorRegistry,
     private readonly oauthService = new ConnectorOAuthService(registry),
-    private readonly access = new ConnectorAccessPolicy(undefined, registry),
   ) {}
 
   async propose(input: {
@@ -176,7 +175,6 @@ export class ConnectorActionRunner {
         "Connector not found",
       );
     }
-    await this.access.requireConnection(connector, input.userId);
     const manifest = this.registry.getManifest(connector.connectorType);
     const actionSpec = manifest.actions.find(
       (candidate) => candidate.type === input.actionType,
@@ -323,7 +321,6 @@ export class ConnectorActionRunner {
         "Connector action not found",
       );
     }
-    await this.access.requireAvailable(action.connectorType, input.userId);
     if (action.status !== "proposed") {
       throw new ConnectorError(
         409,
@@ -455,7 +452,6 @@ export class ConnectorActionRunner {
         "Connector action not found",
       );
     }
-    await this.access.requireAvailable(action.connectorType, input.userId);
     if (
       input.expected?.actionType &&
       action.actionType !== input.expected.actionType
@@ -527,7 +523,6 @@ export class ConnectorActionRunner {
         "Connector is not active",
       );
     }
-    await this.access.requireConnection(connector, input.userId);
     const privateRequest =
       typeof action.requestJson[ENCRYPTED_REQUEST_KEY] === "string";
     if (privateRequest && action.approvedBy !== input.userId) {
@@ -598,12 +593,17 @@ export class ConnectorActionRunner {
 
     const startedAt = Date.now();
     try {
-      const accessToken = await this.oauthService.getRuntimeToken({
-        teamId: workspace.organizationId,
-        workspaceId: workspace.id,
-        accountId: connector.oauthAccountId,
-        connectorType: connector.connectorType,
-      });
+      const accessToken = await resolveCredential(
+        {
+          getRuntimeToken: (input) => this.oauthService.getRuntimeToken(input),
+          getManifest: (type) => this.registry.getManifest(type),
+        },
+        {
+          teamId: workspace.organizationId,
+          workspaceId: workspace.id,
+          connector,
+        },
+      );
       const adapter = this.registry.getAdapter(connector.connectorType);
       logger.debug("Connector action adapter execution started", {
         ...connectorActionExecutionMeta({
@@ -699,6 +699,13 @@ export class ConnectorActionRunner {
       }
       return { action: updated ?? action };
     } catch (error) {
+      await this.oauthService.markBrokeredAccountReauthRequired({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        accountId: connector.oauthAccountId,
+        connectorType: connector.connectorType,
+        error,
+      });
       const connectorError = toConnectorError(error);
       logger.debug("Connector action adapter execution failed", {
         ...connectorActionExecutionMeta({

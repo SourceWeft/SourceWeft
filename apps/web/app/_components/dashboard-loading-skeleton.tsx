@@ -11,7 +11,6 @@ import { DashboardPageNavigation } from "../dashboard/_components/dashboard-page
 import {
   ChatThreadPagePanelSkeleton,
   DashboardContentRouteSkeleton,
-  DashboardMobileBottomNavSkeleton,
   DashboardSidebarSkeleton,
   DashboardSkeletonContentForPath,
 } from "./route-loading-skeleton";
@@ -52,11 +51,10 @@ function DashboardLoadingShellContent({
           desktopTitlebar={desktopTitlebar}
         />
       )}
-      <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">
+      <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden pb-[env(safe-area-inset-bottom)] md:pb-0">
         <DashboardPageNavigation />
         <DashboardSkeletonContentForPath pathname={pathname} />
       </section>
-      <DashboardMobileBottomNavSkeleton />
     </>
   );
 }

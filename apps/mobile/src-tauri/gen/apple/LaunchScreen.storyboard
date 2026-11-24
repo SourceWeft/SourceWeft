@@ -1,7 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- Matches placeholder-dist/splash.html and the web app's launch cover: same background,
+     and the wordmark where the web view centres those pages. The web view lays them out
+     between the safe-area top and the safe-area bottom, so their centre sits
+     (top inset - bottom inset) / 2 below the middle of the screen: 14pt on Dynamic Island
+     iPhones (62 - 34), 12.5 on some (59 - 34). The span below runs from 28pt under the top
+     of the screen to the bottom, centring the wordmark 14pt below the middle.
+     It is tied to the screen, not the safe area, on purpose: iOS renders the launch image
+     with different safe-area insets from the running app (about 44 top, 0 bottom), so a
+     safe-area layout lands in one place in the launch image and another in the app, and
+     the wordmark jumps when the app takes over. On notch iPhones the web centre is 5-8pt
+     below the middle, so the wordmark still moves 6-9pt there. -->
 <document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="17150" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" useTraitCollections="YES" useSafeAreas="YES" colorMatched="YES" initialViewController="Y6W-OH-hqX">
     <dependencies>
         <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="17122"/>
+        <capability name="Named colors" minToolsVersion="9.0"/>
         <capability name="Safe area layout guides" minToolsVersion="9.0"/>
         <capability name="System colors in document resources" minToolsVersion="11.0"/>
         <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
@@ -14,8 +26,27 @@
                     <view key="view" contentMode="scaleToFill" id="5EZ-qb-Rvc">
                         <rect key="frame" x="0.0" y="0.0" width="414" height="896"/>
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                        <subviews>
+                            <view hidden="YES" userInteractionEnabled="NO" contentMode="scaleToFill" translatesAutoresizingMaskIntoConstraints="NO" id="Sp1-Ar-Ea1" userLabel="Web viewport span">
+                                <rect key="frame" x="0.0" y="28" width="414" height="868"/>
+                            </view>
+                            <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="SourceWeft" textAlignment="center" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="Wm1-Lb-Sw1">
+                                <rect key="frame" x="149" y="434.5" width="116" height="27"/>
+                                <fontDescription key="fontDescription" type="system" weight="semibold" pointSize="22"/>
+                                <color key="textColor" systemColor="labelColor"/>
+                                <nil key="highlightedColor"/>
+                            </label>
+                        </subviews>
                         <viewLayoutGuide key="safeArea" id="vDu-zF-Fre"/>
-                        <color key="backgroundColor" systemColor="systemBackgroundColor"/>
+                        <color key="backgroundColor" name="LaunchBackground"/>
+                        <constraints>
+                            <constraint firstItem="Wm1-Lb-Sw1" firstAttribute="centerX" secondItem="5EZ-qb-Rvc" secondAttribute="centerX" id="Cx1-Lb-Sw1"/>
+                            <constraint firstItem="Sp1-Ar-Ea1" firstAttribute="top" secondItem="5EZ-qb-Rvc" secondAttribute="top" constant="28" id="Sp1-Top-Cn1"/>
+                            <constraint firstItem="Sp1-Ar-Ea1" firstAttribute="bottom" secondItem="5EZ-qb-Rvc" secondAttribute="bottom" id="Sp1-Bot-Cn1"/>
+                            <constraint firstItem="Sp1-Ar-Ea1" firstAttribute="leading" secondItem="5EZ-qb-Rvc" secondAttribute="leading" id="Sp1-Lea-Cn1"/>
+                            <constraint firstItem="Sp1-Ar-Ea1" firstAttribute="trailing" secondItem="5EZ-qb-Rvc" secondAttribute="trailing" id="Sp1-Tra-Cn1"/>
+                            <constraint firstItem="Wm1-Lb-Sw1" firstAttribute="centerY" secondItem="Sp1-Ar-Ea1" secondAttribute="centerY" id="Cy1-Lb-Sw1"/>
+                        </constraints>
                     </view>
                 </viewController>
                 <placeholder placeholderIdentifier="IBFirstResponder" id="Ief-a0-LHa" userLabel="First Responder" customClass="UIResponder" sceneMemberID="firstResponder"/>
@@ -23,8 +54,11 @@
         </scene>
     </scenes>
     <resources>
-        <systemColor name="systemBackgroundColor">
-            <color white="1" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
+        <namedColor name="LaunchBackground">
+            <color red="1" green="1" blue="1" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+        </namedColor>
+        <systemColor name="labelColor">
+            <color white="0.0" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
         </systemColor>
     </resources>
 </document>

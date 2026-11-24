@@ -14,6 +14,7 @@ import {
 import { apiKeyClient } from "@better-auth/api-key/client";
 import { oauthProviderClient } from "@better-auth/oauth-provider/client";
 import { passkeyClient } from "@better-auth/passkey/client";
+import { ssoClient } from "@better-auth/sso/client";
 import { apiBaseUrl } from "./api-base-url";
 import { resolveGoogleOneTapConfig } from "./google-one-tap-config";
 
@@ -65,6 +66,10 @@ export const authClient = createAuthClient({
     oneTimeTokenClient(),
     passkeyClient(),
     oauthProviderClient(),
+    // Enterprise SSO (OIDC + SAML). `domainVerification` matches the backend
+    // plugin, whose account linking relies on a verified email domain. Adds
+    // `authClient.signIn.sso(...)`, used by the `/auth/sso` view.
+    ssoClient({ domainVerification: { enabled: true } }),
     ...(googleOneTapConfig.active
       ? [
           oneTapClient({

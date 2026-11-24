@@ -1,6 +1,7 @@
 "use client";
 
 import { authClient } from "./auth-client";
+import { nativeBridge } from "./native-bridge";
 
 type GoogleAuthModule = {
   signIn: (options: {
@@ -77,18 +78,31 @@ export async function signInWithMobileGoogle(clientId: string) {
   return result;
 }
 
+/**
+ * The message to show for a failed Google sign-in, or null when the person
+ * cancelled it. The Google SDK's own errors describe app configuration
+ * ("…is not configured in Info.plist") and mean nothing to the person, so they
+ * go to the console and the person sees one plain sentence.
+ */
 export function getMobileGoogleSignInError(error: unknown) {
   if (isCancelledGoogleSignIn(error)) {
     return null;
   }
 
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
-
-  if (typeof error === "string" && error.trim()) {
-    return error;
-  }
-
+  console.warn("[mobile sign-in] Google sign-in failed", error);
+  // The web view's console cannot be read on a phone; the device log can.
+  void nativeBridge
+    .logSignInFailure("google", describeError(error))
+    .catch(() => undefined);
   return "Unable to sign in with Google. Try again or use email.";
+}
+
+function describeError(error: unknown) {
+  if (error instanceof Error) return error.message || error.name;
+  if (typeof error === "string") return error;
+  try {
+    return JSON.stringify(error) ?? String(error);
+  } catch {
+    return String(error);
+  }
 }

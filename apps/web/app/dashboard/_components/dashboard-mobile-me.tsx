@@ -2,25 +2,27 @@
 import { disconnectLocalHostSession } from "../../../lib/local-host-session";
 
 import * as React from "react";
+import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useBillingAvailable } from "../../../lib/billing-edition/capabilities";
 import { usePurchasesAllowed } from "../../../lib/native-host";
 import { isSettingsTabAvailable } from "../../../lib/billing-edition/visibility";
-import { useAuthenticate } from "@better-auth-ui/react";
 import {
   Activity,
   ArrowLeft,
+  CalendarClock,
   ChevronRight,
+  ConciergeBell,
   CreditCard,
   Info,
   LayoutGrid,
-  LogOut,
+  PanelLeftOpen,
   PanelsTopLeft,
   ShieldCheck,
-  User,
   Users,
 } from "lucide-react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
+import { cn } from "@sourceweft/ui-web/lib/utils";
 import { authClient } from "../../../lib/auth-client";
 import {
   AboutPanel,
@@ -32,51 +34,84 @@ import {
   WorkspaceMembersPanel,
   type SettingsCenterTab,
 } from "./dashboard-settings-center-modal";
+import {
+  getMobileMeInitials,
+  MobileMeAvatar,
+  useMobileMeUser,
+} from "./dashboard-mobile-me-entry";
 import { useDashboardMobileNav } from "./dashboard-mobile-nav-state";
 import {
   getVisibleTeamOrganizations,
   useDashboardTeamSelector,
 } from "./dashboard-team-selector-shared";
-import { RawImage } from "../../_components/raw-image";
+import { useWorkspaceLayout } from "./dashboard-workspace-layout";
+import { swipeBackProps } from "@/lib/left-edge-swipe";
 
 type MobileMePanel = Exclude<SettingsCenterTab, "local">;
+type IconComponent = React.ComponentType<{ className?: string }>;
 
-const panelItems: Array<{
-  icon: React.ComponentType<{ className?: string }>;
-  key: MobileMePanel;
-}> = [
-  { key: "account", icon: User },
-  { key: "team", icon: Users },
-  { key: "workspace", icon: PanelsTopLeft },
-  { key: "usage", icon: LayoutGrid },
-  { key: "billing", icon: CreditCard },
-  { key: "approvals", icon: ShieldCheck },
-  { key: "about", icon: Info },
+// Grouped like the iOS Settings app: one rounded card per group, a tinted
+// icon per row.
+const panelGroups: Array<
+  Array<{ icon: IconComponent; key: MobileMePanel; tint: string }>
+> = [
+  [
+    { key: "team", icon: Users, tint: "bg-sky-500" },
+    { key: "workspace", icon: PanelsTopLeft, tint: "bg-indigo-500" },
+  ],
+  [
+    { key: "usage", icon: LayoutGrid, tint: "bg-emerald-500" },
+    { key: "billing", icon: CreditCard, tint: "bg-amber-500" },
+  ],
+  [{ key: "approvals", icon: ShieldCheck, tint: "bg-teal-500" }],
 ];
 
-function getInitials(name?: string, email?: string) {
-  const value = name || email || "SW";
-  return value
-    .split(/\s+|@/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() || "")
-    .join("");
+function MeGroup({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="overflow-hidden rounded-2xl border border-border/60 bg-card [&>*+*]:border-t [&>*+*]:border-border/60">
+      {children}
+    </div>
+  );
 }
+
+function MeRowContent({
+  icon: Icon,
+  label,
+  tint,
+}: {
+  icon: IconComponent;
+  label: string;
+  tint: string;
+}) {
+  return (
+    <>
+      <span
+        className={cn(
+          "flex size-7 shrink-0 items-center justify-center rounded-lg text-white",
+          tint,
+        )}
+      >
+        <Icon className="size-4" />
+      </span>
+      <span className="min-w-0 flex-1 truncate text-[15px] text-foreground">
+        {label}
+      </span>
+      <ChevronRight className="size-4 shrink-0 text-muted-foreground/70" />
+    </>
+  );
+}
+
+const rowClass =
+  "flex min-h-12 w-full items-center gap-3 px-4 py-2.5 text-left transition-colors active:bg-accent hover:bg-accent/60";
 
 export function DashboardMobileMe() {
   const t = useTranslations("dashboardNav");
   const billingAvailable = useBillingAvailable();
   const purchasesAllowed = usePurchasesAllowed();
-  const authState = useAuthenticate(authClient);
-  const sessionState = authState.data as
-    | {
-        user?: { email?: string; image?: string | null; name?: string };
-      }
-    | null
-    | undefined;
+  const user = useMobileMeUser();
   const { activeOrg, orgList } = useDashboardTeamSelector();
-  const { openObservability } = useDashboardMobileNav();
+  const { openMain, openObservability } = useDashboardMobileNav();
+  const { conversationsOpen, toggleConversations } = useWorkspaceLayout();
   const [activePanel, setActivePanel] = React.useState<MobileMePanel | null>(
     null,
   );
@@ -85,10 +120,10 @@ export function DashboardMobileMe() {
     orgList.length > 0 ? "team" : "personal",
   );
 
-  const userName = sessionState?.user?.name;
-  const userEmail = sessionState?.user?.email;
-  const userImage = sessionState?.user?.image;
-  const initials = getInitials(userName, userEmail);
+  const userName = user?.name;
+  const userEmail = user?.email;
+  const userImage = user?.image;
+  const initials = getMobileMeInitials(userName, userEmail);
   const visibleTeams = getVisibleTeamOrganizations(orgList);
   const hasTeam = visibleTeams.length > 0;
   const teamName = activeOrg?.name || visibleTeams[0]?.name;
@@ -109,150 +144,177 @@ export function DashboardMobileMe() {
     }
   }
 
+  const available = (key: MobileMePanel) =>
+    isSettingsTabAvailable(key, billingAvailable, purchasesAllowed);
+  const drawerLabel = conversationsOpen
+    ? t("sidebar.hideSidebar")
+    : t("sidebar.showSidebar");
+
   return (
     <main className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background md:hidden">
-      <header className="shrink-0 border-b border-border px-4 py-3">
+      <header className="flex h-12 shrink-0 items-center gap-1 border-b border-border/70 px-1.5">
         {activePanel ? (
-          <div className="flex items-center gap-2">
-            <Button
-              className="h-8 w-8 shrink-0"
-              onClick={() => setActivePanel(null)}
-              size="icon"
-              type="button"
-              variant="ghost"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              <span className="sr-only">{t("common.back")}</span>
-            </Button>
-            <div className="min-w-0 text-base font-semibold text-foreground">
-              {t(`mobileMe.panels.${activePanel}.label`)}
-            </div>
-          </div>
+          <Button
+            {...swipeBackProps}
+            className="size-10 shrink-0"
+            onClick={() => setActivePanel(null)}
+            size="icon"
+            type="button"
+            variant="ghost"
+          >
+            <ArrowLeft className="size-4" />
+            <span className="sr-only">{t("common.back")}</span>
+          </Button>
         ) : (
-          <div className="flex h-8 items-center">
-            <h1 className="text-base font-semibold text-foreground">
-              {t("nav.me")}
-            </h1>
-          </div>
+          <Button
+            aria-expanded={conversationsOpen}
+            aria-label={drawerLabel}
+            className="size-10 shrink-0"
+            data-conversations-toggle
+            onClick={toggleConversations}
+            size="icon"
+            title={drawerLabel}
+            type="button"
+            variant="ghost"
+          >
+            <PanelLeftOpen className="size-4" />
+          </Button>
         )}
+        <h1 className="min-w-0 truncate text-[15px] font-semibold text-foreground">
+          {activePanel
+            ? t(`mobileMe.panels.${activePanel}.label`)
+            : t("nav.me")}
+        </h1>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-6 pt-4">
+      {/* Keyed so opening or leaving a panel starts at the top. */}
+      <div
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-8 pt-5"
+        key={activePanel ?? "list"}
+      >
         {!activePanel ? (
-          <div className="space-y-2">
-            <div className="mb-4 rounded-xl border border-border bg-card p-4">
-              <div className="flex items-center gap-3">
-                {userImage ? (
-                  <RawImage
-                    alt={userName || t("account.userAvatarAlt")}
-                    className="h-16 w-16 shrink-0 rounded-2xl object-cover"
-                    src={userImage}
-                  />
-                ) : (
-                  <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-muted text-lg font-semibold text-foreground">
-                    {initials || "SW"}
-                  </div>
-                )}
-                <div className="min-w-0">
-                  <div className="truncate text-base font-semibold text-foreground">
+          <div className="space-y-6">
+            <MeGroup>
+              <button
+                className={cn(rowClass, "gap-4 py-4")}
+                onClick={() => setActivePanel("account")}
+                type="button"
+              >
+                <MobileMeAvatar className="size-14 text-lg" user={user} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-lg font-semibold text-foreground">
                     {userName || t("account.sourceweftUser")}
-                  </div>
-                  <div className="mt-1 truncate text-xs text-muted-foreground">
+                  </span>
+                  <span className="mt-0.5 block truncate text-[13px] text-muted-foreground">
                     {userEmail || t("account.signedIn")}
-                  </div>
+                  </span>
                   {teamName ? (
-                    <div className="mt-2 inline-flex max-w-full rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground">
+                    <span className="mt-1.5 inline-flex max-w-full rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
                       <span className="truncate">{teamName}</span>
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-
-            {panelItems
-              .filter((item) =>
-                isSettingsTabAvailable(
-                  item.key,
-                  billingAvailable,
-                  purchasesAllowed,
-                ),
-              )
-              .map((item) => {
-                const Icon = item.icon;
-                return (
-                  <button
-                    className="flex w-full items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-3 text-left transition-colors hover:bg-accent"
-                    key={item.key}
-                    onClick={() => setActivePanel(item.key)}
-                    type="button"
-                  >
-                    <span className="flex min-w-0 items-center gap-3">
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                        <Icon className="h-4 w-4" />
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm font-medium text-foreground">
-                          {t(`mobileMe.panels.${item.key}.label`)}
-                        </span>
-                        <span className="block truncate text-xs text-muted-foreground">
-                          {t(`mobileMe.panels.${item.key}.description`)}
-                        </span>
-                      </span>
                     </span>
-                    <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  </button>
-                );
-              })}
-            <button
-              className="flex w-full items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-3 text-left transition-colors hover:bg-accent"
-              onClick={openObservability}
-              type="button"
-            >
-              <span className="flex min-w-0 items-center gap-3">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                  <Activity className="h-4 w-4" />
+                  ) : null}
                 </span>
-                <span className="min-w-0">
-                  <span className="block truncate text-sm font-medium text-foreground">
-                    {t("common.observe")}
-                  </span>
-                  <span className="block truncate text-xs text-muted-foreground">
-                    {t("mobileMe.observeDescription")}
-                  </span>
-                </span>
-              </span>
-              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-            </button>
-            <button
-              className="flex w-full items-center justify-between gap-3 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-3 text-left text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={isSigningOut}
-              onClick={() => void handleSignOut()}
-              type="button"
-            >
-              <span className="flex min-w-0 items-center gap-3">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-destructive/10 text-destructive">
-                  <LogOut className="h-4 w-4" />
-                </span>
-                <span className="min-w-0">
-                  <span className="block truncate text-sm font-medium">
-                    {isSigningOut
-                      ? t("mobileMe.signingOut")
-                      : t("mobileMe.signOut")}
-                  </span>
-                  <span className="block truncate text-xs text-destructive/70">
-                    {t("mobileMe.endSession")}
-                  </span>
-                </span>
-              </span>
-            </button>
-          </div>
-        ) : null}
+                <ChevronRight className="size-4 shrink-0 text-muted-foreground/70" />
+              </button>
+            </MeGroup>
 
-        {activePanel ? (
-          <div className="min-w-0 rounded-xl border border-border bg-card p-4">
+            {panelGroups.map((group, index) => {
+              const items = group.filter((item) => available(item.key));
+              if (items.length === 0) return null;
+              return (
+                <MeGroup key={index}>
+                  {items.map((item) => (
+                    <button
+                      className={rowClass}
+                      key={item.key}
+                      onClick={() => setActivePanel(item.key)}
+                      type="button"
+                    >
+                      <MeRowContent
+                        icon={item.icon}
+                        label={t(`mobileMe.panels.${item.key}.label`)}
+                        tint={item.tint}
+                      />
+                    </button>
+                  ))}
+                </MeGroup>
+              );
+            })}
+
+            <MeGroup>
+              <Link
+                className={rowClass}
+                href="/dashboard/scheduled"
+                onClick={openMain}
+              >
+                <MeRowContent
+                  icon={CalendarClock}
+                  label={t("nav.scheduled")}
+                  tint="bg-orange-500"
+                />
+              </Link>
+              <Link
+                className={rowClass}
+                href="/dashboard/assistant"
+                onClick={openMain}
+              >
+                <MeRowContent
+                  icon={ConciergeBell}
+                  label={t("nav.assistant")}
+                  tint="bg-violet-500"
+                />
+              </Link>
+              <button
+                className={rowClass}
+                onClick={openObservability}
+                type="button"
+              >
+                <MeRowContent
+                  icon={Activity}
+                  label={t("common.observe")}
+                  tint="bg-rose-500"
+                />
+              </button>
+              {available("about") ? (
+                <button
+                  className={rowClass}
+                  onClick={() => setActivePanel("about")}
+                  type="button"
+                >
+                  <MeRowContent
+                    icon={Info}
+                    label={t("mobileMe.panels.about.label")}
+                    tint="bg-zinc-500"
+                  />
+                </button>
+              ) : null}
+            </MeGroup>
+
+            <MeGroup>
+              <button
+                className={cn(
+                  rowClass,
+                  "justify-center text-[15px] font-medium text-destructive disabled:opacity-60",
+                )}
+                disabled={isSigningOut}
+                onClick={() => void handleSignOut()}
+                type="button"
+              >
+                {isSigningOut
+                  ? t("mobileMe.signingOut")
+                  : t("mobileMe.signOut")}
+              </button>
+            </MeGroup>
+          </div>
+        ) : (
+          // No card around the panel: the panels group their own content, so
+          // wrapping them again would nest cards. `data-settings-surface`
+          // lets a panel hide its own title, which the header above repeats.
+          <div className="min-w-0" data-settings-surface="page">
             {activePanel === "account" ? (
               <AccountPanel
                 initials={initials}
+                layout="page"
                 userEmail={userEmail}
                 userImage={userImage}
                 userName={userName}
@@ -272,7 +334,7 @@ export function DashboardMobileMe() {
             {activePanel === "approvals" ? <TrustRulesPanel /> : null}
             {activePanel === "about" ? <AboutPanel /> : null}
           </div>
-        ) : null}
+        )}
       </div>
     </main>
   );

@@ -246,7 +246,8 @@ export function TeamPanel({
       {/* ── Team ── */}
       <div className="pb-7 pt-1">
         <div className="mb-4 flex items-center justify-between gap-3">
-          <p className="text-base font-semibold text-foreground">
+          {/* The phone Me page already titles this panel in its header. */}
+          <p className="text-base font-semibold text-foreground in-data-[settings-surface=page]:hidden">
             {t("team.title")}
           </p>
           {teamCreationAvailable ? (
@@ -381,6 +382,7 @@ export function TeamPanel({
                         </td>
                         <td className="px-4 py-2.5 text-right">
                           <Button
+                            className="in-data-[settings-surface=page]:size-9"
                             disabled={
                               removingMemberId === m.id ||
                               m.role === "owner" ||
@@ -428,13 +430,16 @@ export function TeamPanel({
                     )}
                     key={inv.id}
                   >
-                    <div>
-                      <p className="text-sm text-foreground">{inv.email}</p>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm text-foreground">
+                        {inv.email}
+                      </p>
                       <p className="mt-0.5 text-xs capitalize text-muted-foreground">
                         {inv.role}
                       </p>
                     </div>
                     <Button
+                      className="in-data-[settings-surface=page]:h-9"
                       disabled={revokingId === inv.id}
                       onClick={() => void handleRevoke(inv.id)}
                       size="xs"

@@ -8,6 +8,7 @@ import {
   maxChannelVersion,
 } from "@langchain/langgraph-checkpoint";
 import { createIsolatedTestDatabase } from "../test/isolated-database";
+import { setUpCheckpointSchema } from "./chat-checkpointer";
 import {
   UniqueVersionPostgresSaver,
   nextUniqueCheckpointVersion,
@@ -88,3 +89,36 @@ test("PostgreSQL branches from one checkpoint retain their own messages instead 
     ["base"],
   );
 });
+
+test("processes that set the checkpoint schema up at the same time all succeed", async () => {
+  // API, worker and scheduler each reach setup on their first chat call. Without
+  // the advisory lock the slower ones fail on the duplicate migration row.
+  const schema = "langgraph_setup_race";
+  const pools = Array.from(
+    { length: 6 },
+    () => new Pool({ connectionString: isolated.url }),
+  );
+  try {
+    await Promise.all(
+      pools.map((pool) =>
+        setUpCheckpointSchema(
+          new UniqueVersionPostgresSaver(pool, undefined, { schema }),
+          pool,
+        ),
+      ),
+    );
+    const applied = await pools[0]!.query(
+      `select v, count(*)::int as n from "${schema}".checkpoint_migrations group by v order by v`,
+    );
+    assert.ok(applied.rows.length > 0);
+    assert.ok(applied.rows.every((row) => row.n === 1));
+    // The column the 1.1 saver writes exists after setup.
+    const column = await pools[0]!.query(
+      `select 1 from information_schema.columns where table_schema = $1 and table_name = 'checkpoint_writes' and column_name = 'task_path'`,
+      [schema],
+    );
+    assert.equal(column.rowCount, 1);
+  } finally {
+    await Promise.all(pools.map((pool) => pool.end()));
+  }
+}, 60_000);

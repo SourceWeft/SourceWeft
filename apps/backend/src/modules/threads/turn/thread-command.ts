@@ -119,9 +119,13 @@ export async function resolveThreadCommand(input: {
   }
 
   const capabilityCommand = await resolveCapabilityCommand(input.command.name);
-  const capabilityToolCommand = await resolveCapabilityToolCommandWorkflow(
-    input.command.name,
-  );
+  // A command the composer sent as a skill is never a tool command, even when
+  // the skill's slug is also a tool command's alias (a skill named `quiz` or
+  // `table`, say): the user picked the skill.
+  const capabilityToolCommand =
+    input.command.kind === "skill"
+      ? null
+      : await resolveCapabilityToolCommandWorkflow(input.command.name);
   const toolName =
     capabilityToolCommand?.toolName ??
     resolveToolCommandName(input.command.name);

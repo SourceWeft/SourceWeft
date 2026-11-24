@@ -6,6 +6,7 @@ vi.mock("dotenv/config", () => ({}));
 
 const NAMES = [
   "AUTH_APPLE_APP_BUNDLE_ID",
+  "AUTH_APPLE_SERVICES_ID",
   "AUTH_APPLE_TEAM_ID",
   "AUTH_APPLE_KEY_ID",
   "AUTH_APPLE_PRIVATE_KEY",
@@ -41,6 +42,7 @@ function setKey(privateKey = ecKey) {
 test("Sign in with Apple is off and keyless by default", async () => {
   const { config } = await import("./config");
   assert.equal(config.auth.appleAppBundleId, "");
+  assert.equal(config.auth.appleServicesId, "");
   assert.equal(config.auth.appleTeamId, "");
   assert.equal(config.auth.appleKeyId, "");
   assert.equal(config.auth.applePrivateKey, "");
@@ -114,4 +116,43 @@ test("the private key never appears in a configuration error", async () => {
     assert.ok(!error.message.includes("secret-material"));
     return true;
   });
+});
+
+test("a Services ID with the key turns web Sign in with Apple on, with or without the iOS app", async () => {
+  vi.stubEnv("AUTH_APPLE_SERVICES_ID", " com.sourceweft.web ");
+  setKey();
+  let { config } = await import("./config");
+  assert.equal(config.auth.appleServicesId, "com.sourceweft.web");
+  assert.equal(config.auth.appleAppBundleId, "");
+  assert.equal(config.auth.appleKeyId, "KEY1234567");
+
+  vi.resetModules();
+  vi.stubEnv("AUTH_APPLE_APP_BUNDLE_ID", "nicelab.sourceweft.mobile");
+  ({ config } = await import("./config"));
+  assert.equal(config.auth.appleServicesId, "com.sourceweft.web");
+  assert.equal(config.auth.appleAppBundleId, "nicelab.sourceweft.mobile");
+});
+
+test("a Services ID without the key fails loading and names what is missing", async () => {
+  vi.stubEnv("AUTH_APPLE_SERVICES_ID", "com.sourceweft.web");
+  await assert.rejects(
+    import("./config"),
+    /AUTH_APPLE_SERVICES_ID is set but AUTH_APPLE_TEAM_ID, AUTH_APPLE_KEY_ID, AUTH_APPLE_PRIVATE_KEY are missing/,
+  );
+
+  vi.resetModules();
+  vi.stubEnv("AUTH_APPLE_APP_BUNDLE_ID", "nicelab.sourceweft.mobile");
+  setKey();
+  vi.stubEnv("AUTH_APPLE_PRIVATE_KEY", "");
+  await assert.rejects(
+    import("./config"),
+    /AUTH_APPLE_APP_BUNDLE_ID and AUTH_APPLE_SERVICES_ID are set but AUTH_APPLE_PRIVATE_KEY is missing/,
+  );
+});
+
+test("the Services ID cannot be the iOS bundle id", async () => {
+  vi.stubEnv("AUTH_APPLE_APP_BUNDLE_ID", "nicelab.sourceweft.mobile");
+  vi.stubEnv("AUTH_APPLE_SERVICES_ID", "nicelab.sourceweft.mobile");
+  setKey();
+  await assert.rejects(import("./config"), /not the iOS app's bundle id/);
 });

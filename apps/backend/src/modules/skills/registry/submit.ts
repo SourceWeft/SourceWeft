@@ -8,7 +8,7 @@ import { compareCommits } from "../../market/parser/github";
 import { grantSkillAccess } from "../repository";
 import { parseGithubStoragePointer } from "../storage/source-pointer";
 import { RegistrySubmissionError } from "./errors";
-import { triageRegistrySubmission } from "./guard";
+import { describeRefusal, triageRegistrySubmission } from "./guard";
 import {
   getRegistrySlugForSource,
   getRegistrySkillForSubmission,
@@ -172,6 +172,13 @@ export async function writeSubmittedSkill(input: {
       submitterId: input.userId,
       scan: analyzed.scan,
     });
+    if (decision.outcome === "refused") {
+      throw new RegistrySubmissionError(
+        "REGISTRY_SKILL_REFUSED",
+        describeRefusal(decision.reasons),
+        { reasons: decision.reasons },
+      );
+    }
 
     const storagePointer = `github:${owner}/${repo}@${commitSha}${
       analyzed.repoSubpath ? `#${analyzed.repoSubpath}` : ""

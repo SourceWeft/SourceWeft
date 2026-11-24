@@ -15,6 +15,7 @@ import { apiKey } from "@better-auth/api-key";
 import { billingOrganizationHooks } from "../../billing-host/bindings";
 import { oauthProvider } from "@better-auth/oauth-provider";
 import { passkey } from "@better-auth/passkey";
+import { buildSsoPlugins } from "../enterprise-sso";
 import { APIError } from "better-auth/api";
 import { config } from "../../shared/config";
 import { database } from "@sourceweft/db";
@@ -28,7 +29,10 @@ import {
 } from "./auth-error-i18n";
 import { resolveMailLocale } from "./mail-locale";
 import { mailDeliveryConfigured } from "../mail/delivery";
-import { buildSocialProviders } from "./social-providers";
+import {
+  authTrustedOrigins,
+  buildSocialProviders,
+} from "./social-providers";
 import { createAuthMiddleware } from "better-auth/api";
 import { serializeAuthLogArgs } from "./auth-log-args";
 import {
@@ -173,7 +177,7 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}) {
       oauthAuthServerConfig: true,
     },
     database,
-    trustedOrigins: config.auth.trustedOrigins,
+    trustedOrigins: authTrustedOrigins(config.auth),
     socialProviders,
     user: {
       additionalFields: {
@@ -203,11 +207,50 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}) {
           ? {
               async beforeDelete(user) {
                 await assertUserHardDeleteAllowed(user.id);
+                // Hand this user's team SSO providers to a surviving owner/admin
+                // before the `ssoProvider.userId` ON DELETE CASCADE would take
+                // the team's identity source down with the departing account.
+                // Runs after the sole-owner guard, so a team whose only owner is
+                // leaving has already blocked the delete.
+                const { reassignSsoProvidersOnUserDelete } = await import(
+                  "../enterprise-sso/lifecycle"
+                );
+                await reassignSsoProvidersOnUserDelete(user.id);
                 // Before any data is erased: a failed revocation must leave the
                 // account exactly as it was, so deleting can be retried.
                 const { revokeAppleTokensBeforeDelete } =
                   await import("./apple-account-tokens");
                 await revokeAppleTokensBeforeDelete(user.id);
+                // Connectors in the user's personal organization would outlive
+                // the account with live provider grants (a Composio-brokered
+                // Gmail connection can read the whole mailbox), because nothing
+                // cascades from the user to them. Revoke every grant at its
+                // provider, then delete the connectors and their indexed
+                // content; a failed revocation aborts here with nothing local
+                // deleted, so deleting can be retried. Connectors the user added
+                // to team workspaces stay: the team shares and manages them.
+                const { workspaceService } = await import("../workspace");
+                const personal =
+                  await workspaceService.findPersonalOrganizationMembershipByUser(
+                    user.id,
+                  );
+                if (personal) {
+                  const { connectorTeamDataRemoval } = await import(
+                    "../connectors"
+                  );
+                  try {
+                    await connectorTeamDataRemoval.removeTeams([
+                      personal.organizationId,
+                    ]);
+                  } catch (error) {
+                    logger.error("connector_user_cleanup_failed", {
+                      userId: user.id,
+                      error:
+                        error instanceof Error ? error.message : String(error),
+                    });
+                    throw error;
+                  }
+                }
                 // Artifact page records carry the owner as plain text (the auth
                 // tables live outside the drizzle schema), so a viewer's own
                 // records and consents are erased here rather than by FK. This
@@ -219,6 +262,19 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}) {
                   await artifactRecordsService.deleteUserData(user.id);
                 } catch (error) {
                   logger.error("artifact_record_user_cleanup_failed", {
+                    userId: user.id,
+                    error:
+                      error instanceof Error ? error.message : String(error),
+                  });
+                  throw error;
+                }
+                // Same reason: notifications name their owner as plain text.
+                const { deleteUserNotifications } =
+                  await import("../notifications");
+                try {
+                  await deleteUserNotifications(user.id);
+                } catch (error) {
+                  logger.error("notification_user_cleanup_failed", {
                     userId: user.id,
                     error:
                       error instanceof Error ? error.message : String(error),
@@ -336,6 +392,31 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}) {
         "/api/auth/organization/invite-member": {
           window: 60,
           max: 10,
+        },
+        // better-auth matches a custom rule's key against the request path
+        // with the `/api/auth` base path already stripped (confirmed against
+        // better-auth@1.7.7's `resolveRateLimitConfig`/`normalizePathname`),
+        // so these three are keyed without it — unlike the (pre-existing,
+        // and as a result never-matching) `/api/auth/...` keys above. Without
+        // its own rule, `/sign-in/sso` would fall under the built-in
+        // `/sign-in/*` special rule (3 per 10s), too tight for a page that
+        // retries IdP discovery.
+        //
+        // `/sign-in/sso` is keyed by client IP, and a whole office shares one
+        // egress IP; the endpoint itself only computes/returns a redirect URL
+        // (no credential check, no IdP round-trip), so a much higher ceiling
+        // still blocks a real flood without punishing a shared-IP office.
+        "/sign-in/sso": {
+          window: 60,
+          max: 100,
+        },
+        "/sso/register": {
+          window: 60,
+          max: 10,
+        },
+        "/sso/verify-domain": {
+          window: 60,
+          max: 6,
         },
       },
     },
@@ -462,12 +543,34 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}) {
                     organization.id,
                   );
                 },
-                async beforeDeleteOrganization({ organization }) {
+                async beforeDeleteOrganization({ organization, user }) {
                   if (isPersonalOrganizationMetadata(organization.metadata)) {
                     throw new APIError("BAD_REQUEST", {
                       message: "Personal workspace cannot be deleted.",
                     });
                   }
+                  // Revoke every connector grant of the team at its provider,
+                  // then delete its connectors and their indexed content:
+                  // workspaces are not foreign-keyed to the organization, so
+                  // nothing else removes them and the grants would stay live.
+                  // Runs first because it is the step that can fail (a provider
+                  // error aborts the delete with nothing local changed).
+                  const { connectorTeamDataRemoval } = await import(
+                    "../connectors"
+                  );
+                  await connectorTeamDataRemoval.removeTeams([organization.id]);
+                  // Remove the team's SSO providers and their linked `account`
+                  // rows: otherwise a verified provider keeps blocking its domain
+                  // for every other team, and no one can delete it once its org
+                  // is gone. Runs here (before the org row goes) so the audit
+                  // sink still exists.
+                  const { deleteSsoProvidersForOrganization } = await import(
+                    "../enterprise-sso/lifecycle"
+                  );
+                  await deleteSsoProvidersForOrganization({
+                    organizationId: organization.id,
+                    actorUserId: user?.id ?? null,
+                  });
                 },
                 async afterCreateOrganization({ organization, user }) {
                   const { onboardingService } = await import("../onboarding");
@@ -712,6 +815,9 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}) {
           config.auth.extensionEnabled ? [config.auth.extensionClientId] : [],
         ),
       }),
+      // Registered outside the isRuntimeMode branching below so that
+      // `auth migrate` (mode: "migration") still creates its table.
+      ...buildSsoPlugins(),
       // Localizes better-auth error messages for the request locale. Registered
       // last so its `after` hook runs after every other plugin's and can
       // translate errors surfaced by any of them (design §16, D11).
@@ -739,6 +845,25 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}) {
               create: {
                 after: async (user) => {
                   logAuthUserCreated(user);
+                },
+              },
+            },
+            // Apple refresh tokens are sealed with the client that issued
+            // them, so account deletion can revoke them (see
+            // protectAppleAccountWrite).
+            account: {
+              create: {
+                before: async (account, context) => {
+                  const { protectAppleAccountWrite } =
+                    await import("./apple-account-tokens");
+                  protectAppleAccountWrite(account, context);
+                },
+              },
+              update: {
+                before: async (account, context) => {
+                  const { protectAppleAccountWrite } =
+                    await import("./apple-account-tokens");
+                  protectAppleAccountWrite(account, context);
                 },
               },
             },

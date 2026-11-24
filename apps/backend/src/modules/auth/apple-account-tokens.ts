@@ -11,17 +11,24 @@ import {
 } from "./apple-tokens";
 
 /**
- * Apple refresh tokens for accounts created with native Sign in with Apple.
+ * Apple refresh tokens kept so that deleting an account can revoke the app's
+ * access to the person's Apple ID (App Store guideline 5.1.1(v)).
  *
- * Better Auth's ID-token sign-in stores no refresh token, but revoking the
- * app's access when an account is deleted needs one. After each Apple sign-in
- * the app sends its authorization code; it is exchanged here and the refresh
- * token is kept on the user's `apple` row in Better Auth's `account` table.
- * A later sign-in does not clear it: Better Auth skips token fields it was not
- * given.
+ * Two sign-ins produce them:
+ * - Native iOS: Better Auth's ID-token sign-in stores no refresh token, so the
+ *   app sends its authorization code afterwards; it is exchanged here, as the
+ *   iOS app's bundle id.
+ * - Web: Better Auth's redirect flow exchanges the code itself, as the web
+ *   Services ID, and writes the refresh token into the account row; the
+ *   account database hook ({@link protectAppleAccountWrite}) encrypts it on
+ *   the way in.
  *
- * The token is a credential of the person, not of a team, so it is encrypted
- * with the deployment master secret (`encryptSecret`) rather than a team key.
+ * Either way the token lands on the user's `apple` row in Better Auth's
+ * `account` table, encrypted with the deployment master secret
+ * (`encryptSecret`) because it is a credential of the person, not of a team.
+ * Apple only revokes a token as the client it was issued to, so the stored
+ * value records that client next to the token. Values written before web
+ * sign-in existed are the bare token and were all issued to the bundle id.
  */
 
 type AppleAccountRow = {
@@ -30,19 +37,65 @@ type AppleAccountRow = {
   refreshToken: string | null;
 };
 
-export function appleKeySettings(): AppleKeySettings | null {
+type AppleKey = Omit<AppleKeySettings, "clientId">;
+
+/** The Sign in with Apple key, or null when this server has none. */
+function appleKey(): AppleKey | null {
   const auth = config.auth;
-  if (!auth.appleAppBundleId) return null;
+  if (!auth.appleTeamId || !auth.appleKeyId || !auth.applePrivateKey) {
+    return null;
+  }
   return {
-    appBundleId: auth.appleAppBundleId,
     teamId: auth.appleTeamId,
     keyId: auth.appleKeyId,
     privateKey: auth.applePrivateKey,
   };
 }
 
+/** Settings for calls made as the iOS app, or null when it is not set up. */
+export function appleKeySettings(): AppleKeySettings | null {
+  const key = appleKey();
+  if (!key || !config.auth.appleAppBundleId) return null;
+  return { ...key, clientId: config.auth.appleAppBundleId };
+}
+
 function encryptionSecret() {
   return config.modelGatewayEncryptionSecret;
+}
+
+type StoredAppleToken = { clientId: string; refreshToken: string };
+
+/** The encrypted column value for a refresh token issued to `clientId`. */
+export function sealAppleRefreshToken(token: StoredAppleToken) {
+  return encryptSecret(
+    JSON.stringify({ clientId: token.clientId, token: token.refreshToken }),
+    encryptionSecret(),
+  );
+}
+
+/**
+ * Reads a stored refresh token and the client it was issued to. Apple refresh
+ * tokens never start with `{`, so a bare token is a value from before the
+ * client was recorded, which only the iOS app could have written.
+ */
+export function openAppleRefreshToken(
+  stored: string,
+  legacyClientId: string,
+): StoredAppleToken {
+  const plain = decryptSecret(stored, encryptionSecret());
+  if (!plain.startsWith("{")) {
+    return { clientId: legacyClientId, refreshToken: plain };
+  }
+  const parsed = JSON.parse(plain) as { clientId?: unknown; token?: unknown };
+  if (
+    typeof parsed.clientId !== "string" ||
+    !parsed.clientId ||
+    typeof parsed.token !== "string" ||
+    !parsed.token
+  ) {
+    throw new Error("Stored Apple refresh token is malformed.");
+  }
+  return { clientId: parsed.clientId, refreshToken: parsed.token };
 }
 
 async function appleAccountsOf(userId: string) {
@@ -98,7 +151,10 @@ export async function storeAppleRefreshToken(
 
   await database.query(
     `update "account" set "refreshToken" = $1, "updatedAt" = now() where id = $2`,
-    [encryptSecret(refreshToken, encryptionSecret()), account.id],
+    [
+      sealAppleRefreshToken({ clientId: settings.clientId, refreshToken }),
+      account.id,
+    ],
   );
   return { kind: "stored" };
 }
@@ -115,8 +171,8 @@ export async function revokeAppleTokensBeforeDelete(
   const accounts = await appleAccountsOf(userId);
   if (accounts.length === 0) return;
 
-  const settings = appleKeySettings();
-  if (!settings) {
+  const key = appleKey();
+  if (!key) {
     logger.error("apple_token_revocation_unconfigured", { userId });
     throw new APIError("SERVICE_UNAVAILABLE", {
       message:
@@ -127,15 +183,15 @@ export async function revokeAppleTokensBeforeDelete(
   for (const account of accounts) {
     if (!account.refreshToken) {
       throw new APIError("BAD_REQUEST", {
-        message:
-          "Sign in with Apple again in the iOS app, then delete your account.",
+        message: "Sign in with Apple again, then delete your account.",
       });
     }
     try {
-      await revoke(
-        settings,
-        decryptSecret(account.refreshToken, encryptionSecret()),
+      const { clientId, refreshToken } = openAppleRefreshToken(
+        account.refreshToken,
+        config.auth.appleAppBundleId,
       );
+      await revoke({ ...key, clientId }, refreshToken);
     } catch (error) {
       // invalid_grant: the token was already revoked (for example from the
       // person's Apple ID settings), which is what deletion needs.
@@ -157,4 +213,37 @@ export async function revokeAppleTokensBeforeDelete(
       });
     }
   }
+}
+
+/**
+ * Better Auth database hook for every write to an `account` row, applied in
+ * place before the row is written. Only `apple` rows are touched:
+ * - A refresh token from the web redirect flow (the OAuth callback) was issued
+ *   to the web Services ID; it is sealed with that client before it is stored.
+ * - A refresh token written anywhere else did not come from Apple to this
+ *   server: the ID-token sign-in accepts one in its request body. It is
+ *   dropped, so it can never replace the token deletion revokes.
+ * - Apple access tokens open no API this server uses, so they are not kept.
+ */
+export function protectAppleAccountWrite(
+  data: Record<string, unknown>,
+  context: { path?: string } | null | undefined,
+) {
+  if (data.providerId !== "apple") return;
+  delete data.accessToken;
+  const refreshToken = data.refreshToken;
+  delete data.refreshToken;
+  const servicesId = config.auth.appleServicesId;
+  if (
+    typeof refreshToken !== "string" ||
+    !refreshToken ||
+    !servicesId ||
+    !context?.path?.startsWith("/callback/")
+  ) {
+    return;
+  }
+  data.refreshToken = sealAppleRefreshToken({
+    clientId: servicesId,
+    refreshToken,
+  });
 }

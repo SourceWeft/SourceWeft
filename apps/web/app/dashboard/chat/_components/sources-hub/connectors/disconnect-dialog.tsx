@@ -18,6 +18,7 @@ import { getConnectorDisplayName } from "./components";
 import type { ConnectorItem } from "./types";
 
 export function ConnectorDisconnectDialog({
+  broker,
   connector,
   hardDelete,
   isBusy,
@@ -25,6 +26,8 @@ export function ConnectorDisconnectDialog({
   onHardDeleteChange,
   onOpenChange,
 }: {
+  /** The connector type's authorization broker, from its manifest, if any. */
+  broker: string | null;
   connector: ConnectorItem | null;
   hardDelete: boolean;
   isBusy: boolean;
@@ -109,7 +112,11 @@ export function ConnectorDisconnectDialog({
             </span>
           </button>
           <p className="text-xs text-muted-foreground">
-            {t("connectors.disconnectNote")}
+            {/* Deleting a Composio-brokered connector deletes its Composio
+                connection; a standard OAuth grant stays with the provider. */}
+            {broker === "composio"
+              ? t("connectors.disconnectNoteComposio")
+              : t("connectors.disconnectNote")}
           </p>
         </div>
         <AlertDialogFooter>

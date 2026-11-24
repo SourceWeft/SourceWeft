@@ -179,3 +179,42 @@ test("collection slugs are read one per line or comma-separated, in order, once 
   ]);
   expect(parseCollectionSlugs("  \n ")).toEqual([]);
 });
+
+test("a long queue is read a page at a time: the heading counts all of it and Load more adds the next page", async () => {
+  admin.getSkillReviewVersion.mockResolvedValue({ skillContent: null });
+  const second = { ...entry, skillId: "skill_2", skillVersionId: "ver_2", displayName: "XLSX" };
+  admin.listSkillReviewQueue
+    .mockResolvedValueOnce({ items: [entry], nextCursor: "page-2", total: 38126 })
+    .mockResolvedValueOnce({ items: [entry, second], nextCursor: null, total: 38126 });
+  ({ container } = await mountWithIntl(<SkillReviewQueue />));
+  await flush(2);
+
+  expect(container.querySelector("h1")?.textContent).toContain("38126");
+  expect(container.textContent).toContain("Showing 1 of 38126");
+  expect(rows()).toHaveLength(1);
+
+  await act(async () => button("Load more")!.click());
+  await flush(2);
+  expect(admin.listSkillReviewQueue).toHaveBeenLastCalledWith("page-2");
+  // An entry both pages carry is shown once.
+  expect(rows().map((row) => row.textContent)).toHaveLength(2);
+  expect(button("Load more")).toBeUndefined();
+});
+
+test("deciding the last loaded skill while more are waiting reads the queue again", async () => {
+  admin.getSkillReviewVersion.mockResolvedValue({ skillContent: null });
+  admin.publishSkillSubmission.mockResolvedValue({});
+  const second = { ...entry, skillId: "skill_2", skillVersionId: "ver_2", displayName: "XLSX" };
+  admin.listSkillReviewQueue
+    .mockResolvedValueOnce({ items: [entry], nextCursor: "page-2", total: 2 })
+    .mockResolvedValueOnce({ items: [second], nextCursor: null, total: 1 });
+  ({ container } = await mountWithIntl(<SkillReviewQueue />));
+  await flush(2);
+
+  await act(async () => button("Approve and publish")!.click());
+  await flush(2);
+  expect(admin.listSkillReviewQueue).toHaveBeenCalledTimes(2);
+  expect(rows()).toHaveLength(1);
+  expect(detail()?.textContent).toContain("XLSX");
+  expect(container.querySelector("h1")?.textContent).toContain("1");
+});

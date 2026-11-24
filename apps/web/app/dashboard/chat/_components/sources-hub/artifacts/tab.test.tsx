@@ -75,3 +75,18 @@ test("the marker sits beside the Public badge without replacing it", async () =>
   );
   expect(container.textContent).toContain(label);
 });
+
+test("the status badge is worded, not the raw status, and a failed one stands out", async () => {
+  const statuses = en.dashboardSourcesHub.artifacts.status;
+  const { container } = await render([
+    item({ id: "a", status: "running", completedAt: null }),
+    item({ id: "b", status: "failed" }),
+  ]);
+  const rows = [...container.querySelectorAll("button")];
+  expect(rows[0]!.textContent).toContain(statuses.running);
+  expect(rows[0]!.textContent).not.toContain("running");
+  const failed = [...rows[1]!.querySelectorAll("span")].find(
+    (node) => node.textContent === statuses.failed,
+  );
+  expect(failed?.className).toContain("amber");
+});

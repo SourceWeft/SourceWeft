@@ -39,6 +39,10 @@ export type ConnectorCatalogItem = {
   /** Hidden from the catalog until the backend reports the type as available.
    * Set for connectors that depend on backend rollout registration. */
   requiresBackendRegistration?: boolean;
+  /** Add-only connector: there is no account to authorize, and each feed is
+   * its own connector, so the card never reads as connected and its action
+   * adds another one (`feed_url` asks for a feed URL). */
+  addMode?: "feed_url";
   isIndexable: boolean;
   supportsPeriodicSync: boolean;
   supportsActions: boolean;
@@ -68,6 +72,27 @@ export type ConnectorCatalogStatus = {
 export type ConnectorReadinessState = {
   reason: string;
   message: string;
+};
+
+/** Outcome of the pre-create feed check: the readiness verdict plus, when the
+ * feed was read, its title and item count (both from the check metadata). */
+export type FeedCheckResult = ConnectorReadinessState & {
+  ready: boolean;
+  title: string | null;
+  itemCount: number | null;
+};
+
+/**
+ * Per-connector-type facts derived from its manifest (see
+ * `connectorsClient.listManifests`): whether the adapter declares any sync
+ * resources, and, for a brokered adapter (`auth.kind === "brokered"`), which
+ * broker fronts its authorization. A connector type absent from the manifest
+ * response, or whose manifest has not loaded yet, has no entry here; callers
+ * treat a missing entry the same as today's (indexable, non-brokered) shape.
+ */
+export type ConnectorManifestInfo = {
+  supportsIndexing: boolean;
+  broker: string | null;
 };
 
 export type ConnectorActivityKindFilter = "all" | "sync" | "action" | "webhook";

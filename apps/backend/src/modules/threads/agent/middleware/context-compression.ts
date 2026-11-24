@@ -1,11 +1,11 @@
 import type { BaseLanguageModel } from "@langchain/core/language_models/base";
 import {
   AIMessage,
-  HumanMessage,
   ToolMessage,
   type BaseMessage,
 } from "@langchain/core/messages";
 import type { LangChainModelExecutionConfig } from "@sourceweft/model-gateway";
+import { isUserRequestMessage } from "./pinned-skill-message";
 import {
   ClearToolUsesEdit,
   contextEditingMiddleware,
@@ -575,20 +575,16 @@ function estimateSingleMessageTokens(message: BaseMessage) {
   return estimateSourceWeftMessageTokens([message]);
 }
 
+// Pinned skill instructions are HumanMessages that follow the user's message;
+// the turn starts at what the user wrote, so they stay inside the current turn.
 function latestHumanMessage(messages: BaseMessage[]) {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (message && HumanMessage.isInstance(message)) {
-      return message;
-    }
-  }
-  return null;
+  const index = latestHumanMessageIndex(messages);
+  return index >= 0 ? (messages[index] ?? null) : null;
 }
 
 function latestHumanMessageIndex(messages: BaseMessage[]) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (message && HumanMessage.isInstance(message)) {
+    if (isUserRequestMessage(messages[index])) {
       return index;
     }
   }

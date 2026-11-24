@@ -1053,6 +1053,12 @@ type MessageListProps = {
     assistantMessageId: string;
     branchIndex: number;
   }) => void;
+  /**
+   * The viewer can never start a turn here (a workspace assistant's own
+   * conversation): the Edit prompt pencil is not rendered at all, rather
+   * than shown disabled as it is while an ordinary chat is busy.
+   */
+  readOnly?: boolean;
   workspaceId?: string | null;
 };
 
@@ -1219,6 +1225,7 @@ type MessageGroupItemProps = {
   onCitationClick?: MessageListProps["onCitationClick"];
   onRefreshLatest?: MessageListProps["onRefreshLatest"];
   onRestartFromMessage?: MessageListProps["onRestartFromMessage"];
+  readOnly: boolean;
   onSourcePreview?: MessageListProps["onSourcePreview"];
   onOpenNote?: (note: SavedNoteRef) => void;
   onNoteSaved?: (messageId: string, note: SavedNoteRef) => void;
@@ -1249,6 +1256,7 @@ const MessageGroupItem = memo(function MessageGroupItem({
   onCitationClick,
   onRefreshLatest,
   onRestartFromMessage,
+  readOnly,
   onNoteSaved,
   onOpenNote,
   savedNotes,
@@ -1480,6 +1488,7 @@ const MessageGroupItem = memo(function MessageGroupItem({
                     ) : null}
 
                     {!isAssistant &&
+                    !readOnly &&
                     isLatestUserGroup &&
                     versionIndex === activeVisibleBranchIndex &&
                     !isStreaming ? (
@@ -1585,6 +1594,7 @@ function MessageListContent({
   resolvedConfirmations = [],
   onRestartFromMessage,
   onRefreshLatest,
+  readOnly = false,
   workspaceId,
 }: MessageListProps) {
   const t = useTranslations("dashboardChatCanvas");
@@ -1788,6 +1798,7 @@ function MessageListContent({
                 onCitationClick={onCitationClick}
                 onRefreshLatest={onRefreshLatest}
                 onRestartFromMessage={onRestartFromMessage}
+                readOnly={readOnly}
                 onNoteSaved={markSaved}
                 onOpenNote={openSavedNote}
                 onSourcePreview={onSourcePreview}

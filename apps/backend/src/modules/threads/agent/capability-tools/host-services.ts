@@ -47,6 +47,7 @@ import {
   createProtectedRunReceiptServices,
 } from "../../durable/protected-agent-tool-state-repository";
 import { createRunScopedWorkBlobService } from "./work-blob-service";
+import { createGroundedArtifactServices } from "./grounded-artifact-services";
 
 type ReadyArtifactRecordInput = Parameters<typeof createReadyArtifactRecord>[0];
 type PendingArtifactRecordInput = Parameters<
@@ -423,6 +424,10 @@ export function createCapabilityAgentToolHostServices(
             filesystemBackend.backend.readRaw(filePath),
         }
       : undefined,
+    groundedArtifacts: createGroundedArtifactServices({
+      prepared,
+      runCancellation,
+    }),
     logger,
     media: {
       probeAudioDurationSeconds: (mediaInput) =>

@@ -1,4 +1,9 @@
 import type {
+  CheckConnectorConfigRequest,
+  CheckConnectorConfigResponse,
+  ConnectorSelectionBrowseResult,
+  ConnectorSelectionDescribeResult,
+  ConnectorSelectionSearchResult,
   ConnectorWebhookConfigResponse,
   CreateConnectorActionRequest,
   CreateConnectorActionResponse,
@@ -69,6 +74,40 @@ export class ConnectorsClient {
       `/v1/workspaces/${encode(workspaceId)}/connectors/${encode(connectorId)}/google-drive/picker-session`,
     );
   }
+
+  selectionBrowse(
+    workspaceId: string,
+    connectorId: string,
+    input: { containerId?: string | null; cursor?: string } = {},
+  ) {
+    return this.http.post<ConnectorSelectionBrowseResult>(
+      `/v1/workspaces/${encode(workspaceId)}/connectors/${encode(connectorId)}/selection/browse`,
+      input,
+    );
+  }
+
+  selectionSearch(
+    workspaceId: string,
+    connectorId: string,
+    input: { query: string; cursor?: string },
+  ) {
+    return this.http.post<ConnectorSelectionSearchResult>(
+      `/v1/workspaces/${encode(workspaceId)}/connectors/${encode(connectorId)}/selection/search`,
+      input,
+    );
+  }
+
+  selectionDescribe(
+    workspaceId: string,
+    connectorId: string,
+    input: { ids: string[] },
+  ) {
+    return this.http.post<ConnectorSelectionDescribeResult>(
+      `/v1/workspaces/${encode(workspaceId)}/connectors/${encode(connectorId)}/selection/describe`,
+      input,
+    );
+  }
+
   constructor(private readonly http: HttpClient) {}
 
   listManifests(workspaceId: string) {
@@ -112,6 +151,14 @@ export class ConnectorsClient {
   create(workspaceId: string, input: CreateConnectorRequest) {
     return this.http.post<CreateConnectorResponse>(
       `/v1/workspaces/${encode(workspaceId)}/connectors`,
+      input,
+    );
+  }
+
+  /** Pre-create readiness check for a configuration; creates nothing. */
+  checkConfig(workspaceId: string, input: CheckConnectorConfigRequest) {
+    return this.http.post<CheckConnectorConfigResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/connectors/check`,
       input,
     );
   }

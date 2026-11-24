@@ -22,6 +22,8 @@ import {
 } from "@sourceweft/ui-web/components/ui/scroll-area";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { trackWorkspaceCreated } from "../../lib/analytics-events";
+import { MAX_PINNED_THREADS } from "@sourceweft/contracts";
+import type { ThreadListItem } from "@sourceweft/contracts";
 import { contentClient, workspaceClient } from "../../lib/sdk";
 import { ensureDashboardWorkspace } from "../../lib/dashboard-workspace-bootstrap";
 import {
@@ -32,6 +34,7 @@ import { useDashboardChatState } from "./_components/dashboard-chat-state";
 import { DashboardTeamSwitcher } from "./_components/dashboard-team-switcher";
 import {
   DashboardHomeOverviewPanelSkeleton,
+  DashboardHomeTeamSwitcherSkeleton,
   DashboardHomeWorkspaceRailSkeleton,
 } from "../_components/route-loading-skeleton";
 
@@ -82,6 +85,18 @@ type ActivityItem = {
   badgeTone: string;
   updatedAt: string;
 };
+
+const RECENT_CHATS_LIMIT = 5;
+
+/** The most recently active chats, newest first, each once. */
+function recentChats(items: ThreadListItem[]) {
+  const activity = (item: ThreadListItem) =>
+    Date.parse(item.lastMessageAt ?? item.createdAt);
+  const unique = new Map(items.map((item) => [item.id, item]));
+  return [...unique.values()]
+    .sort((a, b) => activity(b) - activity(a))
+    .slice(0, RECENT_CHATS_LIMIT);
+}
 
 function formatRelative(value: string, t: Translate) {
   const time = new Date(value).getTime();
@@ -523,38 +538,65 @@ export default function DashboardPage() {
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(
     null,
   );
+  // The organization whose workspaces are shown or loading. The chat state
+  // can hydrate more than once for the same organization (the auth session's
+  // organization arrives after the first bootstrap); those passes must not
+  // bring the skeleton back or fetch the list again.
+  const requestedOrganizationIdRef = useRef<string | null>(null);
 
   useEffect(() => {
+    if (dashboardState.isWorkspaceHydrating) {
+      return;
+    }
+    if (!resolvedOrganizationId) {
+      requestedOrganizationIdRef.current = null;
+      setWorkspaces([]);
+      setActiveWorkspaceId(null);
+      setLoading(false);
+      return;
+    }
+    if (requestedOrganizationIdRef.current === resolvedOrganizationId) {
+      return;
+    }
+    requestedOrganizationIdRef.current = resolvedOrganizationId;
+    const organizationId = resolvedOrganizationId;
+    const isCurrent = () =>
+      requestedOrganizationIdRef.current === organizationId;
+
     async function loadWorkspaces() {
-      if (!resolvedOrganizationId) {
-        if (dashboardState.isWorkspaceHydrating) {
-          setLoading(true);
-          return;
-        }
-
-        setWorkspaces([]);
-        setActiveWorkspaceId(null);
-        setLoading(false);
-        return;
-      }
-
       setLoading(true);
 
       try {
-        const workspaceResponse = await ensureDashboardWorkspace(
-          resolvedOrganizationId,
-        );
+        const workspaceResponse =
+          await ensureDashboardWorkspace(organizationId);
 
         const withPreviews = await Promise.all(
           workspaceResponse.items.map(async (workspace: Workspace) => {
-            const [sourceResult, threadResult] = await Promise.allSettled([
-              contentClient.listSources(workspace.id, { view: "tree" }),
-              contentClient.listThreads(workspace.id, { limit: 5 }),
-            ]);
+            const [sourceResult, threadResult, pinnedResult] =
+              await Promise.allSettled([
+                contentClient.listSources(workspace.id, { view: "tree" }),
+                contentClient.listThreads(workspace.id, {
+                  limit: RECENT_CHATS_LIMIT,
+                }),
+                // The main list leaves pinned chats out; recent activity
+                // includes them.
+                contentClient.listThreads(workspace.id, {
+                  pinned: true,
+                  limit: MAX_PINNED_THREADS,
+                }),
+              ]);
             const sourceResponse =
               sourceResult.status === "fulfilled" ? sourceResult.value : null;
-            const threadResponse =
-              threadResult.status === "fulfilled" ? threadResult.value : null;
+            const threadResponse = {
+              items: recentChats([
+                ...(threadResult.status === "fulfilled"
+                  ? threadResult.value.items
+                  : []),
+                ...(pinnedResult.status === "fulfilled"
+                  ? pinnedResult.value.items
+                  : []),
+              ]),
+            };
             const sources: Source[] = (sourceResponse?.items ?? []).map(
               (source: {
                 id: string;
@@ -599,10 +641,11 @@ export default function DashboardPage() {
           }),
         );
 
+        if (!isCurrent()) {
+          return;
+        }
         setWorkspaces(withPreviews);
-        const storedWorkspaceId = getStoredDashboardWorkspaceId(
-          resolvedOrganizationId,
-        );
+        const storedWorkspaceId = getStoredDashboardWorkspaceId(organizationId);
         const resolvedWorkspace =
           withPreviews.find(
             (workspace) => workspace.id === storedWorkspaceId,
@@ -614,9 +657,14 @@ export default function DashboardPage() {
           null;
 
         setActiveWorkspaceId(resolvedWorkspace?.id ?? null);
+        setLoading(false);
       } catch {
+        if (!isCurrent()) {
+          return;
+        }
+        // Let a later pass for this organization try again.
+        requestedOrganizationIdRef.current = null;
         toast.error(t("toasts.loadFailed"));
-      } finally {
         setLoading(false);
       }
     }
@@ -773,6 +821,7 @@ export default function DashboardPage() {
           <div className="flex min-w-0 items-center gap-2 md:gap-3">
             <DashboardTeamSwitcher
               className="max-w-[48vw]"
+              fallback={<DashboardHomeTeamSwitcherSkeleton />}
               onAddTeam={() => router.push("/dashboard/settings")}
               size="sm"
             />
@@ -869,9 +918,7 @@ export default function DashboardPage() {
                 </div>
                 <div>
                   <p className="text-base font-medium text-foreground">
-                    {hasSearchQuery
-                      ? t("empty.searchTitle")
-                      : t("empty.title")}
+                    {hasSearchQuery ? t("empty.searchTitle") : t("empty.title")}
                   </p>
                   <p className="mt-2 text-sm text-muted-foreground">
                     {hasSearchQuery

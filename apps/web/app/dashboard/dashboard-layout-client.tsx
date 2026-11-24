@@ -13,7 +13,6 @@ import { ChatHubProvider } from "./chat/_components/chat-hub-context";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { SidebarProvider } from "@sourceweft/ui-web/components/ui/sidebar";
 import { DashboardChatStateProvider } from "./_components/dashboard-chat-state";
-import { DashboardMobileBottomNav } from "./_components/dashboard-mobile-bottom-nav";
 import { DashboardMobileContent } from "./_components/dashboard-mobile-content";
 import { DashboardMobileNavProvider } from "./_components/dashboard-mobile-nav-state";
 import { DashboardPageNavigation } from "./_components/dashboard-page-navigation";
@@ -22,6 +21,8 @@ import { DashboardWorkspaceLayout } from "./_components/dashboard-workspace-layo
 import { authClient } from "../../lib/auth-client";
 import { AiDataConsentGate } from "./_components/ai-data-consent-gate";
 import { isEmbedMode } from "../../lib/thread-embed-params";
+import { setMobileSessionHint } from "../../lib/mobile-app-shell";
+import { useVisibleViewportHeight } from "../../lib/visible-viewport";
 import { useIsHydrated } from "../_components/auth/use-is-hydrated";
 
 // Only chat surfaces read the registry, so marketing pages no longer pay for
@@ -69,6 +70,7 @@ export function DashboardLayoutClient({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  useVisibleViewportHeight();
   const isAuxiliaryWindow =
     pathname === "/dashboard/hub-window" ||
     pathname === "/dashboard/preview-window";
@@ -124,6 +126,11 @@ export function DashboardLayoutClient({
       console.error("Local host initialization unavailable", error),
     );
   }, [hasSession, isPending, userId, sessionId, isAuxiliaryWindow]);
+  // The iOS app opens the dashboard directly on its next launch only while a session exists.
+  useEffect(() => {
+    if (isPending || isAuxiliaryWindow) return;
+    setMobileSessionHint(hasSession);
+  }, [hasSession, isPending, isAuxiliaryWindow]);
   // The sandbox runtime is fetched as soon as the signed-in dashboard is open, not when a menu
   // or Settings happens to be opened. The main window owns it, as it owns the host session.
   useEffect(() => {
@@ -246,7 +253,7 @@ export function DashboardLayoutClient({
 
   if (isAuxiliaryWindow) {
     return (
-      <main className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
+      <main className="h-[var(--sw-visible-height,100dvh)] min-h-0 overflow-hidden bg-background text-foreground">
         {children}
       </main>
     );
@@ -254,7 +261,7 @@ export function DashboardLayoutClient({
 
   return (
     <AiDataConsentGate userId={data?.user?.id}>
-      <SidebarProvider className="!h-dvh !min-h-0 overflow-hidden overscroll-none">
+      <SidebarProvider className="!h-[var(--sw-visible-height,100dvh)] !min-h-0 overflow-hidden overscroll-none">
         <DashboardChatStateProvider>
           <DashboardMobileNavProvider>
             <DashboardWorkspaceLayout>
@@ -264,7 +271,7 @@ export function DashboardLayoutClient({
                   className={
                     embedMode
                       ? "min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden"
-                      : "min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0"
+                      : "min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden pb-[env(safe-area-inset-bottom)] md:pb-0"
                   }
                 >
                   {embedMode ? (
@@ -278,7 +285,6 @@ export function DashboardLayoutClient({
                     </>
                   )}
                 </main>
-                {embedMode ? null : <DashboardMobileBottomNav />}
               </ChatHubProvider>
             </DashboardWorkspaceLayout>
           </DashboardMobileNavProvider>

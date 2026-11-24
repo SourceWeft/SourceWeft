@@ -38,6 +38,7 @@ import type {
   EmbedBatchInput,
   EmbedInput,
   GatewayMessage,
+  GatewayOperation,
   LangChainChatModelLike,
   LangChainEmbeddingsLike,
   ModelGatewayConfig,
@@ -49,17 +50,13 @@ import type {
   ToolBindingOptions,
   ToolCall,
 } from "../types";
-import { resolveModelGatewayConfig, resolveRequestCandidates } from "../config";
+import { resolveModelGatewayConfig } from "../config";
+import { ModelGatewayError, normalizeGatewayError } from "../errors";
 import {
-  canonicalProviderModel,
-  isAdministrativeGatewayCode,
-  isFailoverableError,
-  ModelGatewayError,
-  normalizeGatewayError,
-  selectSurfacedFailoverError,
-  summarizeTargetErrors,
-  type TargetAttemptError,
-} from "../errors";
+  planCandidates,
+  startFailoverRun,
+  type CandidatePlan,
+} from "../failover-policy";
 import {
   buildGenerationErrorEvent,
   createGenerationObservation,
@@ -122,7 +119,13 @@ function gatewayContentToText(content: GatewayMessage["content"]) {
     return content;
   }
   return content
-    .map((part) => (part.type === "text" ? part.text : "[image]"))
+    .map((part) =>
+      part.type === "text"
+        ? part.text
+        : part.type === "video_url"
+          ? "[video]"
+          : "[image]",
+    )
     .join("\n")
     .trim();
 }
@@ -567,6 +570,7 @@ function createObservedLangChainChatModel(input: {
         responseMetadata,
         responseHeaders: responseCapture.headers,
         capturedUsage: responseCapture.usage,
+        capturedUpstreamProvider: responseCapture.upstreamProvider,
       },
     });
     observation.traceId = generation.start.traceId;
@@ -766,6 +770,7 @@ async function* observeStream(input: {
           responseMetadata,
           responseHeaders: input.responseCapture.headers,
           capturedUsage: input.responseCapture.usage,
+          capturedUpstreamProvider: input.responseCapture.upstreamProvider,
         },
       }),
     );
@@ -1127,17 +1132,9 @@ export async function createLangChainChatModel(input: {
     toolBindingOptions: input.execution?.toolBindingOptions,
   };
 
-  const resolvedCandidates = await resolveRequestCandidates(
-    resolvedConfig,
-    payload,
-  );
-  const candidates =
-    payload.fallbackPolicy === "none"
-      ? resolvedCandidates.slice(0, 1)
-      : resolvedCandidates;
   return createFailoverLangChainChatModel({
     config: resolvedConfig,
-    candidates,
+    plan: await planCandidates(resolvedConfig, payload),
     buildModel: (target, options, binding) =>
       createChatModel({
         config: resolvedConfig,
@@ -1159,9 +1156,10 @@ export async function createLangChainChatModel(input: {
 
 /**
  * LangChain-facing counterpart of `runWithTargetFailover`: one fresh model per
- * target attempt, with the same failover policy — move to the
- * next target only on a failoverable error, never after the caller aborted,
- * and for streams only while no chunk has reached the consumer.
+ * target attempt, under the shared failover policy (`failover-policy.ts`) —
+ * for streams, only while no chunk has reached the consumer. The candidate
+ * order is re-read for every call, so a target that failed earlier in an
+ * agent turn is demoted for the rest of it.
  *
  * `bindTools` returns a new facade whose model factory re-applies the binding
  * per candidate, so a fallback model carries the same tools as the one it
@@ -1170,7 +1168,7 @@ export async function createLangChainChatModel(input: {
  */
 function createFailoverLangChainChatModel(input: {
   config: ResolvedModelGatewayConfig;
-  candidates: ResolvedRequestTarget[];
+  plan: CandidatePlan;
   buildModel: (
     target: ResolvedRequestTarget,
     options?: RequestOptions,
@@ -1179,7 +1177,8 @@ function createFailoverLangChainChatModel(input: {
 }): LangChainChatModelLike {
   // Keep a model for capability/property inspection only. Executions build a
   // fresh model so request overrides and timeout signals never persist between calls.
-  const primaryModel = input.buildModel(input.candidates[0]!);
+  const primaryTarget = input.plan.strategyOrder[0]!;
+  const primaryModel = input.buildModel(primaryTarget);
 
   const callerAborted = (options?: Record<string, unknown>) =>
     Boolean((options as { signal?: AbortSignal } | undefined)?.signal?.aborted);
@@ -1224,30 +1223,8 @@ function createFailoverLangChainChatModel(input: {
     }
   };
 
-  const logFailover = (
-    operation: string,
-    index: number,
-    error: unknown,
-    nextIndex: number,
-  ) => {
-    const target = input.candidates[index]!;
-    input.config.logger.warn?.("model-gateway.failover", {
-      operation,
-      alias: target.routeDecision.alias,
-      failedProvider: target.provider,
-      failedProviderModel: target.providerModel,
-      errorCode: normalizeGatewayError(error).code,
-      nextProvider: input.candidates[nextIndex]?.provider,
-      attempt: index + 1,
-      candidates: input.candidates.length,
-      ...(nextIndex > index + 1
-        ? { skippedSameModelCandidates: nextIndex - index - 1 }
-        : {}),
-    });
-  };
-
   async function runWithFailover<T>(
-    operation: string,
+    operation: GatewayOperation,
     options: Record<string, unknown> | undefined,
     run: (
       model: LangChainChatModelLike,
@@ -1255,10 +1232,9 @@ function createFailoverLangChainChatModel(input: {
       guard: AttemptGuard,
     ) => Promise<T>,
   ): Promise<T> {
-    const attempts: TargetAttemptError[] = [];
-    let index = 0;
-    while (index < input.candidates.length) {
-      const target = input.candidates[index]!;
+    const failover = startFailoverRun(input.config, input.plan, operation);
+    for (;;) {
+      const target = failover.current()!;
       let guard: AttemptGuard | undefined;
       try {
         const { requestOptions, guard: attemptGuard } = openAttempt(
@@ -1289,80 +1265,26 @@ function createFailoverLangChainChatModel(input: {
           if (!callerAborted(options)) await settleWithin(pending, 1_000);
           throw attemptGuard.verdict(error);
         }
-        input.config.targetHealth.markSuccess(target);
+        failover.succeeded(target);
         return result;
       } catch (error) {
-        attempts.push({
-          provider: target.provider,
-          providerModel: target.providerModel,
-          error,
+        const decision = failover.failed(target, error, {
+          callerAborted: callerAborted(options),
         });
-        const aborted = callerAborted(options);
-        const errorCode = normalizeGatewayError(error).code;
-        // STRUCTURED_OUTPUT deliberately does not cool the target down: the
-        // channel is healthy, the model/request combination is what failed.
-        if (!aborted && isFailoverableError(error)) {
-          input.config.targetHealth.markFailure(target);
-        }
-        if (!aborted && isAdministrativeGatewayCode(errorCode)) {
-          input.config.logger.warn?.("model-gateway.target-quota", {
-            operation,
-            alias: target.routeDecision.alias,
-            provider: target.provider,
-            providerModel: target.providerModel,
-            errorCode,
-          });
-        }
-        if (aborted) {
-          throw error;
-        }
-
-        // Same-model channels cannot rescue a model-level structured-output
-        // failure — skip straight to the next genuinely different model.
-        let nextIndex = -1;
-        if (isFailoverableError(error)) {
-          nextIndex = index + 1;
-        } else if (errorCode === "STRUCTURED_OUTPUT") {
-          nextIndex = index + 1;
-          while (
-            nextIndex < input.candidates.length &&
-            canonicalProviderModel(
-              input.candidates[nextIndex]!.providerModel,
-            ) === canonicalProviderModel(target.providerModel)
-          ) {
-            nextIndex += 1;
-          }
-        }
-
-        if (nextIndex < 0 || nextIndex >= input.candidates.length) {
-          const surfaced = selectSurfacedFailoverError(attempts);
-          if (attempts.length > 1) {
-            input.config.logger.warn?.("model-gateway.failover-exhausted", {
-              operation,
-              alias: target.routeDecision.alias,
-              surfacedErrorCode: normalizeGatewayError(surfaced).code,
-              targetErrors: summarizeTargetErrors(attempts),
-            });
-          }
-          throw surfaced;
-        }
-        logFailover(operation, index, error, nextIndex);
-        index = nextIndex;
+        if (!decision.next) throw decision.surfaced;
       } finally {
         guard?.settle();
       }
     }
-    throw selectSurfacedFailoverError(attempts);
   }
 
   async function* streamWithFailover(
     messages: unknown,
     options?: Record<string, unknown>,
   ): AsyncGenerator<unknown> {
-    const attempts: TargetAttemptError[] = [];
-    for (let index = 0; index < input.candidates.length; index++) {
-      const target = input.candidates[index]!;
-      const isLast = index === input.candidates.length - 1;
+    const failover = startFailoverRun(input.config, input.plan, "chat.stream");
+    for (;;) {
+      const target = failover.current()!;
       let iterator: StreamIterator<unknown> | undefined;
       let yielded = false;
       let failed = false;
@@ -1386,7 +1308,7 @@ function createFailoverLangChainChatModel(input: {
               // present, has already failed the generation for it).
               const truncated = guard.completion();
               if (truncated) throw truncated;
-              if (!yielded) input.config.targetHealth.markSuccess(target);
+              if (!yielded) failover.succeeded(target);
               return;
             }
             // Arms the idle watchdog and the reasoning budget; a trip aborts
@@ -1394,7 +1316,7 @@ function createFailoverLangChainChatModel(input: {
             guard.observeChunk(next.value);
             if (guard.signal.aborted) throw guard.signal.reason;
             // Once any chunk is visible, a later error must not replay it.
-            if (!yielded) input.config.targetHealth.markSuccess(target);
+            if (!yielded) failover.succeeded(target);
             yielded = true;
             yield next.value;
           }
@@ -1406,50 +1328,19 @@ function createFailoverLangChainChatModel(input: {
           await closeStreamIterator(iterator, input.config.logger, failed);
         }
       } catch (error) {
-        if (yielded) throw error;
-        attempts.push({
-          provider: target.provider,
-          providerModel: target.providerModel,
-          error,
+        // Once a chunk reached the consumer the attempt is committed: it is
+        // never replayed, and its own error ends the stream.
+        const decision = failover.failed(target, error, {
+          callerAborted: callerAborted(options),
+          committed: yielded,
         });
-        const aborted = callerAborted(options);
-        const errorCode = normalizeGatewayError(error).code;
-        if (!aborted && isFailoverableError(error)) {
-          input.config.targetHealth.markFailure(target);
-        }
-        if (!aborted && isAdministrativeGatewayCode(errorCode)) {
-          input.config.logger.warn?.("model-gateway.target-quota", {
-            operation: "chat.stream",
-            alias: target.routeDecision.alias,
-            provider: target.provider,
-            providerModel: target.providerModel,
-            errorCode,
-          });
-        }
-        if (aborted || !isFailoverableError(error)) {
-          throw aborted ? error : selectSurfacedFailoverError(attempts);
-        }
-        if (isLast) {
-          const surfaced = selectSurfacedFailoverError(attempts);
-          if (attempts.length > 1) {
-            input.config.logger.warn?.("model-gateway.failover-exhausted", {
-              operation: "chat.stream",
-              alias: target.routeDecision.alias,
-              surfacedErrorCode: normalizeGatewayError(surfaced).code,
-              targetErrors: summarizeTargetErrors(attempts),
-            });
-          }
-          throw surfaced;
-        }
-        logFailover("chat.stream", index, error, index + 1);
-        continue;
+        if (!decision.next) throw decision.surfaced;
       }
     }
   }
 
   const facade: LangChainChatModelLike = {
-    getName: () =>
-      primaryModel.getName?.() ?? input.candidates[0]!.providerModel,
+    getName: () => primaryModel.getName?.() ?? primaryTarget.providerModel,
     invoke: (messages, options) =>
       runWithFailover(
         "chat.complete",

@@ -25,6 +25,12 @@ function resolveErrorCode(searchParams: SearchParams) {
   return code;
 }
 
+// The `authPages.error.code.*` copy mirrors the backend's localized SSO messages
+// verbatim, with ONE deliberate exception: `SSO_ORGANIZATION_REQUIRED`. The
+// backend's own message for that code is about *setting up* SSO ("Single sign-on
+// can only be set up for a team."), which makes no sense to a member who hits
+// this during sign-in (the provider's team is no longer a team). The error-page
+// entry is reworded for that reader instead of mirroring the backend.
 export default async function AuthErrorPage({
   searchParams,
 }: {

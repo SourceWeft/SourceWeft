@@ -12,10 +12,10 @@
     "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
-    "@langchain/core": "^1.2.9",
-    "@langchain/quickjs": "0.6.1",
-    "deepagents": "1.13.1",
-    "langchain": "^1.5.10",
+    "@langchain/core": "^1.4.2",
+    "@langchain/quickjs": "0.6.7",
+    "deepagents": "1.16.5",
+    "langchain": "^1.6.7",
     "zod": "^4.6.6"
   },
   "devDependencies": {

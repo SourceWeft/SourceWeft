@@ -4,6 +4,7 @@ import type {
   SourceDiscoveryResponse,
 } from "@sourceweft/contracts/sources";
 import type { AgentToolWebProvider } from "@sourceweft/contracts/agent-tools";
+import { parseYouTubeUrl } from "@sourceweft/builtin-document-parsers/youtube";
 import { logger } from "../../../shared/logger";
 import { BillingAdmissionError } from "../../../shared/model-gateway/index";
 import { rateLimiter, type RateLimiter } from "../../../shared/rate-limit";
@@ -59,10 +60,15 @@ async function defaultFindExistingSourceId(input: {
   workspaceId: string;
   url: string;
 }) {
+  // A candidate's `url` is already the canonical `watch?v=` URL for a
+  // YouTube video (see `buildCandidates`), so it is looked up as a `youtube`
+  // source, same as every other candidate's page as a `web_url` source.
+  const target = parseYouTubeUrl(input.url);
+  const sourceType = target?.kind === "video" ? "youtube" : "web_url";
   const existing = await findSourceRecordByExternalUri({
     teamId: input.teamId,
     workspaceId: input.workspaceId,
-    sourceType: "web_url",
+    sourceType,
     externalUri: input.url,
   });
   return existing?.id ?? null;

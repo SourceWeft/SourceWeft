@@ -1,4 +1,5 @@
 import { sdkRetryOptions } from "./gateway-caller";
+import { noAmbientOpenAIIdentity } from "../auth-headers";
 import { ObservedOpenAIEmbeddings } from "./observed-embeddings";
 import { ModelGatewayError } from "../errors";
 import type { EmbeddingsAdapter } from "./types";
@@ -25,7 +26,7 @@ export class DeepInfraEmbeddingsAdapter implements EmbeddingsAdapter {
       configuration: {
         ignoreEnvironmentHeaders: true,
         fetch: options?.fetch,
-        adminAPIKey: null,
+        ...noAmbientOpenAIIdentity,
         baseURL: resolveOpenAICompatibleBaseUrl(target.baseUrl),
         defaultHeaders: target.defaultHeaders,
       },

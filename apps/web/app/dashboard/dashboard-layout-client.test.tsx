@@ -31,7 +31,7 @@ vi.mock("../../lib/auth-client", () => ({
 vi.mock("next/navigation", () => ({
   usePathname: () => host.pathname,
   useSearchParams: () => new URLSearchParams(),
-  useRouter: () => ({ replace: vi.fn() }),
+  useRouter: () => ({ replace: vi.fn(), prefetch: vi.fn() }),
 }));
 vi.mock("../../lib/register-builtin-agent-tools", () => ({
   registerBuiltinAgentTools: () => {},
@@ -73,9 +73,6 @@ vi.mock("./_components/dashboard-mobile-content", () => ({
   DashboardMobileContent: passthrough,
 }));
 vi.mock("./_components/dashboard-sidebar", () => ({ DashboardSidebar: empty }));
-vi.mock("./_components/dashboard-mobile-bottom-nav", () => ({
-  DashboardMobileBottomNav: empty,
-}));
 vi.mock("./_components/dashboard-page-navigation", () => ({
   DashboardPageNavigation: empty,
 }));

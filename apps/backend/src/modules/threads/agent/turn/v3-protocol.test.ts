@@ -14,6 +14,7 @@ import {
   adaptToolArgDelta,
   adaptToolsEvent,
   adoptV3RunStream,
+  createAssistantMessageFilter,
   interruptsToLegacyUpdatesPayload,
   isSerializedInterruptMessage,
   unwrapCustomEvent,
@@ -34,11 +35,46 @@ test("adaptToolArgDelta extracts a tool_call_chunk fragment", () => {
     },
   });
   assert.deepEqual(delta, {
+    kind: "snapshot",
     index: 2,
     id: "call_9",
     name: "write_file",
     args: '{"content":"pri',
   });
+});
+
+test("adaptToolArgDelta reads a tool-call block start and its appended slices", () => {
+  // @langchain/core 1.3: identity on content-block-start, args as slices.
+  assert.deepEqual(
+    adaptToolArgDelta({
+      event: "content-block-start",
+      index: 1,
+      content: {
+        type: "tool_call_chunk",
+        id: "call_9",
+        name: "write_file",
+        args: "",
+      },
+    }),
+    { kind: "start", index: 1, id: "call_9", name: "write_file", args: "" },
+  );
+  assert.deepEqual(
+    adaptToolArgDelta({
+      event: "content-block-delta",
+      index: 1,
+      delta: { type: "tool-call-delta", args: '{"content":"pri' },
+    }),
+    { kind: "append", index: 1, args: '{"content":"pri' },
+  );
+  // A text block opening is not a tool call.
+  assert.equal(
+    adaptToolArgDelta({
+      event: "content-block-start",
+      index: 0,
+      content: { type: "text", text: "" },
+    }),
+    null,
+  );
 });
 
 test("adaptToolArgDelta ignores text/reasoning deltas", () => {
@@ -213,6 +249,98 @@ test("adaptMessagesEvent drops tool_call chunks and lifecycle events", () => {
   );
 });
 
+test("createAssistantMessageFilter drops every event of a human-authored message", () => {
+  // The shape deepagents streams when the skills middleware pins a skill: a
+  // human message from a middleware node, then the model's own message.
+  const pinned = ["SkillsMiddleware.before_model:1"];
+  const model = ["model_request:2"];
+  const isAssistant = createAssistantMessageFilter();
+  const verdicts = [
+    isAssistant(pinned, { event: "message-start", role: "human", run_id: "a" }),
+    isAssistant(pinned, {
+      event: "content-block-start",
+      index: 0,
+      run_id: "a",
+    }),
+    isAssistant(pinned, {
+      event: "content-block-delta",
+      index: 0,
+      delta: { type: "text-delta", text: "<skill>body</skill>" },
+      run_id: "a",
+    }),
+    isAssistant(pinned, {
+      event: "content-block-finish",
+      index: 0,
+      run_id: "a",
+    }),
+    isAssistant(pinned, { event: "message-finish", run_id: "a" }),
+    isAssistant(model, { event: "message-start", run_id: "b" }),
+    isAssistant(model, {
+      event: "content-block-delta",
+      index: 0,
+      delta: { type: "text-delta", text: "answer" },
+      run_id: "b",
+    }),
+    isAssistant(model, { event: "message-finish", run_id: "b" }),
+  ];
+  assert.deepEqual(verdicts, [
+    false,
+    false,
+    false,
+    false,
+    false,
+    true,
+    true,
+    true,
+  ]);
+});
+
+test("createAssistantMessageFilter keeps messages apart when they interleave", () => {
+  const isAssistant = createAssistantMessageFilter();
+  const delta = (run_id: string) => ({
+    event: "content-block-delta",
+    index: 0,
+    delta: { type: "text-delta", text: "x" },
+    run_id,
+  });
+  assert.equal(
+    isAssistant([], { event: "message-start", role: "ai", run_id: "ai" }),
+    true,
+  );
+  assert.equal(
+    isAssistant([], { event: "message-start", role: "system", run_id: "sys" }),
+    false,
+  );
+  assert.equal(isAssistant([], delta("ai")), true);
+  assert.equal(isAssistant([], delta("sys")), false);
+  assert.equal(
+    isAssistant([], { event: "message-finish", run_id: "sys" }),
+    false,
+  );
+  // A finished foreign message leaves nothing behind for a later run to trip on.
+  assert.equal(isAssistant([], delta("sys")), true);
+});
+
+test("createAssistantMessageFilter falls back to the namespace without a run id", () => {
+  const isAssistant = createAssistantMessageFilter();
+  const human = ["middleware:1"];
+  const model = ["model_request:2"];
+  const delta = {
+    event: "content-block-delta",
+    index: 0,
+    delta: { type: "text-delta", text: "x" },
+  };
+  assert.equal(
+    isAssistant(human, { event: "message-start", role: "human" }),
+    false,
+  );
+  assert.equal(isAssistant(human, delta), false);
+  assert.equal(isAssistant(model, delta), true);
+  assert.equal(isAssistant(human, { event: "message-finish" }), false);
+  assert.equal(isAssistant(human, { event: "message-start" }), true);
+  assert.equal(isAssistant(human, delta), true);
+});
+
 test("unwrapCustomEvent unwraps the v3 { payload } envelope", () => {
   assert.deepEqual(unwrapCustomEvent({ payload: { stage: "planning" } }), {
     stage: "planning",
@@ -337,13 +465,13 @@ describe("v3-tool-error-rejection", () => {
     return methods;
   }
 
-  test("reading only the event stream leaves the tool's rejected output promise unhandled", async () => {
+  test("the raw event stream no longer leaks the tool's rejected output promise (langchain 1.6)", async () => {
+    // Up to langchain 1.5 this leaked an unhandled rejection, which is why
+    // adoptV3RunStream observes the per-tool output promises. langchain 1.6
+    // handles them itself; the guard stays as a second line of defence, and
+    // this test says so if a later version starts leaking again.
     await runFailingTurn((raw) => raw);
-    assert.ok(
-      unhandled.length > 0,
-      "expected the raw v3 stream to leak an unhandled rejection — if langchain fixed this upstream, adoptV3RunStream's guard can go",
-    );
-    assert.match(String(unhandled[0]), /SANDBOX_NOT_READY_OR_UNHEALTHY/);
+    assert.deepEqual(unhandled, []);
   });
 
   test("adoptV3RunStream observes it, so a failing tool cannot take the process down", async () => {

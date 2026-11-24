@@ -39,6 +39,18 @@ export const BUILTIN_CAPABILITY_MODULES: Record<
     import("@sourceweft/builtin-connector-gmail"),
   "@sourceweft/builtin-connector-google-drive": () =>
     import("@sourceweft/builtin-connector-google-drive"),
+  "@sourceweft/builtin-connector-dropbox": () =>
+    import("@sourceweft/builtin-connector-dropbox"),
+  "@sourceweft/builtin-connector-rss": () =>
+    import("@sourceweft/builtin-connector-rss"),
+  "@sourceweft/builtin-connector-github": () =>
+    import("@sourceweft/builtin-connector-github"),
+  "@sourceweft/builtin-connector-linear": () =>
+    import("@sourceweft/builtin-connector-linear"),
+  "@sourceweft/builtin-connector-jira": () =>
+    import("@sourceweft/builtin-connector-jira"),
+  "@sourceweft/builtin-connector-confluence": () =>
+    import("@sourceweft/builtin-connector-confluence"),
   "@sourceweft/builtin-retrieval": () =>
     import("@sourceweft/builtin-retrieval"),
   "@sourceweft/builtin-skill-ppt-deck": () =>
@@ -47,6 +59,10 @@ export const BUILTIN_CAPABILITY_MODULES: Record<
     import("@sourceweft/builtin-tool-generate-image"),
   "@sourceweft/builtin-tool-publish-artifact": () =>
     import("@sourceweft/builtin-tool-publish-artifact"),
+  "@sourceweft/builtin-tool-study": () =>
+    import("@sourceweft/builtin-tool-study"),
+  "@sourceweft/builtin-tool-table": () =>
+    import("@sourceweft/builtin-tool-table"),
   "@sourceweft/builtin-tool-video-presentation": () =>
     import("@sourceweft/builtin-tool-video-presentation"),
   "@sourceweft/builtin-tool-web-search": () =>

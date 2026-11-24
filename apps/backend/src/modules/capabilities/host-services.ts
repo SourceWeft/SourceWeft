@@ -14,6 +14,7 @@ import { config } from "../../shared/config";
 import { logger } from "../../shared/logger";
 import { listCapabilityRecords } from "../threads/turn/capability-command-workflows";
 import { loadCapabilityEntryModule } from "./entry-module-loader";
+import { createPublicFetchScope } from "./public-fetch";
 
 /**
  * Collects the host-level services capabilities supply.
@@ -178,7 +179,11 @@ export async function collectCapabilityConnectorContributions(
       });
       continue;
     }
-    const contribution = await factory({ env, logger });
+    const contribution = await factory({
+      env,
+      publicFetch: createPublicFetchScope,
+      logger,
+    });
     adapters.push(...contribution.adapters);
     agentToolDefs.push(...contribution.agentToolDefs);
   }

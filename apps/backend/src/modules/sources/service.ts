@@ -43,6 +43,15 @@ import {
   WEB_FETCH_SOURCE_MIME_TYPE,
 } from "./parsers/web-fetch";
 import {
+  canonicalVideoUrl,
+  DEFAULT_YOUTUBE_CATALOG_PROVIDER_ID,
+  DEFAULT_YOUTUBE_TRANSCRIPT_PROVIDER_ID,
+  isUnrecognisedYouTubeUrl,
+  parseYouTubeUrl,
+  YOUTUBE_SOURCE_MIME_TYPE,
+} from "@sourceweft/builtin-document-parsers/youtube";
+import { assertYouTubeTranscriptionConfigured } from "./youtube/model-port";
+import {
   assertSourceContentCanBeParsed,
   requireSupportedSourceFile,
 } from "./source-file-classifier";
@@ -119,9 +128,10 @@ const YOUTUBE_HOST_SUFFIXES = ["youtube.com", "youtube-nocookie.com", "youtu.be"
 
 /**
  * The web fetch provider cannot read YouTube pages: short links and `watch`
- * URLs alike run out the whole fetch budget and fail. Refusing them when the
- * source is created tells the user straight away, instead of a minute later
- * with a generic fetch timeout. Transcript ingestion is a separate source type.
+ * URLs alike run out the whole fetch budget and fail. `createUrlSource` routes
+ * every link the YouTube parser recognises to a YouTube source first; this
+ * guard keeps any other YouTube-hosted link (an odd subdomain, a trailing-dot
+ * host) from silently becoming a web source.
  */
 export function assertWebSourceUrlSupported(externalUri: string) {
   const hostname = new URL(externalUri).hostname
@@ -131,12 +141,52 @@ export function assertWebSourceUrlSupported(externalUri: string) {
     (suffix) => hostname === suffix || hostname.endsWith(`.${suffix}`),
   );
   if (isYouTube) {
+    throw youTubeUrlUnsupportedError();
+  }
+}
+
+/**
+ * A re-paste that names no title keeps whatever the source already had: a
+ * title the user set earlier must survive the refresh's parse.
+ */
+function resolveUserTitleProvided(
+  title: string | undefined,
+  existing: SourceRecord | null | undefined,
+) {
+  if (title?.trim()) return true;
+  return existing?.metadata?.userTitleProvided === true;
+}
+
+function youTubeUrlUnsupportedError() {
+  return new ContentError(
+    422,
+    "YOUTUBE_URL_UNSUPPORTED",
+    "This YouTube link is not a video, playlist or channel link.",
+  );
+}
+
+/**
+ * The video id a pasted link names, or null when it is not a YouTube link.
+ * A playlist/channel link is refused with its kind so the client can offer
+ * the collection's videos; a YouTube link of any other shape is refused.
+ */
+function resolveYouTubeVideoId(url: string): string | null {
+  const target = parseYouTubeUrl(url.trim());
+  if (target?.kind === "video") {
+    return target.videoId;
+  }
+  if (target) {
     throw new ContentError(
       422,
-      "WEB_SOURCE_YOUTUBE_UNSUPPORTED",
-      "YouTube links can't be added as web sources yet.",
+      "YOUTUBE_COLLECTION_URL",
+      `This YouTube link is a ${target.kind}; choose the videos to add from it.`,
+      { details: { kind: target.kind }, exposeDetails: true },
     );
   }
+  if (isUnrecognisedYouTubeUrl(url.trim())) {
+    throw youTubeUrlUnsupportedError();
+  }
+  return null;
 }
 
 function resolveUrlSourceTitle(input: { title?: string; url: string }) {
@@ -985,6 +1035,11 @@ export class ContentSourceService {
     forceRefresh?: boolean;
   }) {
     const workspace = await requireContentWorkspace(input);
+    const videoId = resolveYouTubeVideoId(input.url);
+    if (videoId) {
+      return this.createYouTubeVideoSource({ ...input, workspace, videoId });
+    }
+
     const externalUri = normalizeExternalUrl(input.url);
     assertWebSourceUrlSupported(externalUri);
 
@@ -1001,22 +1056,7 @@ export class ContentSourceService {
       externalUri,
     });
     if (existing && input.forceRefresh !== true) {
-      return {
-        source: existing,
-        status: (await getSourceStatusDetail({
-          teamId: workspace.organizationId,
-          workspaceId: workspace.id,
-          sourceId: existing.id,
-        })) ?? {
-          status: existing.status,
-          progress: existing.status === "indexed" ? 100 : 0,
-          currentStep: existing.status === "indexed" ? "completed" : "created",
-          parsedPages: null,
-          totalPages: null,
-          error: null,
-          jobId: null,
-        },
-      };
+      return this.existingUrlSourceResult(workspace, existing);
     }
 
     const parsingConfig = defaultParsingConfig();
@@ -1027,7 +1067,7 @@ export class ContentSourceService {
       requestedUrl: externalUri,
       sourceUrl: externalUri,
       forceRefresh: input.forceRefresh === true,
-      userTitleProvided: Boolean(input.title?.trim()),
+      userTitleProvided: resolveUserTitleProvided(input.title, existing),
       progress: 0,
       currentStep: "created",
     };
@@ -1083,6 +1123,148 @@ export class ContentSourceService {
           },
         });
 
+    return this.queueUrlSourceParse({
+      workspace,
+      source,
+      parserVersion: parsingConfig.parserVersion,
+      externalUpdatedAt: now,
+      userId: input.userId,
+      forceRefresh: input.forceRefresh === true,
+    });
+  }
+
+  /**
+   * A YouTube video link becomes one `youtube` source per video, whatever
+   * form the link took (youtu.be, shorts, watch with a playlist …): the
+   * canonical watch URL is the dedupe key. Its text is a timestamped
+   * transcript made when the parse job runs.
+   */
+  private async createYouTubeVideoSource(input: {
+    workspace: Awaited<ReturnType<typeof requireContentWorkspace>>;
+    videoId: string;
+    userId: string;
+    url: string;
+    title?: string;
+    parentSourceId?: string | null;
+    forceRefresh?: boolean;
+  }) {
+    const { workspace, videoId } = input;
+    await assertYouTubeTranscriptionConfigured();
+
+    await validateSourceParent({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      parentSourceId: input.parentSourceId,
+    });
+
+    const externalUri = canonicalVideoUrl(videoId);
+    const existing = await findSourceRecordByExternalUri({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      sourceType: "youtube",
+      externalUri,
+    });
+    if (existing && input.forceRefresh !== true) {
+      return this.existingUrlSourceResult(workspace, existing);
+    }
+
+    const parsingConfig = defaultParsingConfig();
+    const now = new Date();
+    const userTitle = input.title?.trim();
+    const title = normalizeContentTitle(
+      userTitle || `YouTube video ${videoId}`,
+      `YouTube video ${videoId}`,
+    );
+    const sourceMetadata = {
+      loaderId: "youtube",
+      parserId: "youtube",
+      videoId,
+      requestedUrl: input.url.trim(),
+      sourceUrl: externalUri,
+      catalogProvider: DEFAULT_YOUTUBE_CATALOG_PROVIDER_ID,
+      transcriptProvider: DEFAULT_YOUTUBE_TRANSCRIPT_PROVIDER_ID,
+      forceRefresh: input.forceRefresh === true,
+      userTitleProvided: resolveUserTitleProvided(userTitle, existing),
+      progress: 5,
+      currentStep: "queued",
+      queuedAt: now.toISOString(),
+    };
+    const sourceFields = {
+      externalId: videoId,
+      externalUri,
+      externalUpdatedAt: now,
+      mimeType: YOUTUBE_SOURCE_MIME_TYPE,
+      sizeBytes: Buffer.byteLength(externalUri, "utf8"),
+      parserVersion: parsingConfig.parserVersion,
+      parsingConfig,
+      status: "queued" as const,
+    };
+    const source = existing
+      ? await updateSourceRecord({
+          teamId: workspace.organizationId,
+          workspaceId: workspace.id,
+          sourceId: existing.id,
+          title: userTitle ? title : undefined,
+          parentSourceId: input.parentSourceId,
+          ...sourceFields,
+          error: {},
+          metadata: { ...(existing.metadata ?? {}), ...sourceMetadata },
+        })
+      : await createSourceRecord({
+          teamId: workspace.organizationId,
+          workspaceId: workspace.id,
+          title,
+          contentText: "",
+          createdBy: input.userId,
+          ingestKind: "youtube",
+          sourceType: "youtube",
+          parentSourceId: input.parentSourceId ?? null,
+          ...sourceFields,
+          metadata: sourceMetadata,
+        });
+
+    return this.queueUrlSourceParse({
+      workspace,
+      source,
+      parserVersion: parsingConfig.parserVersion,
+      externalUpdatedAt: now,
+      userId: input.userId,
+      forceRefresh: input.forceRefresh === true,
+    });
+  }
+
+  private async existingUrlSourceResult(
+    workspace: Awaited<ReturnType<typeof requireContentWorkspace>>,
+    existing: SourceRecord,
+  ) {
+    return {
+      source: existing,
+      status: (await getSourceStatusDetail({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        sourceId: existing.id,
+      })) ?? {
+        status: existing.status,
+        progress: existing.status === "indexed" ? 100 : 0,
+        currentStep: existing.status === "indexed" ? "completed" : "created",
+        parsedPages: null,
+        totalPages: null,
+        error: null,
+        jobId: null,
+      },
+    };
+  }
+
+  /** New revision + parse job for a URL-backed (web or YouTube) source. */
+  private async queueUrlSourceParse(input: {
+    workspace: Awaited<ReturnType<typeof requireContentWorkspace>>;
+    source: SourceRecord | null | undefined;
+    parserVersion: string;
+    externalUpdatedAt: Date;
+    userId: string;
+    forceRefresh: boolean;
+  }) {
+    const { workspace, source } = input;
     if (!source) {
       throw new ContentError(
         500,
@@ -1095,8 +1277,8 @@ export class ContentSourceService {
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
       sourceId: source.id,
-      parserVersion: parsingConfig.parserVersion,
-      externalUpdatedAt: now,
+      parserVersion: input.parserVersion,
+      externalUpdatedAt: input.externalUpdatedAt,
     });
 
     const job = await enqueueSourceParseJob({
@@ -1106,7 +1288,7 @@ export class ContentSourceService {
       teamId: workspace.organizationId,
       userId: input.userId,
       idempotencyKey: `source_parse_${source.id}_${revision.revisionNo}`,
-      forceRefresh: input.forceRefresh === true,
+      forceRefresh: input.forceRefresh,
     });
 
     const queuedSource = await updateSourceRecord({

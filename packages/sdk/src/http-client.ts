@@ -46,6 +46,24 @@ export class HttpClientError extends Error {
   }
 }
 
+/** `filename*` (RFC 5987, UTF-8) wins over the plain `filename`. */
+function parseContentDispositionFileName(header: string | null): string | null {
+  if (!header) {
+    return null;
+  }
+  const extended = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(header)?.[1];
+  if (extended) {
+    try {
+      return decodeURIComponent(extended.trim());
+    } catch {
+      // Fall through to the plain name.
+    }
+  }
+  const plain = /filename\s*=\s*"([^"]*)"|filename\s*=\s*([^;]+)/i.exec(header);
+  const name = (plain?.[1] ?? plain?.[2])?.trim();
+  return name ? name : null;
+}
+
 export class HttpClient {
   private readonly baseUrl: string;
   private readonly getToken?: () =>
@@ -79,10 +97,15 @@ export class HttpClient {
     });
   }
 
-  async postForm<T>(path: string, body: FormData): Promise<T> {
+  async postForm<T>(
+    path: string,
+    body: FormData,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<T> {
     return this.request<T>(path, {
       method: "POST",
       body,
+      signal: options.signal,
     });
   }
 
@@ -114,6 +137,24 @@ export class HttpClient {
     return (
       await this.response(path, { method: "GET", signal, cache: "no-store" })
     ).blob();
+  }
+
+  /** A file download: its bytes and the name the server suggests, if any. */
+  async getDownload(
+    path: string,
+    signal?: AbortSignal,
+  ): Promise<{ blob: Blob; fileName: string | null }> {
+    const response = await this.response(path, {
+      method: "GET",
+      signal,
+      cache: "no-store",
+    });
+    return {
+      blob: await response.blob(),
+      fileName: parseContentDispositionFileName(
+        response.headers.get("content-disposition"),
+      ),
+    };
   }
 
   async putBytes<T>(

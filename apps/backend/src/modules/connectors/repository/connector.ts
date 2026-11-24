@@ -4,7 +4,7 @@
  * sources) and the scheduling fields the periodic indexer reads and writes.
  */
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, lte, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, lte, ne, sql } from "drizzle-orm";
 import {
   chunks,
   citations,
@@ -403,6 +403,60 @@ export async function hardDeleteSourceConnectorRecord(input: {
       sourcesDeleted: deletedSources.length,
       documentsDeleted: documentCountRow?.count ?? 0,
       authorizationDeleted,
+    };
+  });
+}
+
+/**
+ * Delete all connector data of one team in one transaction: every connector's
+ * indexed sources (keeping their citations readable, as a single connector
+ * delete does), every connector, then every stored authorization. Sync runs,
+ * sync state, action runs, webhook events, trust rules and schedules go with
+ * their connector by cascade. Callers revoke the authorizations at their
+ * providers first.
+ */
+export async function hardDeleteTeamConnectorRecords(teamId: string) {
+  return db.transaction(async (tx) => {
+    const connectors = await tx
+      .select({
+        id: sourceConnectors.id,
+        workspaceId: sourceConnectors.workspaceId,
+      })
+      .from(sourceConnectors)
+      .where(eq(sourceConnectors.teamId, teamId));
+    for (const connector of connectors) {
+      await tx.execute(
+        preserveConnectorSourceCitationsSql({
+          teamId,
+          workspaceId: connector.workspaceId,
+          connectorId: connector.id,
+        }),
+      );
+    }
+
+    const deletedSources = await tx
+      .delete(sources)
+      .where(
+        and(
+          eq(sources.teamId, teamId),
+          eq(sources.ingestKind, "connector"),
+          isNotNull(sources.connectorId),
+        ),
+      )
+      .returning({ id: sources.id });
+    const deletedConnectors = await tx
+      .delete(sourceConnectors)
+      .where(eq(sourceConnectors.teamId, teamId))
+      .returning({ id: sourceConnectors.id });
+    const deletedAccounts = await tx
+      .delete(connectorOAuthAccounts)
+      .where(eq(connectorOAuthAccounts.teamId, teamId))
+      .returning({ id: connectorOAuthAccounts.id });
+
+    return {
+      connectorsDeleted: deletedConnectors.length,
+      sourcesDeleted: deletedSources.length,
+      authorizationsDeleted: deletedAccounts.length,
     };
   });
 }

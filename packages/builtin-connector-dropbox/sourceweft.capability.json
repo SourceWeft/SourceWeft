@@ -1,0 +1,151 @@
+{
+  "schemaVersion": 1,
+  "id": "sourceweft/dropbox",
+  "kind": "connector",
+  "name": "Dropbox Connector",
+  "version": "0.1.0",
+  "entry": "./src/index.ts",
+  "connectors": [
+    {
+      "id": "dropbox",
+      "title": "Dropbox",
+      "auth": {
+        "kind": "oauth2",
+        "authorizationUrl": "https://www.dropbox.com/oauth2/authorize",
+        "tokenUrl": "https://api.dropboxapi.com/oauth2/token",
+        "scopes": [
+          "account_info.read",
+          "files.metadata.read",
+          "files.content.read"
+        ],
+        "authorizationParams": {
+          "token_access_type": "offline"
+        },
+        "sendScope": true
+      },
+      "sync": {
+        "supportsIncremental": false,
+        "defaultFrequencyMinutes": 360,
+        "minFrequencyMinutes": 60,
+        "resources": [
+          {
+            "type": "dropbox_file",
+            "title": "Dropbox file",
+            "supportsDeleteDetection": true
+          }
+        ]
+      },
+      "actions": [
+        {
+          "id": "dropbox.browse",
+          "title": "Browse Dropbox",
+          "description": "List a Dropbox folder so the user can choose files and folders for this connector.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "internal",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "containerId": {
+                "type": ["string", "null"],
+                "pattern": "^id:[A-Za-z0-9_-]{1,200}$"
+              },
+              "cursor": {
+                "type": "string",
+                "maxLength": 4096
+              }
+            }
+          }
+        },
+        {
+          "id": "dropbox.search",
+          "title": "Search Dropbox",
+          "description": "Search Dropbox file names so the user can choose files and folders for this connector.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "internal",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["query"],
+            "properties": {
+              "query": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "cursor": {
+                "type": "string",
+                "maxLength": 4096
+              }
+            }
+          }
+        },
+        {
+          "id": "dropbox.describe",
+          "title": "Describe Dropbox items",
+          "description": "Return the name, path and existence of selected Dropbox items.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "internal",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["ids"],
+            "properties": {
+              "ids": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 100,
+                "items": {
+                  "type": "string",
+                  "pattern": "^id:[A-Za-z0-9_-]{1,200}$"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 500,
+            "uniqueItems": true,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "kind"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^id:[A-Za-z0-9_-]{1,200}$"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": ["file", "folder"]
+                }
+              }
+            }
+          }
+        },
+        "default": { "items": [] }
+      },
+      "selection": {
+        "actions": {
+          "browse": "dropbox.browse",
+          "search": "dropbox.search",
+          "describe": "dropbox.describe"
+        },
+        "kinds": ["folder", "file"],
+        "maxItems": 500
+      }
+    }
+  ]
+}

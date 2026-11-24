@@ -1097,6 +1097,23 @@ test("the shipped OrcaRouter key does not activate the Provider", async () => {
   }
 });
 
+test("shipped config offers no youtube-transcript model profile", async () => {
+  const loaded = await loadGlobalModelGatewayConfig(
+    resolve("config/model-gateway.global.json"),
+  );
+  // YouTube transcription runs on its own provider (sources/youtube/model-port.ts),
+  // never on a model profile that the chat model selector would offer.
+  const profiles = [
+    ...(loaded?.chatProfiles ?? []),
+    ...(loaded?.imageProfiles ?? []),
+    ...(loaded?.visionProfiles ?? []),
+  ];
+  assert.equal(
+    profiles.some((entry) => entry.profileAlias === "youtube-transcript"),
+    false,
+  );
+});
+
 test.each([
   null,
   "",

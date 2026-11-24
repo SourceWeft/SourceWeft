@@ -156,6 +156,7 @@ export function ChatCanvas({
   activeRunLookupPending = false,
   otherUserRunActive = false,
   typingIndicator,
+  composerNotice,
   onComposerType,
   queuedSends = [],
   onCancelQueuedSend,
@@ -225,6 +226,11 @@ export function ChatCanvas({
   // them a Stop button for a run they don't own.
   otherUserRunActive?: boolean;
   typingIndicator?: ReactNode;
+  /**
+   * Shown instead of the composer in a conversation that takes no messages
+   * from the viewer (a workspace assistant's own conversation).
+   */
+  composerNotice?: ReactNode;
   onComposerType?: () => void;
   // Messages the user submitted while a run was streaming, awaiting auto-send
   // when the thread frees. Rendered as a compact stack above the composer.
@@ -535,9 +541,7 @@ export function ChatCanvas({
       if (onReloadMessages) {
         void Promise.resolve(onReloadMessages()).catch((error) => {
           const message =
-            error instanceof Error
-              ? error.message
-              : t("errors.reloadFailed");
+            error instanceof Error ? error.message : t("errors.reloadFailed");
           toast.error(message);
         });
       }
@@ -557,9 +561,7 @@ export function ChatCanvas({
           assistantMessageId: toolConfirmationLookup.assistantMessageId,
         },
       );
-      toast.error(
-        t("errors.confirmationMissing"),
-      );
+      toast.error(t("errors.confirmationMissing"));
       return;
     }
 
@@ -572,17 +574,13 @@ export function ChatCanvas({
           assistantMessageId: toolConfirmationLookup.assistantMessageId,
         },
       );
-      toast.error(
-        t("errors.confirmationMissing"),
-      );
+      toast.error(t("errors.confirmationMissing"));
       return;
     }
 
     void Promise.resolve(onReloadMessages()).catch((error) => {
       const message =
-        error instanceof Error
-          ? error.message
-          : t("errors.reloadFailed");
+        error instanceof Error ? error.message : t("errors.reloadFailed");
       toast.error(message);
     });
   }, [
@@ -654,6 +652,10 @@ export function ChatCanvas({
     },
     [],
   );
+  // A conversation that takes no messages from the viewer (a workspace
+  // assistant's own) also takes no continue, refresh, restart, approval or
+  // answer from them: the server refuses every one of those turns.
+  const viewerReadOnly = Boolean(composerNotice);
   const continuationDisabled =
     !onSendMessage ||
     !workspaceId ||
@@ -725,6 +727,7 @@ export function ChatCanvas({
       <EmptyState
         workingFolderSlot={workingFolderSlot}
         composerDraftKey={composerDraftKey}
+        workspaceId={workspaceId}
         composerInitialInput={composerInitialInput}
         composerResetKey={composerResetKey}
         allSources={allSources}
@@ -768,7 +771,9 @@ export function ChatCanvas({
         <MessageList
           continuationDisabled={continuationDisabled}
           onContinueAgentRun={
-            onSendMessage ? handleContinueAgentRun : undefined
+            onSendMessage && !viewerReadOnly
+              ? handleContinueAgentRun
+              : undefined
           }
           activeThreadRun={activeThreadRun}
           activeVersionByGroup={activeVersionByGroup}
@@ -783,12 +788,17 @@ export function ChatCanvas({
           onArtifactPreview={onArtifactPreview}
           onCitationClick={onCitationClick}
           onLoadOlderMessages={onLoadOlderMessages}
-          onRefreshLatest={localStatus.blocked ? undefined : onRefreshLatest}
+          onRefreshLatest={
+            localStatus.blocked || viewerReadOnly ? undefined : onRefreshLatest
+          }
           onRestartFromMessage={
-            localStatus.blocked ? undefined : onRestartFromMessage
+            localStatus.blocked || viewerReadOnly
+              ? undefined
+              : onRestartFromMessage
           }
           onSourcePreview={onSourcePreview}
           onWorkfileClick={onWorkfileClick}
+          readOnly={viewerReadOnly}
           resolvedConfirmations={confirmationResolutions}
           workspaceId={workspaceId}
         />
@@ -797,7 +807,7 @@ export function ChatCanvas({
       <ToolInterventionBar
         activeIntervention={activeIntervention}
         activeThreadRun={activeThreadRun}
-        items={activeConfirmationItems}
+        items={viewerReadOnly ? [] : activeConfirmationItems}
         onInterventionSettled={({ decision, result, item }) => {
           const settled = settleToolConfirmationDecision({
             decision,
@@ -839,9 +849,7 @@ export function ChatCanvas({
           }
           void Promise.resolve(onReloadMessages()).catch((error) => {
             const message =
-              error instanceof Error
-                ? error.message
-                : t("errors.reloadFailed");
+              error instanceof Error ? error.message : t("errors.reloadFailed");
             toast.error(message);
           });
         }}
@@ -859,9 +867,7 @@ export function ChatCanvas({
           }
           void Promise.resolve(onReloadMessages()).catch((error) => {
             const message =
-              error instanceof Error
-                ? error.message
-                : t("errors.reloadFailed");
+              error instanceof Error ? error.message : t("errors.reloadFailed");
             toast.error(message);
           });
         }}
@@ -896,7 +902,7 @@ export function ChatCanvas({
       />
 
       <UserQuestionInterventionBar
-        items={pendingQuestionItems}
+        items={viewerReadOnly ? [] : pendingQuestionItems}
         onSettled={({ answer, item }) => {
           if (localStatus.blocked) {
             if (answer.status === "cancelled") onStopStreaming?.();
@@ -999,69 +1005,74 @@ export function ChatCanvas({
             </div>
           ) : null}
           {typingIndicator}
-          <Composer
-            onRegisterContinuationInput={registerContinuationInput}
-            draftKey={composerDraftKey}
-            placeholder={
-              localStatus.blocked
-                ? `${localStatus.message ?? t("chatRoot.computerUnavailable")} ${t("chatRoot.keepWritingDraft")}`
-                : undefined
-            }
-            workingFolderSlot={workingFolderSlot}
-            className="w-full"
-            allSources={allSources}
-            sourceMentionLoader={sourceMentionLoader}
-            submitDisabled={isSubmitDisabledForRun}
-            isStopping={isStopping}
-            initialAttachments={editingInitialAttachments}
-            initialCommand={composerInitialCommand}
-            initialInput={composerInitialInput}
-            isEditing={isEditing}
-            inputKey={threadTitle + "-" + (composerResetKey ?? 0)}
-            onCancelEditing={onCancelEditing}
-            onRemoveSource={handleRemoveSource}
-            onSkillSelectionChange={handleSkillSelectionChange}
-            onSearchEnabledChange={onSearchEnabledChange}
-            onSubmit={(
-              message,
-              tools,
-              command,
-              skillIds,
-              content,
-              invocation,
-            ) =>
-              handleSendMessage({
-                content: content ?? message.text.trim(),
-                images: promptFilesToImages(message.files),
-                mentionedSourceIds: message.mentionedSourceIds,
-                skillIds,
+          {composerNotice ? (
+            composerNotice
+          ) : (
+            <Composer
+              onRegisterContinuationInput={registerContinuationInput}
+              draftKey={composerDraftKey}
+              dictationWorkspaceId={workspaceId}
+              placeholder={
+                localStatus.blocked
+                  ? `${localStatus.message ?? t("chatRoot.computerUnavailable")} ${t("chatRoot.keepWritingDraft")}`
+                  : undefined
+              }
+              workingFolderSlot={workingFolderSlot}
+              className="w-full"
+              allSources={allSources}
+              sourceMentionLoader={sourceMentionLoader}
+              submitDisabled={isSubmitDisabledForRun}
+              isStopping={isStopping}
+              initialAttachments={editingInitialAttachments}
+              initialCommand={composerInitialCommand}
+              initialInput={composerInitialInput}
+              isEditing={isEditing}
+              inputKey={threadTitle + "-" + (composerResetKey ?? 0)}
+              onCancelEditing={onCancelEditing}
+              onRemoveSource={handleRemoveSource}
+              onSkillSelectionChange={handleSkillSelectionChange}
+              onSearchEnabledChange={onSearchEnabledChange}
+              onSubmit={(
+                message,
                 tools,
                 command,
+                skillIds,
+                content,
                 invocation,
-              })
-            }
-            onStopStreaming={composerStopStreaming}
-            stopPending={isComposerStopPending}
-            onType={onComposerType}
-            onThinkingSettingsChange={onThinkingSettingsChange}
-            searchEnabled={searchEnabled}
-            availableSkills={availableSkills}
-            capabilityCatalog={capabilityCatalog}
-            selectedSkillIds={selectedSkillIds}
-            selectedMcpInstallIds={selectedMcpInstallIds}
-            selectedMcpToolIds={selectedMcpToolIds}
-            selectedSources={selectedSources}
-            thinkingCapabilities={thinkingCapabilities}
-            thinkingSettings={thinkingSettings}
-            modelCapabilities={modelCapabilities}
-            imageModelAvailable={imageModelAvailable}
-            imageModelAlias={imageModelAlias}
-            notionConnectorId={notionConnectorId}
-            disabledToolNames={disabledToolNames}
-            onDisabledToolNamesChange={onDisabledToolNamesChange}
-            composerOptions={composerOptions}
-            onComposerOptionsChange={onComposerOptionsChange}
-          />
+              ) =>
+                handleSendMessage({
+                  content: content ?? message.text.trim(),
+                  images: promptFilesToImages(message.files),
+                  mentionedSourceIds: message.mentionedSourceIds,
+                  skillIds,
+                  tools,
+                  command,
+                  invocation,
+                })
+              }
+              onStopStreaming={composerStopStreaming}
+              stopPending={isComposerStopPending}
+              onType={onComposerType}
+              onThinkingSettingsChange={onThinkingSettingsChange}
+              searchEnabled={searchEnabled}
+              availableSkills={availableSkills}
+              capabilityCatalog={capabilityCatalog}
+              selectedSkillIds={selectedSkillIds}
+              selectedMcpInstallIds={selectedMcpInstallIds}
+              selectedMcpToolIds={selectedMcpToolIds}
+              selectedSources={selectedSources}
+              thinkingCapabilities={thinkingCapabilities}
+              thinkingSettings={thinkingSettings}
+              modelCapabilities={modelCapabilities}
+              imageModelAvailable={imageModelAvailable}
+              imageModelAlias={imageModelAlias}
+              notionConnectorId={notionConnectorId}
+              disabledToolNames={disabledToolNames}
+              onDisabledToolNamesChange={onDisabledToolNamesChange}
+              composerOptions={composerOptions}
+              onComposerOptionsChange={onComposerOptionsChange}
+            />
+          )}
         </div>
       </div>
     </section>

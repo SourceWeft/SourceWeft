@@ -8,6 +8,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Activity,
+  CalendarClock,
+  ConciergeBell,
   LayoutDashboard,
   MessageSquareText,
   MoreHorizontal,
@@ -29,6 +31,9 @@ import {
 import { useSidebar } from "@sourceweft/ui-web/components/ui/sidebar";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { DashboardAccountMenu } from "./dashboard-account-menu";
+import { DashboardMobileMeEntry } from "./dashboard-mobile-me-entry";
+import { useDashboardMobileNav } from "./dashboard-mobile-nav-state";
+import { chatDeletionRemovesChat } from "./dashboard-chat-items";
 import { useDashboardChatState } from "./dashboard-chat-state";
 import { McpIcon, SkillIcon } from "../../_components/site-icons";
 import { DashboardSidebarChatPanel } from "./dashboard-sidebar-chat-panel";
@@ -36,6 +41,7 @@ import { WorkspaceMembersDialog } from "./workspace-members-dialog";
 import { copyStoredByokState } from "../chat/_components/byok-state";
 import { useWorkspaceLayout } from "./dashboard-workspace-layout";
 import { DashboardSidebarBrand } from "./dashboard-sidebar-brand";
+import { NotificationBell } from "../scheduled/_components/notification-bell";
 import { MARKET_ADMIN_HREF, MarketAdminNavLink } from "./market-admin-nav-link";
 
 type NavItem = {
@@ -74,6 +80,20 @@ const navMain: NavItem[] = [
     href: "/dashboard/mcp",
     icon: McpIcon,
     match: (p) => p.startsWith("/dashboard/mcp"),
+  },
+  {
+    labelKey: "nav.scheduled",
+    href: "/dashboard/scheduled",
+    icon: CalendarClock,
+    match: (p) => p.startsWith("/dashboard/scheduled"),
+    more: true,
+  },
+  {
+    labelKey: "nav.assistant",
+    href: "/dashboard/assistant",
+    icon: ConciergeBell,
+    match: (p) => p.startsWith("/dashboard/assistant"),
+    more: true,
   },
   {
     labelKey: "nav.observability",
@@ -122,13 +142,23 @@ export function DashboardSidebar() {
   const router = useRouter();
   const { openMobile, setOpenMobile } = useSidebar();
   const {
-    closeConversations,
+    closeConversations: closeConversationPanel,
     conversationOverlayOpen,
     conversationsDocked,
     desktopTitlebar,
     conversationWidth,
     railWidth,
   } = useWorkspaceLayout();
+  const { openMain, openMe } = useDashboardMobileNav();
+  // Going somewhere from the drawer also leaves the phone's Me page.
+  const closeConversations = () => {
+    openMain();
+    closeConversationPanel();
+  };
+  const openMePage = () => {
+    openMe();
+    closeConversationPanel();
+  };
   const overlayRef = React.useRef<HTMLElement>(null);
   const [search, setSearch] = React.useState("");
   // Member management is per-workspace, not an account setting — it opens as
@@ -146,6 +176,15 @@ export function DashboardSidebar() {
     activeChatId,
     archivedChats,
     archiveChat,
+    unarchiveChat,
+    renameChat,
+    pinChat,
+    unpinChat,
+    pinnedChatIds,
+    hasMoreArchivedChats,
+    isLoadingArchivedChats,
+    loadArchivedChats,
+    loadMoreArchivedChats,
     clearArchivedChats,
     clearPrivateChats,
     createChat,
@@ -170,17 +209,28 @@ export function DashboardSidebar() {
     routeThreadId ||
     (pathname === "/dashboard/chat" && mode === "thread" ? activeChatId : "");
 
+  // Read before the delete: the lists no longer hold the chat afterwards. The
+  // server deletes the conversations a chat's delegations opened along with
+  // it, so an open one of those is left as well.
   const handleDeleteChat = async (id: string) => {
+    const shouldResetRoute = chatDeletionRemovesChat(
+      [...privateChats, ...sharedChats, ...archivedChats],
+      [id],
+      activeThreadId,
+    );
+
     await deleteChat(id);
 
-    if (id === activeThreadId) {
+    if (shouldResetRoute) {
       router.push("/dashboard/chat");
     }
   };
 
   const handleClearPrivateChats = async () => {
-    const shouldResetRoute = privateChats.some(
-      (item) => item.id === activeThreadId,
+    const shouldResetRoute = chatDeletionRemovesChat(
+      privateChats,
+      privateChats.map((item) => item.id),
+      activeThreadId,
     );
 
     await clearPrivateChats();
@@ -191,8 +241,10 @@ export function DashboardSidebar() {
   };
 
   const handleClearArchivedChats = async () => {
-    const shouldResetRoute = archivedChats.some(
-      (item) => item.id === activeThreadId,
+    const shouldResetRoute = chatDeletionRemovesChat(
+      archivedChats,
+      archivedChats.map((item) => item.id),
+      activeThreadId,
     );
 
     await clearArchivedChats();
@@ -314,14 +366,27 @@ export function DashboardSidebar() {
     });
   };
 
+  const handleTogglePinChat = React.useCallback(
+    (id: string, pinned: boolean) => (pinned ? pinChat(id) : unpinChat(id)),
+    [pinChat, unpinChat],
+  );
+
   // Everything the conversation list needs, shared by the docked column, the
   // overlay and the phone drawer.
   const panelProps = {
     search,
     onSearchChange: setSearch,
     archivedChats,
+    hasMoreArchivedChats,
+    isLoadingArchivedChats,
     activeChatId: activeThreadId,
     onArchiveChat: archiveChat,
+    onUnarchiveChat: unarchiveChat,
+    onRenameChat: renameChat,
+    onTogglePinChat: handleTogglePinChat,
+    pinnedChatIds,
+    onLoadArchivedChats: loadArchivedChats,
+    onLoadMoreArchivedChats: loadMoreArchivedChats,
     onClearArchivedChats: handleClearArchivedChats,
     onClearPrivateChats: handleClearPrivateChats,
     onCreateAgentChat: handleCreateAgentChat,
@@ -430,17 +495,28 @@ export function DashboardSidebar() {
       data-testid="navigation-rail"
       style={{ width: railWidth }}
       className={cn(
-        "flex h-svh shrink-0 flex-col items-center gap-1 border-r border-sidebar-border bg-sidebar px-2 pb-3",
-        desktopTitlebar ? "pt-0" : "pt-3",
+        "relative flex h-svh shrink-0 flex-col items-center gap-1 bg-sidebar px-2 pb-3",
+        desktopTitlebar ? "pt-0" : "border-r border-sidebar-border pt-3",
       )}
     >
       {desktopTitlebar ? (
-        // The traffic lights sit here; the strip drags the window.
-        <div
-          aria-hidden="true"
-          data-desktop-drag-region=""
-          className="h-10 w-full shrink-0 select-none"
-        />
+        // The traffic lights sit here and reach past the rail, so this strip
+        // is one titlebar row with the column beside it: as tall as the chat
+        // header, with that row's bottom line carried across the rail, and
+        // the rail's edge starts at that line instead of running between the
+        // lights.
+        <>
+          <div
+            aria-hidden="true"
+            data-desktop-drag-region=""
+            className="h-14 w-full shrink-0 select-none"
+          />
+          <div
+            aria-hidden="true"
+            data-testid="navigation-rail-edge"
+            className="pointer-events-none absolute inset-x-0 bottom-0 top-[55px] border-r border-t border-sidebar-border"
+          />
+        </>
       ) : (
         <DashboardSidebarBrand collapsed />
       )}
@@ -489,7 +565,8 @@ export function DashboardSidebar() {
           </DropdownMenuContent>
         </DropdownMenu>
       </nav>
-      <div className="mt-auto">
+      <div className="mt-auto flex flex-col items-center gap-1">
+        <NotificationBell />
         <DashboardAccountMenu />
       </div>
     </aside>
@@ -506,7 +583,7 @@ export function DashboardSidebar() {
         data-testid="conversation-overlay-backdrop"
         style={{ left: railWidth }}
         className="absolute inset-y-0 right-0 z-30 bg-black/10 animate-in fade-in-0 duration-150"
-        onClick={closeConversations}
+        onClick={closeConversationPanel}
       />
       <aside
         ref={overlayRef}
@@ -538,7 +615,7 @@ export function DashboardSidebar() {
             className="size-8 shrink-0 text-muted-foreground"
             aria-label={t("sidebar.hideConversations")}
             title={t("sidebar.hideConversations")}
-            onClick={closeConversations}
+            onClick={closeConversationPanel}
           >
             <PanelLeftClose className="size-4" />
           </Button>,
@@ -585,15 +662,15 @@ export function DashboardSidebar() {
                 size="icon-xs"
                 className="size-8 shrink-0 text-muted-foreground"
                 aria-label={t("sidebar.hideSidebar")}
-                onClick={closeConversations}
+                onClick={closeConversationPanel}
               >
                 <PanelLeftClose className="size-4" />
               </Button>
             }
             navigation={renderNavigation()}
             footer={
-              <div className="shrink-0 border-t border-sidebar-border/60 p-3">
-                <DashboardAccountMenu expanded />
+              <div className="shrink-0 border-t border-sidebar-border/60 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+                <DashboardMobileMeEntry onOpen={openMePage} />
               </div>
             }
           />

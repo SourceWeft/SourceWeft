@@ -13,6 +13,7 @@ import {
   updateNoteContentRequestSchema,
   retrySourceRequestSchema,
   updateSourceRequestSchema,
+  youTubeListingRequestSchema,
 } from "@sourceweft/contracts";
 import {
   getSourceGuide,
@@ -23,6 +24,8 @@ import {
   isSourceDiscoveryAvailable,
 } from "../../../modules/sources/discovery/service";
 import { discoveryRateLimitedError } from "./source-discovery-errors";
+import { listYouTubeCollection } from "../../../modules/sources/youtube/listing-service";
+import { requireContentWorkspace } from "../../../modules/workspace/guards";
 import { getNoteOrigin, updateNoteContent } from "../../../modules/notes";
 import { billingRuntime as billingService } from "../../../billing-host/bindings";
 import {
@@ -35,7 +38,19 @@ import {
   requireSession,
 } from "../../middleware/auth-session";
 import { ApiError, ApiResponse } from "../../response/api-response";
+import { ContentError } from "../../../modules/content/errors";
 import { ensureObjectBody, requireRouteParam } from "./helpers";
+
+/** Seconds until a 429 rate-limit refusal clears, or null for any other error. */
+function rateLimitRetryAfterSeconds(error: unknown): number | null {
+  if (!(error instanceof ContentError) || error.statusCode !== 429) {
+    return null;
+  }
+  const details = error.details as { retryAfterSeconds?: unknown } | undefined;
+  return typeof details?.retryAfterSeconds === "number"
+    ? details.retryAfterSeconds
+    : null;
+}
 
 function parseOptionalBooleanQuery(value: string | undefined) {
   if (value === undefined) {
@@ -357,6 +372,45 @@ export function registerSourceRoutes(app: Hono) {
     }
     const { kind: _kind, ...response } = result;
     return ApiResponse.success(c, response);
+  });
+
+  app.post("/sources/youtube/listing", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const body = ensureObjectBody(await c.req.json().catch(() => null));
+    const parsed = youTubeListingRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const workspace = await requireContentWorkspace({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+    });
+
+    let result;
+    try {
+      result = await listYouTubeCollection({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        userId: getSessionUserId(session),
+        url: parsed.data.url,
+      });
+    } catch (error) {
+      // Same as /source-discovery: a refusal says when to come back.
+      const retryAfterSeconds = rateLimitRetryAfterSeconds(error);
+      if (retryAfterSeconds !== null) {
+        c.header("Retry-After", String(retryAfterSeconds));
+      }
+      throw error;
+    }
+
+    return ApiResponse.success(c, result);
   });
 
   app.get("/sources/:id/note", async (c) => {

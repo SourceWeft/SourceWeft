@@ -148,31 +148,46 @@ async function runMixedDecisionTurn(extraMiddleware: boolean) {
   return seen;
 }
 
-test("approve + reject in one batch drops the approved call from the model's message without the middleware", async () => {
-  // LangChain's HITL keeps only the rejected call and jumps to the model, so
-  // the next request carries a message the model never produced — which a
-  // provider validating its own output (DeepSeek thinking mode) rejects.
+test("approve + reject in one batch runs the approved call and answers the rejected one (langchain 1.6)", async () => {
+  // Up to langchain 1.5 its HITL middleware kept only the rejected call and
+  // jumped back to the model: the approved call never ran, and the next
+  // request carried a message the model never produced, which a provider
+  // validating its own output (DeepSeek thinking mode) rejects. langchain 1.6
+  // keeps both calls, runs the approved one and answers the rejected one.
   const seen = await runMixedDecisionTurn(false);
   assert.equal(seen.length, 2);
-  const message = seen[1]!.find(AIMessage.isInstance)!;
+  const next = seen[1]!;
+  const message = next.find(AIMessage.isInstance)!;
+  assert.deepEqual(message.tool_calls?.map((c) => c.id).sort(), ["a", "b"]);
+  assert.deepEqual(unansweredCallIds(next), []);
   assert.deepEqual(
-    message.tool_calls?.map((c) => c.id),
-    ["b"],
+    next
+      .filter(ToolMessage.isInstance)
+      .map((m) => [m.tool_call_id, String(m.content)])
+      .sort(),
+    [
+      ["a", "sent A"],
+      ["b", "Do not send B."],
+    ],
   );
 });
 
-test("with the middleware, the next model call keeps the model's message and answers every call", async () => {
+test("with the middleware, a mixed batch reaches the model the same way", async () => {
+  // The middleware only fills in calls nobody answered; here upstream answers
+  // both, so it must leave the approved call's real result alone.
   const seen = await runMixedDecisionTurn(true);
   assert.equal(seen.length, 2);
   const next = seen[1]!;
   const message = next.find(AIMessage.isInstance)!;
   assert.deepEqual(message.tool_calls?.map((c) => c.id).sort(), ["a", "b"]);
   assert.deepEqual(unansweredCallIds(next), []);
-  const results = next.filter(ToolMessage.isInstance);
   assert.deepEqual(
-    results.map((m) => [m.tool_call_id, String(m.content)]),
+    next
+      .filter(ToolMessage.isInstance)
+      .map((m) => [m.tool_call_id, String(m.content)])
+      .sort(),
     [
-      ["a", UNANSWERED_TOOL_CALL_RESULT],
+      ["a", "sent A"],
       ["b", "Do not send B."],
     ],
   );

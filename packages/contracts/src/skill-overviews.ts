@@ -33,6 +33,8 @@ export const systemModelProblemSchema = z.enum([
   "provider_not_found",
   "provider_capability_missing",
   "provider_credential_headers",
+  "provider_routing_invalid",
+  "provider_routing_unsupported",
 ]);
 
 // Whether the system model can write overviews. Names settings, the Provider

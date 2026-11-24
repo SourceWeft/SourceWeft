@@ -524,6 +524,28 @@ export async function resolveRequestCandidates(
     metadata?: Record<string, unknown>;
   },
 ): Promise<ResolvedRequestTarget[]> {
+  // Demote targets in failure cooldown to the tail so requests stop paying a
+  // known-dead target's failed round-trip on every call. This reorders, never
+  // removes: with every target cooling down the strategy order is preserved
+  // and the request still has its full failover chain.
+  return orderByTargetHealth(
+    await resolveStrategyCandidates(config, execution),
+    config.targetHealth,
+  );
+}
+
+/**
+ * The candidates of `resolveRequestCandidates` in route strategy order, before
+ * cooldown demotion. The failover policy applies the demotion itself, per
+ * request, so it can record which targets were skipped.
+ */
+export async function resolveStrategyCandidates(
+  config: ResolvedModelGatewayConfig,
+  execution: GatewayExecutionInput & {
+    model: string;
+    metadata?: Record<string, unknown>;
+  },
+): Promise<ResolvedRequestTarget[]> {
   const mode = execution.executionMode ?? config.modeDefault;
 
   if (mode === "BYOK") {
@@ -761,9 +783,5 @@ export async function resolveRequestCandidates(
     };
   });
 
-  // Demote targets in failure cooldown to the tail so requests stop paying a
-  // known-dead target's failed round-trip on every call. This reorders, never
-  // removes: with every target cooling down the strategy order is preserved
-  // and the request still has its full failover chain.
-  return orderByTargetHealth(targets, config.targetHealth);
+  return targets;
 }

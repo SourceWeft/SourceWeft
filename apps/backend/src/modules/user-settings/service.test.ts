@@ -15,9 +15,25 @@ test("normalizeUserSettings applies defaults and drops unknown fields", () => {
     }),
     {
       appearance: { theme: "dark", language: "system" },
-      preview: { gmail: false },
     },
   );
+});
+
+test("normalizeUserSettings ignores a legacy stored preview key", () => {
+  // Rows written before Gmail opened to everyone still carry `preview` in the
+  // jsonb; reads must return appearance only, with no migration.
+  for (const preview of [{ gmail: true }, { gmail: false }, "malformed"]) {
+    assert.deepEqual(
+      normalizeUserSettings({
+        appearance: { theme: "dark", language: "zh-TW" },
+        preview,
+      }),
+      { appearance: { theme: "dark", language: "zh-TW" } },
+    );
+  }
+  assert.deepEqual(normalizeUserSettings({ preview: { gmail: true } }), {
+    appearance: DEFAULT_USER_SETTINGS.appearance,
+  });
 });
 
 test("normalizeUserSettings falls back for invalid settings", () => {
@@ -54,13 +70,11 @@ test("mergeUserSettings keeps existing appearance fields", () => {
     mergeUserSettings(
       {
         appearance: { theme: "light", language: "system" },
-        preview: { gmail: false },
       },
       { appearance: { theme: "dark" } },
     ),
     {
       appearance: { theme: "dark", language: "system" },
-      preview: { gmail: false },
     },
   );
 });

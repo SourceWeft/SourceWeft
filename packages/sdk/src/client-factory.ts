@@ -1,3 +1,5 @@
+import { AgentTasksClient } from "./agent-tasks-client";
+import { AssistantClient } from "./assistant-client";
 import { DeploymentClient } from "./deployment-client";
 import { BillingClient } from "./billing-client";
 import { ConnectorsClient } from "./connectors-client";
@@ -6,12 +8,15 @@ import { DashboardClient } from "./dashboard-client";
 import { HttpClient } from "./http-client";
 import { JobsClient } from "./jobs-client";
 import { LocalDevicesClient } from "./local-devices-client";
+import { NotificationsClient } from "./notifications-client";
 import { LlmObservabilityClient } from "./llm-observability-client";
 import { UserSettingsClient } from "./user-settings-client";
 import { WorkspaceClient } from "./workspace-client";
 
 export type SourceweftClient = {
   readonly http: HttpClient;
+  readonly agentTasks: AgentTasksClient;
+  readonly assistant: AssistantClient;
   readonly billing: BillingClient;
   readonly deployment: DeploymentClient;
   readonly connectors: ConnectorsClient;
@@ -20,6 +25,7 @@ export type SourceweftClient = {
   readonly jobs: JobsClient;
   readonly llmObservability: LlmObservabilityClient;
   readonly localDevices: LocalDevicesClient;
+  readonly notifications: NotificationsClient;
   readonly userSettings: UserSettingsClient;
   readonly workspace: WorkspaceClient;
 };
@@ -39,6 +45,8 @@ export function createSourceweftClient(baseUrl: string): SourceweftClient {
 
   return {
     http,
+    agentTasks: new AgentTasksClient(http),
+    assistant: new AssistantClient(http),
     billing: new BillingClient(http),
     deployment: new DeploymentClient(http),
     connectors: new ConnectorsClient(http),
@@ -47,6 +55,7 @@ export function createSourceweftClient(baseUrl: string): SourceweftClient {
     jobs: new JobsClient(http),
     llmObservability: new LlmObservabilityClient(http),
     localDevices: new LocalDevicesClient(http),
+    notifications: new NotificationsClient(http),
     userSettings: new UserSettingsClient(http),
     workspace: new WorkspaceClient(http),
   };

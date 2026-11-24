@@ -101,6 +101,9 @@ test("backend manifest adapter injects OAuth runtime fields only at host boundar
   );
 
   assert.equal(manifest.type, "notion");
+  if (manifest.auth.kind !== "oauth2") {
+    throw new Error("expected notion manifest to use oauth2 auth");
+  }
   assert.equal(manifest.auth.redirectUri, "https://app.example/callback");
   assert.equal(manifest.auth.authorizationParams?.client_id, "client-id");
   assert.equal(manifest.auth.authorizationParams?.owner, "user");

@@ -1,3 +1,4 @@
+import { MAX_PINNED_THREADS } from "@sourceweft/contracts";
 import { Hono } from "hono";
 import { contentThreadService } from "../../modules/threads";
 import { workspaceService } from "../../modules/workspace";
@@ -146,6 +147,7 @@ export function registerDashboardRoutes(app: Hono) {
 
     const [
       privateChatsResult,
+      pinnedChatsResult,
       initialChatPreferencesResult,
       modelCatalogResult,
     ] = await Promise.allSettled([
@@ -153,6 +155,12 @@ export function registerDashboardRoutes(app: Hono) {
         workspaceId: activeWorkspace.id,
         userId,
         limit: THREADS_PAGE_SIZE,
+      }),
+      contentThreadService.listThreads({
+        workspaceId: activeWorkspace.id,
+        userId,
+        pinned: true,
+        limit: MAX_PINNED_THREADS,
       }),
       contentThreadService.getInitialChatPreferences({
         workspaceId: activeWorkspace.id,
@@ -177,6 +185,10 @@ export function registerDashboardRoutes(app: Hono) {
       modelCatalogResult.status === "fulfilled"
         ? modelCatalogResult.value
         : null;
+    // Pins are a convenience: the dashboard still loads without them.
+    if (pinnedChatsResult.status === "rejected") {
+      warnings.push(warningFromError("pinnedChats", pinnedChatsResult.reason));
+    }
     if (modelCatalogResult.status === "rejected") {
       warnings.push(
         warningFromError("modelCatalog", modelCatalogResult.reason),
@@ -191,6 +203,9 @@ export function registerDashboardRoutes(app: Hono) {
       activeWorkspace,
       workspaces,
       privateChats: privateChatsResult.value,
+      ...(pinnedChatsResult.status === "fulfilled"
+        ? { pinnedChats: pinnedChatsResult.value }
+        : {}),
       initialChatPreferences:
         initialChatPreferencesResult.value.initialChatPreferences,
       modelCatalog,

@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>SourceWeft</title>
+    <!-- Shown while the web app loads. Without viewport-fit=cover the viewport runs from
+         the safe-area top to the safe-area bottom, as it does for the web app's own launch
+         cover, and LaunchScreen.storyboard puts its wordmark at the centre of that span on
+         Dynamic Island iPhones, so the three hand over without the wordmark moving. If
+         loading takes a while it says so; if it fails (the app opens this page as
+         #failed), it offers a retry. -->
+    <style>
+      :root { --bg: #ffffff; --fg: #000000; --muted: #737373; }
+      @media (prefers-color-scheme: dark) {
+        :root { --bg: #171717; --fg: #ffffff; --muted: #a3a3a3; }
+      }
+      html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+        font-family: -apple-system, BlinkMacSystemFont, sans-serif; -webkit-user-select: none; user-select: none; }
+      .mark { position: fixed; left: 0; right: 0; top: 50%; transform: translateY(-50%);
+        text-align: center; font-size: 22px; font-weight: 600; line-height: 27px; }
+      .below { position: fixed; left: 24px; right: 24px; top: calc(50% + 32px);
+        display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; }
+      .bar { width: 44px; height: 3px; border-radius: 2px; background: color-mix(in srgb, var(--muted) 35%, transparent);
+        overflow: hidden; position: relative; }
+      .bar::after { content: ""; position: absolute; inset: 0; width: 40%; border-radius: 2px; background: var(--fg);
+        animation: slide 1.1s ease-in-out infinite; }
+      .status { font-size: 14px; line-height: 20px; color: var(--muted); min-height: 20px; }
+      button { font: inherit; font-size: 15px; font-weight: 600; color: var(--bg); background: var(--fg);
+        border: 0; border-radius: 999px; padding: 10px 22px; }
+      [hidden] { display: none !important; }
+      @keyframes slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(250%); } }
+      @media (prefers-reduced-motion: reduce) { .bar::after { animation: none; width: 100%; opacity: .5; } }
+    </style>
+  </head>
+  <body>
+    <div class="mark">SourceWeft</div>
+    <div class="below">
+      <div class="bar" id="bar" role="progressbar" aria-label="Loading"></div>
+      <div class="status" id="status" aria-live="polite"></div>
+      <button id="retry" type="button" hidden></button>
+    </div>
+    <script>
+      (() => {
+        const zh = (navigator.language || "").toLowerCase().startsWith("zh");
+        const tw = /^zh-(tw|hk|mo|hant)/i.test(navigator.language || "");
+        const text = {
+          slow: zh ? (tw ? "網路較慢，正在連線…" : "网络较慢，正在连接…") : "Slow connection, still connecting…",
+          offline: zh ? (tw ? "目前沒有網路連線" : "当前没有网络连接") : "You're offline",
+          failed: zh ? (tw ? "無法連線到 SourceWeft" : "无法连接到 SourceWeft") : "Can't reach SourceWeft",
+          retry: zh ? (tw ? "重試" : "重试") : "Try again",
+        };
+        const SLOW_MS = 3000;
+        const FAILED_MS = 15000;
+        const bar = document.getElementById("bar");
+        const status = document.getElementById("status");
+        const retry = document.getElementById("retry");
+        retry.textContent = text.retry;
+        let timers = [];
+
+        const show = (message, canRetry) => {
+          status.textContent = message;
+          retry.hidden = !canRetry;
+          bar.hidden = canRetry;
+        };
+        const start = () => {
+          timers.forEach(clearTimeout);
+          show("", false);
+          if (!navigator.onLine) {
+            show(text.offline, true);
+            return;
+          }
+          timers = [
+            setTimeout(() => show(text.slow, false), SLOW_MS),
+            setTimeout(() => show(text.failed, true), FAILED_MS),
+          ];
+        };
+        const relaunch = () => {
+          start();
+          const invoke = window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke;
+          if (invoke) invoke("retry_launch").catch(() => show(text.failed, true));
+        };
+
+        retry.addEventListener("click", relaunch);
+        if (location.hash === "#failed") {
+          show(navigator.onLine ? text.failed : text.offline, true);
+          window.addEventListener("online", relaunch);
+          return;
+        }
+        window.addEventListener("online", relaunch);
+        window.addEventListener("offline", () => show(text.offline, true));
+        start();
+      })();
+    </script>
+  </body>
+</html>

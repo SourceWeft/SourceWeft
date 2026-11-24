@@ -714,6 +714,13 @@ test("the truncation predicate reads both finish-reason spellings and every tool
     ),
     false,
   );
+  // A Responses API reply has no finish reason; its status says it was cut.
+  const responses = (status: string) => ({
+    response_metadata: { object: "response", status },
+    tool_calls: [{ name: "w" }],
+  });
+  assert.equal(isToolCallTruncatedByOutputLimit(responses("incomplete")), true);
+  assert.equal(isToolCallTruncatedByOutputLimit(responses("completed")), false);
   for (const finish of ["stop", "tool_calls", undefined]) {
     assert.equal(
       isToolCallTruncatedByOutputLimit({

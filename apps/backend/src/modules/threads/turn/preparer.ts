@@ -36,8 +36,10 @@ import {
   findThreadRecord,
   updateThreadModelSettingsRecord,
 } from "../thread/repository";
+import { assertTurnAllowedInThread } from "../thread/host-owned";
 import {
   applyPersonaToolAllowlist,
+  applyUnattendedToolPolicy,
   resolvePersona,
   type AgentCitation,
 } from "../agent";
@@ -1288,6 +1290,9 @@ export async function prepareThreadTurn(
   if (!thread) {
     throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
   }
+  // Every client turn (send, edit, regenerate, resume; durable or direct)
+  // passes here: a host-owned conversation only runs the host's turns.
+  assertTurnAllowedInThread(thread, input);
 
   if (thread.executionTarget?.kind === "local") {
     const { requireLocalConversationReady } =
@@ -1622,7 +1627,7 @@ export async function prepareThreadTurn(
     workspaceId: workspace.id,
     personaId: thread.personaId,
   });
-  const toolPermissions = applyPersonaToolAllowlist(
+  const personaToolPermissions = applyPersonaToolAllowlist(
     resolveToolPermissions({
       command: resolvedCommand,
       selectedSkillRuntime,
@@ -1630,6 +1635,11 @@ export async function prepareThreadTurn(
     }),
     persona,
   );
+  // Last, so nothing above can widen it: with nobody present only the
+  // read-class allow-list stays permitted.
+  const toolPermissions = input.unattended
+    ? applyUnattendedToolPolicy(personaToolPermissions)
+    : personaToolPermissions;
   const runtimeTools = buildRuntimeTools({
     toolPermissions,
     tools: effectiveTools,
@@ -2005,6 +2015,11 @@ export async function prepareThreadTurn(
     isFirstAssistantAttempt,
     initialTitle,
     failurePersistence: input.failurePersistence ?? "persist-error-turn",
+    ...(input.unattended ? { unattended: true as const } : {}),
+    ...(input.creditCap !== undefined ? { creditCap: input.creditCap } : {}),
+    ...(input.hostContext !== undefined
+      ? { hostContext: input.hostContext }
+      : {}),
     // The web client sends the MCP selection inside tools.mcp (sources-hub
     // picker); the top-level field remains for API callers. Without this
     // fallback the picker selection never reached the turn at all.

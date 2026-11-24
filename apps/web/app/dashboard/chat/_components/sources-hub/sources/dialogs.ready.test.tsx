@@ -20,6 +20,7 @@ test("file submission waits for a usable workspace, then resumes without a timer
     onClose: noop,
     onCreateTextSource: noop,
     onCreateUrlSource: noop,
+    onOpenYouTubeListing: noop,
     onDragEnter: noop,
     onDragLeave: noop,
     onDragOver: noop,

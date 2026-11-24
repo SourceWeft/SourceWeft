@@ -23,6 +23,8 @@ export async function markRunWaitingForApproval(input: {
   confirmationIds?: string[];
   requestedAt?: Date;
   expiresAt?: Date;
+  /** How many credits this run has cost so far; see `finishChatThreadRun`. */
+  consumedCredits?: number;
 }) {
   const requestedAt = input.requestedAt ?? new Date();
   const expiresAt =
@@ -73,6 +75,7 @@ export async function markRunWaitingForApproval(input: {
     teamId: input.run.teamId,
     workspaceId: input.run.workspaceId,
     snapshotJson: snapshot,
+    consumedCredits: input.consumedCredits,
   });
   if (!updated) {
     return null;

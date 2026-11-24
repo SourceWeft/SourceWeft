@@ -1,0 +1,67 @@
+{
+  "id": "mixed-constitutions",
+  "title": "United States Bill of Rights (1789) and 中华人民共和国宪法 第三章第一节",
+  "language": "mixed",
+  "category": "mixed",
+  "uiLocale": "zh-CN",
+  "licenses": [
+    "us-bill-of-rights",
+    "prc-constitution"
+  ],
+  "chunks": [
+    {
+      "chunkNo": 0,
+      "headingPath": "United States Bill of Rights (1789)",
+      "text": "Congress of the United States,\n\nbegun and held at the City of New-York, on\n\nWednesday the fourth of March, one thousand seven hundred and eighty nine.\n\nThe Conventions of a number of the States, having at the time of their adopting the Constitution, expressed a desire, in order to prevent misconstruction or abuse of its powers, that further declaratory and restrictive clauses should be added: And as extending the ground of public confidence in the Government, will best ensure the beneficent ends of its institution.\n\nResolved by the Senate and House of Representatives of the United States of America, in Congress assembled, two thirds of both Houses concurring, that the following Articles be proposed to the Legislatures of the several States, as amendments to the Constitution of the United States, all, or any of which Articles, when ratified by three fourths of the said Legislatures, to be valid to all intents and purposes, as part of the said Constitution; vizt.\n\nArticles in addition to, and Amendment of the Constitution of the United States of America, proposed by Congress, and ratified by the Legislatures of the several States, pursuant to the fifth Article of the original Constitution.",
+      "language": "en"
+    },
+    {
+      "chunkNo": 1,
+      "headingPath": "United States Bill of Rights (1789)",
+      "text": "| Article the first | After the first enumeration required by the first article of the Constitution, there shall be one Representative for every thirty thousand until the number shall amount to one hundred, after which the proportion shall be so regulated by Congress, that there shall be not less than one hundred Representatives, nor less than one Representative for every forty thousand persons, until the number of Representatives shall amount to two hundred; after which the proportion shall be so regulated by Congress, that there shall not be less than two hundred Representatives, nor more than one Representative for every fifty thousand persons. |\n\n| Article the second | No law, varying the compensation for the services of the Senators and Representatives, shall take effect, until an election of Representatives shall have intervened. |\n\n| Article the third | Congress shall make no law respecting an establishment of religion, or prohibiting the free exercise thereof; or abridging the freedom of speech, or of the press; or the right of the people peaceably to assemble, and to petition the Government for a redress of grievances. |\n\n| Article the fourth | A well regulated Militia, being necessary to the security of a free State, the right of the people to keep and bear arms, shall not be infringed. |\n\n| Article the fifth | No Soldier shall, in time of peace be quartered in any house, without the consent of the owner, nor in time of war, but in a manner to be prescribed by law. |",
+      "language": "en"
+    },
+    {
+      "chunkNo": 2,
+      "headingPath": "United States Bill of Rights (1789)",
+      "text": "| Article the sixth | The right of the people to be secure in their persons, houses, papers, and effects, against unreasonable searches and seizures, shall not be violated, and no Warrants shall issue, but upon probable cause, supported by Oath or affirmation, and particularly describing the place to be searched, and the persons or things to be seized. |\n\n| Article the seventh | No person shall be held to answer for a capital, or otherwise infamous crime, unless on a presentment or indictment of a Grand Jury, except in cases arising in the land or naval forces, or in the Militia, when in actual service in time of war or public danger; nor shall any person be subject for the same offence to be twice put in jeopardy of life or limb; nor shall be compelled in any criminal case to be a witness against himself, nor be deprived of life, liberty, or property, without due process of law; nor shall private property be taken for public use, without just compensation. |\n\n| Article the eighth | In all criminal prosecutions, the accused shall enjoy the right to a speedy and public trial, by an impartial jury of the State and district wherein the crime shall have been committed, which district shall have been previously ascertained by law, and to be informed of the nature and cause of the accusation; to be confronted with the witnesses against him; to have compulsory process for obtaining witnesses in his favor, and to have the Assistance of Counsel for his defence. |\n\n| Article the ninth | In suits at common law, where the value in controversy shall exceed twenty dollars, the right of trial by jury shall be preserved, and no fact tried by a jury, shall be otherwise re-examined in any Court of the United States, than according to the rules of the common law. |",
+      "language": "en"
+    },
+    {
+      "chunkNo": 3,
+      "headingPath": "United States Bill of Rights (1789)",
+      "text": "| Article the tenth | Excessive bail shall not be required, nor excessive fines imposed, nor cruel and unusual punishments inflicted. |\n\n| Article the eleventh | The enumeration in the Constitution, of certain rights, shall not be construed to deny or disparage others retained by the people. |\n\n| Article the twelfth | The powers not delegated to the United States by the Constitution, nor prohibited by it to the States, are reserved to the States respectively, or to the people. |",
+      "language": "en"
+    },
+    {
+      "chunkNo": 4,
+      "headingPath": "第三章　国家机构 > 第一节　全国人民代表大会",
+      "text": "第五十七条　中华人民共和国全国人民代表大会是最高国家权力机关。它的常设机关是全国人民代表大会常务委员会。\n\n第五十八条　全国人民代表大会和全国人民代表大会常务委员会行使国家立法权。\n\n第五十九条　全国人民代表大会由省、自治区、直辖市、特别行政区和军队选出的代表组成。各少数民族都应当有适当名额的代表。\n\n全国人民代表大会代表的选举由全国人民代表大会常务委员会主持。\n\n全国人民代表大会代表名额和代表产生办法由法律规定。\n\n第六十条　全国人民代表大会每届任期五年。\n\n全国人民代表大会任期届满的两个月以前，全国人民代表大会常务委员会必须完成下届全国人民代表大会代表的选举。如果遇到不能进行选举的非常情况，由全国人民代表大会常务委员会以全体组成人员的三分之二以上的多数通过，可以推迟选举，延长本届全国人民代表大会的任期。在非常情况结束后一年内，必须完成下届全国人民代表大会代表的选举。\n\n第六十一条　全国人民代表大会会议每年举行一次，由全国人民代表大会常务委员会召集。如果全国人民代表大会常务委员会认为必要，或者有五分之一以上的全国人民代表大会代表提议，可以临时召集全国人民代表大会会议。\n\n全国人民代表大会举行会议的时候，选举主席团主持会议。\n\n第六十二条　全国人民代表大会行使下列职权：\n\n（一）修改宪法；\n\n（二）监督宪法的实施；\n\n（三）制定和修改刑事、民事、国家机构的和其他的基本法律；\n\n（四）选举中华人民共和国主席、副主席；\n\n（五）根据中华人民共和国主席的提名，决定国务院总理的人选；根据国务院总理的提名，决定国务院副总理、国务委员、各部部长、各委员会主任、审计长、秘书长的人选；",
+      "language": "zh"
+    },
+    {
+      "chunkNo": 5,
+      "headingPath": "第三章　国家机构 > 第一节　全国人民代表大会",
+      "text": "（六）选举中央军事委员会主席；根据中央军事委员会主席的提名，决定中央军事委员会其他组成人员的人选；\n\n（七）选举国家监察委员会主任；\n\n（八）选举最高人民法院院长；\n\n（九）选举最高人民检察院检察长；\n\n（十）审查和批准国民经济和社会发展计划和计划执行情况的报告；\n\n（十一）审查和批准国家的预算和预算执行情况的报告；\n\n（十二）改变或者撤销全国人民代表大会常务委员会不适当的决定；\n\n（十三）批准省、自治区和直辖市的建置；\n\n（十四）决定特别行政区的设立及其制度；\n\n（十五）决定战争和和平的问题；\n\n（十六）应当由最高国家权力机关行使的其他职权。\n\n第六十三条　全国人民代表大会有权罢免下列人员：\n\n（一）中华人民共和国主席、副主席；\n\n（二）国务院总理、副总理、国务委员、各部部长、各委员会主任、审计长、秘书长；\n\n（三）中央军事委员会主席和中央军事委员会其他组成人员；\n\n（四）国家监察委员会主任；\n\n（五）最高人民法院院长；\n\n（六）最高人民检察院检察长。\n\n第六十四条　宪法的修改，由全国人民代表大会常务委员会或者五分之一以上的全国人民代表大会代表提议，并由全国人民代表大会以全体代表的三分之二以上的多数通过。\n\n法律和其他议案由全国人民代表大会以全体代表的过半数通过。\n\n第六十五条　全国人民代表大会常务委员会由下列人员组成：\n\n委员长，\n\n副委员长若干人，\n\n秘书长，\n\n委员若干人。\n\n全国人民代表大会常务委员会组成人员中，应当有适当名额的少数民族代表。\n\n全国人民代表大会选举并有权罢免全国人民代表大会常务委员会的组成人员。",
+      "language": "zh"
+    },
+    {
+      "chunkNo": 6,
+      "headingPath": "第三章　国家机构 > 第一节　全国人民代表大会",
+      "text": "全国人民代表大会常务委员会的组成人员不得担任国家行政机关、监察机关、审判机关和检察机关的职务。\n\n第六十六条　全国人民代表大会常务委员会每届任期同全国人民代表大会每届任期相同，它行使职权到下届全国人民代表大会选出新的常务委员会为止。\n\n委员长、副委员长连续任职不得超过两届。\n\n第六十七条　全国人民代表大会常务委员会行使下列职权：\n\n（一）解释宪法，监督宪法的实施；\n\n（二）制定和修改除应当由全国人民代表大会制定的法律以外的其他法律；\n\n（三）在全国人民代表大会闭会期间，对全国人民代表大会制定的法律进行部分补充和修改，但是不得同该法律的基本原则相抵触；\n\n（四）解释法律；\n\n（五）在全国人民代表大会闭会期间，审查和批准国民经济和社会发展计划、国家预算在执行过程中所必须作的部分调整方案；\n\n（六）监督国务院、中央军事委员会、国家监察委员会、最高人民法院和最高人民检察院的工作；\n\n（七）撤销国务院制定的同宪法、法律相抵触的行政法规、决定和命令；\n\n（八）撤销省、自治区、直辖市国家权力机关制定的同宪法、法律和行政法规相抵触的地方性法规和决议；\n\n（九）在全国人民代表大会闭会期间，根据国务院总理的提名，决定部长、委员会主任、审计长、秘书长的人选；\n\n（十）在全国人民代表大会闭会期间，根据中央军事委员会主席的提名，决定中央军事委员会其他组成人员的人选；\n\n（十一）根据国家监察委员会主任的提请，任免国家监察委员会副主任、委员；\n\n（十二）根据最高人民法院院长的提请，任免最高人民法院副院长、审判员、审判委员会委员和军事法院院长；",
+      "language": "zh"
+    },
+    {
+      "chunkNo": 7,
+      "headingPath": "第三章　国家机构 > 第一节　全国人民代表大会",
+      "text": "（十三）根据最高人民检察院检察长的提请，任免最高人民检察院副检察长、检察员、检察委员会委员和军事检察院检察长，并且批准省、自治区、直辖市的人民检察院检察长的任免；\n\n（十四）决定驻外全权代表的任免；\n\n（十五）决定同外国缔结的条约和重要协定的批准和废除；\n\n（十六）规定军人和外交人员的衔级制度和其他专门衔级制度；\n\n（十七）规定和决定授予国家的勋章和荣誉称号；\n\n（十八）决定特赦；\n\n（十九）在全国人民代表大会闭会期间，如果遇到国家遭受武装侵犯或者必须履行国际间共同防止侵略的条约的情况，决定战争状态的宣布；\n\n（二十）决定全国总动员或者局部动员；\n\n（二十一）决定全国或者个别省、自治区、直辖市进入紧急状态；\n\n（二十二）全国人民代表大会授予的其他职权。\n\n第六十八条　全国人民代表大会常务委员会委员长主持全国人民代表大会常务委员会的工作，召集全国人民代表大会常务委员会会议。副委员长、秘书长协助委员长工作。\n\n委员长、副委员长、秘书长组成委员长会议，处理全国人民代表大会常务委员会的重要日常工作。\n\n第六十九条　全国人民代表大会常务委员会对全国人民代表大会负责并报告工作。\n\n第七十条　全国人民代表大会设立民族委员会、宪法和法律委员会、财政经济委员会、教育科学文化卫生委员会、外事委员会、华侨委员会和其他需要设立的专门委员会。在全国人民代表大会闭会期间，各专门委员会受全国人民代表大会常务委员会的领导。\n\n各专门委员会在全国人民代表大会和全国人民代表大会常务委员会领导下，研究、审议和拟订有关议案。",
+      "language": "zh"
+    },
+    {
+      "chunkNo": 8,
+      "headingPath": "第三章　国家机构 > 第一节　全国人民代表大会",
+      "text": "第七十一条　全国人民代表大会和全国人民代表大会常务委员会认为必要的时候，可以组织关于特定问题的调查委员会，并且根据调查委员会的报告，作出相应的决议。\n\n调查委员会进行调查的时候，一切有关的国家机关、社会团体和公民都有义务向它提供必要的材料。\n\n第七十二条　全国人民代表大会代表和全国人民代表大会常务委员会组成人员，有权依照法律规定的程序分别提出属于全国人民代表大会和全国人民代表大会常务委员会职权范围内的议案。\n\n第七十三条　全国人民代表大会代表在全国人民代表大会开会期间，全国人民代表大会常务委员会组成人员在常务委员会开会期间，有权依照法律规定的程序提出对国务院或者国务院各部、各委员会的质询案。受质询的机关必须负责答复。\n\n第七十四条　全国人民代表大会代表，非经全国人民代表大会会议主席团许可，在全国人民代表大会闭会期间非经全国人民代表大会常务委员会许可，不受逮捕或者刑事审判。\n\n第七十五条　全国人民代表大会代表在全国人民代表大会各种会议上的发言和表决，不受法律追究。\n\n第七十六条　全国人民代表大会代表必须模范地遵守宪法和法律，保守国家秘密，并且在自己参加的生产、工作和社会活动中，协助宪法和法律的实施。\n\n全国人民代表大会代表应当同原选举单位和人民保持密切的联系，听取和反映人民的意见和要求，努力为人民服务。\n\n第七十七条　全国人民代表大会代表受原选举单位的监督。原选举单位有权依照法律规定的程序罢免本单位选出的代表。\n\n第七十八条　全国人民代表大会和全国人民代表大会常务委员会的组织和工作程序由法律规定。",
+      "language": "zh"
+    }
+  ]
+}

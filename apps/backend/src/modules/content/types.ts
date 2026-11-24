@@ -1,6 +1,7 @@
 import {
   sourceSchema,
   sourceStatusResponseSchema,
+  threadOriginSchema,
   type ThreadChatPreferences,
 } from "@sourceweft/contracts";
 import type { z } from "zod";
@@ -36,6 +37,7 @@ export type SourceType = z.infer<typeof sourceSchema.shape.sourceType>;
 export type SourceStatusStep = z.infer<
   typeof sourceStatusResponseSchema.shape.currentStep
 >;
+export type ThreadOrigin = z.infer<typeof threadOriginSchema>;
 
 // ---------------------------------------------------------------------------
 // Backend-specific types (not present in shared packages)
@@ -209,7 +211,7 @@ export type ThreadRecord = {
   parentThreadId: string | null;
   /** Persona driving the thread; null for an ordinary chat. */
   personaId: string | null;
-  origin: "user" | "subagent";
+  origin: ThreadOrigin;
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;

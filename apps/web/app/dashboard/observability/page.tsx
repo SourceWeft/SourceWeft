@@ -2,6 +2,16 @@
 
 import { TraceListSkeletonRows, TraceSkeletonBlock, TraceSkeletonLine } from "./trace-loading-skeleton";
 import { ALL_WORKSPACES, useObservabilityWorkspaceScope } from "./use-workspace-scope";
+import {
+  DEFAULT_TRACE_PAGE_SIZE,
+  FIRST_TRACE_PAGE,
+  INITIAL_TRACE_PAGING,
+  TRACE_PAGE_SIZES,
+  adjacentTracePage,
+  settleTracePage,
+  type TracePageSize,
+  type TracePageTarget,
+} from "./trace-paging";
 
 import { useLocale as useDisplayLocale } from "next-intl";
 import { parsePolicyPayload } from "@sourceweft/contracts/llm-observability";
@@ -12,6 +22,7 @@ import {
   Activity,
   Boxes,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Cpu,
   DatabaseZap,
@@ -68,7 +79,6 @@ import type {
   WorkspaceMcpToolRun,
 } from "@sourceweft/sdk";
 
-const LIST_LIMIT = 50;
 const TRACE_DETAIL_OBSERVATION_LIMIT = 200;
 const TRACE_TREE_ROW_HEIGHT_PX = 48;
 const TRACE_LOG_ROW_HEIGHT_PX = 49;
@@ -3089,9 +3099,14 @@ export default function ObservabilityPage() {
     null,
   );
   const [drawerOpen, setDrawerOpen] = React.useState(false);
-  const [nextCursor, setNextCursor] = React.useState<string | null>(null);
+  const [tracePaging, setTracePaging] = React.useState(INITIAL_TRACE_PAGING);
+  const [tracePageSize, setTracePageSize] = React.useState<TracePageSize>(
+    DEFAULT_TRACE_PAGE_SIZE,
+  );
   const [mcpNextCursor, setMcpNextCursor] = React.useState<string | null>(null);
-  const [loadingList, setLoadingList] = React.useState(false);
+  // Starts loading: the first request goes out in an effect after the first
+  // paint, and "No traces" must not flash before it.
+  const [loadingList, setLoadingList] = React.useState(true);
   const [loadingMcpRuns, setLoadingMcpRuns] = React.useState(false);
   const [loadingDetail, setLoadingDetail] = React.useState(false);
   const [loadingMoreObservations, setLoadingMoreObservations] =
@@ -3118,7 +3133,10 @@ export default function ObservabilityPage() {
     : selectedWorkspaceScope;
 
   const loadTraces = React.useCallback(
-    async (cursor?: string | null) => {
+    async (
+      target: TracePageTarget = FIRST_TRACE_PAGE,
+      limit: TracePageSize = tracePageSize,
+    ) => {
       if (!selectedWorkspaceScope) {
         return;
       }
@@ -3134,8 +3152,8 @@ export default function ObservabilityPage() {
       setError(null);
       try {
         const query = {
-          limit: LIST_LIMIT,
-          cursor: cursor ?? undefined,
+          limit,
+          cursor: target.cursor ?? undefined,
           status: status === "all" ? undefined : status,
           traceId: traceId.trim() || undefined,
           threadId: threadId.trim() || undefined,
@@ -3150,10 +3168,10 @@ export default function ObservabilityPage() {
         if (requestId !== listRequestIdRef.current) {
           return;
         }
-        setTraces((current) =>
-          cursor ? [...current, ...page.items] : page.items,
+        setTraces(page.items);
+        setTracePaging((current) =>
+          settleTracePage(current, target, page.nextCursor),
         );
-        setNextCursor(page.nextCursor);
       } catch (err) {
         if (requestId !== listRequestIdRef.current) {
           return;
@@ -3173,6 +3191,7 @@ export default function ObservabilityPage() {
       status,
       threadId,
       traceId,
+      tracePageSize,
       userId,
       t,
     ],
@@ -3255,6 +3274,8 @@ export default function ObservabilityPage() {
     [selectedTraceNames, traces],
   );
   const hasTraceNameFilter = selectedTraceNames.length > 0;
+  const previousTracePage = adjacentTracePage(tracePaging, "previous");
+  const nextTracePage = adjacentTracePage(tracePaging, "next");
   const detailViewModel = React.useMemo(
     () => buildTraceDetailViewModel(detail),
     [detail],
@@ -3269,9 +3290,9 @@ export default function ObservabilityPage() {
     setSelectedTraceKey(null);
     setSelectedNode(null);
     setDrawerOpen(false);
-    setNextCursor(null);
+    setTracePaging(INITIAL_TRACE_PAGING);
     setLoadingMoreObservations(false);
-    void loadTracesRef.current(null);
+    void loadTracesRef.current();
     void loadMcpRunsRef.current(null);
   }, [
     allWorkspacesSelected,
@@ -3421,7 +3442,7 @@ export default function ObservabilityPage() {
   const filtersPanel = (
     <FilterPanel
       visible={filtersVisible}
-      onApply={() => void loadTraces(null)}
+      onApply={() => void loadTraces()}
       onClear={clearFilters}
       onSelectedTraceNamesChange={setSelectedTraceNames}
       onStatusChange={setStatus}
@@ -3446,7 +3467,7 @@ export default function ObservabilityPage() {
   const drawerFiltersPanel = (
     <FilterPanel
       visible
-      onApply={() => void loadTraces(null)}
+      onApply={() => void loadTraces()}
       onClear={clearFilters}
       onSelectedTraceNamesChange={setSelectedTraceNames}
       onStatusChange={setStatus}
@@ -3521,12 +3542,37 @@ export default function ObservabilityPage() {
                     {t("table.shown", { count: visibleTraces.length })}
                   </Badge>
                 ) : null}
-                <Badge
-                  className="h-6 shrink-0 px-2 text-[11px]"
-                  variant="secondary"
-                >
-                  {t("table.pageSize", { count: LIST_LIMIT })}
-                </Badge>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      className="h-6 shrink-0 gap-1 px-2 text-[11px]"
+                      data-testid="trace-page-size"
+                      size="sm"
+                      type="button"
+                      variant="secondary"
+                    >
+                      {t("table.pageSize", { count: tracePageSize })}
+                      <ChevronDown className="h-3 w-3" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start">
+                    {TRACE_PAGE_SIZES.map((size) => (
+                      <DropdownMenuItem
+                        className={cn(
+                          "text-xs",
+                          size === tracePageSize && "bg-accent/60",
+                        )}
+                        key={size}
+                        onSelect={() => {
+                          setTracePageSize(size);
+                          void loadTraces(FIRST_TRACE_PAGE, size);
+                        }}
+                      >
+                        {t("table.pageSize", { count: size })}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
                 {allWorkspacesSelected ? (
                   <Badge
                     className="h-6 shrink-0 px-2 text-[11px]"
@@ -3557,7 +3603,7 @@ export default function ObservabilityPage() {
                   onClick={() =>
                     activeView === "mcp"
                       ? void loadMcpRuns(null)
-                      : void loadTraces(null)
+                      : void loadTraces()
                   }
                   size="sm"
                   type="button"
@@ -3593,7 +3639,8 @@ export default function ObservabilityPage() {
               />
             )
           ) : (
-            <ScrollArea className="min-h-0 flex-1">
+            // Keyed by page, so a new page starts at the top of the list.
+            <ScrollArea className="min-h-0 flex-1" key={tracePaging.index}>
               {loadingList && visibleTraces.length === 0 ? (
                 <TraceListSkeletonRows
                   allWorkspacesSelected={allWorkspacesSelected}
@@ -3749,21 +3796,43 @@ export default function ObservabilityPage() {
                     : t("table.emptyNoMatch")}
                 </div>
               ) : null}
-              {nextCursor ? (
-                <div className="border-t border-border p-3">
-                  <Button
-                    className="w-full"
-                    onClick={() => void loadTraces(nextCursor)}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    {t("table.loadOlder")}
-                  </Button>
-                </div>
-              ) : null}
             </ScrollArea>
           )}
+          {activeView === "traces" &&
+          (previousTracePage || nextTracePage) ? (
+            <div
+              className="flex shrink-0 items-center justify-between gap-2 border-t border-border px-3 py-2"
+              data-testid="trace-pager"
+            >
+              <Button
+                className="h-8 gap-1 px-2 text-xs"
+                disabled={!previousTracePage || loadingList}
+                onClick={() =>
+                  previousTracePage && void loadTraces(previousTracePage)
+                }
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                <ChevronLeft className="h-4 w-4" />
+                {t("table.previousPage")}
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                {t("table.pageNumber", { page: tracePaging.index + 1 })}
+              </span>
+              <Button
+                className="h-8 gap-1 px-2 text-xs"
+                disabled={!nextTracePage || loadingList}
+                onClick={() => nextTracePage && void loadTraces(nextTracePage)}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                {t("table.nextPage")}
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          ) : null}
         </section>
       </div>
       <Sheet open={filtersDrawerOpen} onOpenChange={setFiltersDrawerOpen}>

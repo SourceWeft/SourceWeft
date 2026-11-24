@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import {
+  chatDeletionRemovesChat,
+  delegatedChildChatIds,
   findChatItem,
   flattenChatItems,
   insertChildChatItem,
   mapChatItems,
   mapThreadToChatItem,
+  mergePinnedChats,
   removeChatItem,
 } from "./dashboard-chat-items";
 import type { ChatItem } from "./dashboard-chat-types";
@@ -91,6 +94,50 @@ test("findChatItem, mapChatItems and removeChatItem reach nested children", () =
   assert.equal(removeChatItem(items, "b").length, 1);
 });
 
+test("delegatedChildChatIds lists only the conversations a chat's delegations opened", () => {
+  const items = [
+    chat("a", {
+      children: [
+        chat("a-task", { parentThreadId: "a", origin: "subagent" }),
+        chat("a-created", { parentThreadId: "a", origin: "user" }),
+        chat("a-unknown", { parentThreadId: "a" }),
+      ],
+    }),
+    chat("b", {
+      children: [chat("b-task", { parentThreadId: "b", origin: "subagent" })],
+    }),
+    chat("c"),
+  ];
+
+  assert.deepEqual(delegatedChildChatIds(items, "a"), ["a-task"]);
+  assert.deepEqual(delegatedChildChatIds(items, "c"), []);
+  // A nested conversation has no children of its own, and an unknown id has none.
+  assert.deepEqual(delegatedChildChatIds(items, "a-task"), []);
+  assert.deepEqual(delegatedChildChatIds(items, "zzz"), []);
+});
+
+test("chatDeletionRemovesChat covers the deleted chats and the conversations their delegations opened", () => {
+  const items = [
+    chat("a", {
+      children: [
+        chat("a-task", { parentThreadId: "a", origin: "subagent" }),
+        chat("a-created", { parentThreadId: "a", origin: "user" }),
+      ],
+    }),
+    chat("b"),
+  ];
+
+  assert.equal(chatDeletionRemovesChat(items, ["a"], "a"), true);
+  assert.equal(chatDeletionRemovesChat(items, ["a"], "a-task"), true);
+  assert.equal(chatDeletionRemovesChat(items, ["b", "a"], "a-task"), true);
+  // A conversation a member created under the chat is kept by the server.
+  assert.equal(chatDeletionRemovesChat(items, ["a"], "a-created"), false);
+  assert.equal(chatDeletionRemovesChat(items, ["a"], "b"), false);
+  assert.equal(chatDeletionRemovesChat(items, ["a-task"], "a"), false);
+  // No open chat: nothing to leave.
+  assert.equal(chatDeletionRemovesChat(items, ["a"], ""), false);
+});
+
 test("insertChildChatItem nests under a loaded parent and reports a missing one", () => {
   const items = [
     chat("a", { children: [chat("old", { parentThreadId: "a" })] }),
@@ -122,5 +169,22 @@ test("flattenChatItems lists parents followed by their children", () => {
   assert.deepEqual(
     flattenChatItems(items).map((item) => item.id),
     ["a", "a1", "b"],
+  );
+});
+
+test("mergePinnedChats adds pinned chats in activity order without duplicating one already listed", () => {
+  const page = [
+    chat("new", { updatedAt: "2026-09-03T00:00:00.000Z" }),
+    chat("old", { updatedAt: "2026-09-01T00:00:00.000Z" }),
+  ];
+  const merged = mergePinnedChats(page, [
+    chat("pinned-mid", { updatedAt: "2026-09-02T00:00:00.000Z" }),
+    chat("pinned-oldest", { updatedAt: "2026-08-01T00:00:00.000Z" }),
+    chat("new", { updatedAt: "2026-09-03T00:00:00.000Z" }),
+  ]);
+
+  assert.deepEqual(
+    merged.map((item) => item.id),
+    ["new", "pinned-mid", "old", "pinned-oldest"],
   );
 });

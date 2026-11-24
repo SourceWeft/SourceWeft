@@ -29,6 +29,7 @@ import type { BaseLanguageModel } from "@langchain/core/language_models/base";
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import type { TraceContext } from "../../../llm-observability";
 import { logger } from "../../../../shared/logger";
+import type { BillingScope } from "../../../../shared/model-gateway/billing/scope";
 import { DatabaseKnowledgeBackend } from "../database-fs-backend";
 import {
   listVirtualFsSources,
@@ -47,7 +48,6 @@ import {
   type SandboxBackendProtocolV2,
   type SkillMetadata,
 } from "deepagents";
-import { Overwrite } from "@langchain/langgraph";
 import {
   createCapabilityAgentToolsForTurn,
   type AgentTurnTool,
@@ -98,12 +98,91 @@ import {
 } from "@sourceweft/agent-interpreter";
 import { createInterpreterMiddlewareForTurn } from "../interpreter";
 import {
+  SCHEDULED_RUN_PROMPT,
+  UNATTENDED_FILESYSTEM_PERMISSIONS,
+  filterToolsForUnattendedRun,
+  unattendedFilesystemMiddleware,
+} from "../unattended-policy";
+import {
   currentSourceWeftToolCallId,
   currentSourceWeftToolInvocationSignal,
 } from "../middleware";
 import { ContentError } from "../../../content/errors";
+import {
+  createOriginToolExclusionMiddleware,
+  getOriginTurnProvider,
+  type OriginTurnContext,
+  type OriginTurnProvider,
+} from "../origin-providers";
+import { isHostOwnedThreadOrigin } from "../../thread/host-owned";
 
 const MAX_RUNTIME_SOURCE_REFERENCES = 50;
+
+/**
+ * The provider a host registered for this conversation's origin, if any. A
+ * host-owned conversation without one means the host is not wired into this
+ * worker; its turn fails instead of running without the host's tools and
+ * instructions.
+ */
+function originTurnProviderFor(
+  prepared: PreparedThreadTurn,
+): OriginTurnProvider | undefined {
+  const provider = getOriginTurnProvider(prepared.thread.origin);
+  if (!provider && isHostOwnedThreadOrigin(prepared.thread.origin)) {
+    throw new Error(
+      `No origin turn provider is registered for '${prepared.thread.origin}' conversations.`,
+    );
+  }
+  return provider;
+}
+
+/** Whether this turn's tools are the origin provider's only (a Router). */
+function turnToolsReplacedByOrigin(prepared: PreparedThreadTurn) {
+  return originTurnProviderFor(prepared)?.replaceTools === true;
+}
+
+function originTurnContextFor(prepared: PreparedThreadTurn): OriginTurnContext {
+  // A host-started turn always runs as a durable chat run; without one the
+  // provider could not tie its tools to the run, so the turn does not start.
+  if (!prepared.threadRunId) {
+    throw new Error(
+      `A turn in a '${prepared.thread.origin}' conversation needs its durable chat run id before its origin provider can equip it.`,
+    );
+  }
+  return {
+    workspaceId: prepared.workspace.id,
+    teamId: prepared.workspace.organizationId,
+    threadId: prepared.thread.id,
+    runId: prepared.threadRunId,
+    userId: prepared.userId,
+    hostContext: { ...(prepared.hostContext ?? {}) },
+  };
+}
+
+/**
+ * The turn's tools with the origin provider's added. A provider tool may not
+ * share a name with a tool the turn already has or with an approval gate:
+ * either would silently shadow or drop one of them, so the turn fails.
+ */
+function withOriginTools<T extends { name: string }>(
+  turnTools: readonly T[],
+  originTools: readonly StructuredToolInterface[],
+  reservedNames: ReadonlySet<string>,
+): T[] {
+  const taken = new Set([
+    ...turnTools.map((tool) => tool.name),
+    ...reservedNames,
+  ]);
+  for (const tool of originTools) {
+    if (taken.has(tool.name)) {
+      throw new Error(
+        `Origin provider tool '${tool.name}' collides with a tool this turn already has.`,
+      );
+    }
+    taken.add(tool.name);
+  }
+  return [...turnTools, ...(originTools as unknown as T[])];
+}
 
 // The sandbox backend's operation-claim key when approval is enabled (NOT an
 // approval-correlation id): the resumed `execute` claims its run under the
@@ -423,6 +502,22 @@ export function skillMetadataForTurn(
   }));
 }
 
+/**
+ * Names of the skills the user invoked this turn (slash command or invocation
+ * chip). Deep Agents pins each one: its SKILL.md body is added to the
+ * conversation before the first model call, so the instructions arrive without
+ * depending on the model to read the file. A skill that is only selected stays
+ * available and is not pinned.
+ */
+export function pinnedSkillNamesForTurn(
+  prepared: Pick<PreparedThreadTurn, "enabledSkills" | "invokedSkillIds">,
+): string[] {
+  const invoked = new Set(prepared.invokedSkillIds);
+  return prepared.enabledSkills
+    .filter((skill) => invoked.has(skill.workspaceSkillId))
+    .map((skill) => skill.name);
+}
+
 export interface RuntimePromptContextInput {
   prepared: PreparedThreadTurn;
   toolCollection: ToolCollection;
@@ -439,7 +534,13 @@ export async function buildRuntimePromptContext(
   input: RuntimePromptContextInput,
 ): Promise<RuntimePromptContext> {
   const { prepared, toolCollection, sandboxRuntime } = input;
-  const { webTools, artifactTools, mcpTools, promptProviders } = toolCollection;
+  const originProvider = originTurnProviderFor(prepared);
+  // A replace-tools origin binds none of the collection, so its prompt names
+  // none of it either.
+  const replaceTools = originProvider?.replaceTools === true;
+  const { webTools, artifactTools, mcpTools, promptProviders } = replaceTools
+    ? { webTools: [], artifactTools: [], mcpTools: [], promptProviders: [] }
+    : toolCollection;
 
   const runtimeSourceReferences =
     prepared.sourceIds.length > 0
@@ -489,9 +590,10 @@ export async function buildRuntimePromptContext(
     runtimeSources.length - visibleSources.length,
   );
 
-  const sandboxPromptProvider = sandboxRuntime
-    ? () => sandboxRuntime.buildRuntimePrompt()
-    : undefined;
+  const sandboxPromptProvider =
+    sandboxRuntime && !replaceTools
+      ? () => sandboxRuntime.buildRuntimePrompt()
+      : undefined;
 
   // Operational locators must survive history/tool-output compression. Read
   // only artifacts this user can see in this thread, not the whole workspace.
@@ -518,10 +620,11 @@ export async function buildRuntimePromptContext(
     commandSuccessCriteria: prepared.commandSuccessCriteria,
     enabledSkills: prepared.enabledSkills,
     invokedSkillIds: prepared.invokedSkillIds,
-    skillCatalogAvailable: filterAllowedTools(
-      prepared,
-      toolCollection.skillTools,
-    ).some((tool) => tool.name === "search_skills"),
+    skillCatalogAvailable:
+      !replaceTools &&
+      filterAllowedTools(prepared, toolCollection.skillTools).some(
+        (tool) => tool.name === "search_skills",
+      ),
     toolRuntimePromptProviders: sandboxPromptProvider
       ? [sandboxPromptProvider]
       : [],
@@ -531,8 +634,19 @@ export async function buildRuntimePromptContext(
     publishedArtifacts,
   });
 
+  // A host-owned conversation's provider prompt says who is (not) present;
+  // the scheduled-run block would contradict its tools, so it is left out.
+  const basePrompt =
+    prepared.unattended && !isHostOwnedThreadOrigin(prepared.thread.origin)
+      ? `${runtimePrompt}\n${SCHEDULED_RUN_PROMPT}`
+      : runtimePrompt;
+  const originPrompt = originProvider
+    ? await originProvider.prompt(originTurnContextFor(prepared))
+    : "";
   return {
-    runtimePrompt,
+    runtimePrompt: originPrompt.trim()
+      ? `${basePrompt}\n${originPrompt}`
+      : basePrompt,
     visibleSources,
     selectedSourcesOmitted,
   };
@@ -582,6 +696,8 @@ export interface ThreadAgentAssemblyInput {
   model: BaseLanguageModel;
   /** Aborts `agent.stream` (LLM + signal-aware tools) when the run is cancelled. */
   abortSignal?: AbortSignal;
+  /** Reads the turn's billing scope so the credit-cap middleware can check it. */
+  getBillingScope?: () => BillingScope | undefined;
 }
 
 export interface ThreadAgentAssembly {
@@ -702,9 +818,14 @@ export async function buildSandboxRuntimeForPreparedTurn(input: {
         }
       : null;
   const sandboxRuntime =
-    prepared.thread.executionTarget?.kind !== "local" &&
-    isToolDenied(prepared, AGENT_TOOL_NAMES.execute) &&
-    !commandNeedsTrustedSandbox
+    // An unattended turn never gets a sandbox: its lease would be held, and
+    // billed, for as long as an approval nobody can give stays open.
+    // Nor does a turn whose tools are its origin provider's only.
+    prepared.unattended ||
+    turnToolsReplacedByOrigin(prepared) ||
+    (prepared.thread.executionTarget?.kind !== "local" &&
+      isToolDenied(prepared, AGENT_TOOL_NAMES.execute) &&
+      !commandNeedsTrustedSandbox)
       ? null
       : await agentSandboxService.createRuntimeForTurn({
           executionTarget: prepared.thread.executionTarget ?? { kind: "cloud" },
@@ -917,6 +1038,7 @@ export async function buildThreadAgentAssembly(
     runtimePrompt,
     model,
     abortSignal,
+    getBillingScope,
   } = input;
   const {
     capabilityTools,
@@ -1047,7 +1169,7 @@ export async function buildThreadAgentAssembly(
   // permissions already deny registry tools it may not use; this pass also drops
   // connector, MCP, and sandbox tools, which are bound under their own names.
   const persona = prepared.persona ?? null;
-  const boundTools = filterToolsForPersona(
+  const attendedTools = filterToolsForPersona(
     persona,
     filterCommandPolicyTools(prepared, [
       ...filterAllowedTools(prepared, fileTools),
@@ -1058,6 +1180,40 @@ export async function buildThreadAgentAssembly(
       ...(sandboxRuntime?.tools ?? []),
     ]),
   );
+  // With nobody present a tool that would ask for approval is not offered at
+  // all, so the turn has no approval to wait for and nothing to auto-approve.
+  const approvalGates = {
+    ...(sandboxRuntime?.interruptOn ?? {}),
+    ...(mcpToolRuntime?.interruptOn ?? {}),
+    ...connectorInterruptOn,
+    ...createSkillToolInterruptConfigs(),
+  };
+  // A conversation a host owns (see origin-providers.ts) adds its provider's
+  // tools: instead of the turn's own (a Router) or next to them (a Worker).
+  // In an unattended run the provider's tools are allowed on top of the
+  // allow-list; nothing else is widened.
+  const originProvider = originTurnProviderFor(prepared);
+  const replaceTools = originProvider?.replaceTools === true;
+  const originTools = originProvider
+    ? await originProvider.tools(originTurnContextFor(prepared))
+    : [];
+  const turnTools = originProvider
+    ? withOriginTools(
+        replaceTools ? [] : attendedTools,
+        originTools,
+        new Set(Object.keys(approvalGates)),
+      )
+    : attendedTools;
+  // A replace-tools turn is held to the unattended filesystem, approval and
+  // askUser policy even if a person is somehow present: its provider's tools
+  // are the whole of what it may do.
+  const restricted = Boolean(prepared.unattended) || replaceTools;
+  const boundTools = prepared.unattended
+    ? filterToolsForUnattendedRun(turnTools, {
+        gatedToolNames: new Set(Object.keys(approvalGates)),
+        extraAllowed: new Set(originTools.map((tool) => tool.name)),
+      })
+    : turnTools;
   const inheritableTools = filterInheritableAgentTools(boundTools);
   const searchSourcesTool = boundTools.find(
     (candidate) => candidate.name === AGENT_TOOL_NAMES.searchSources,
@@ -1068,26 +1224,32 @@ export async function buildThreadAgentAssembly(
       (toolName !== AGENT_TOOL_NAMES.searchSources ||
         Boolean(searchSourcesTool)),
   );
-  const interpreterMiddleware = createInterpreterMiddlewareForTurn({
-    allowedTools: interpreterAllowedTools,
-    backend: filesystemBackend.localFiles ? backend : filesystemBackend.backend,
-    readRoots: filesystemBackend.localFiles
-      ? [
-          "/kb",
-          ...(sandboxRuntime ? [sandboxRuntime.pathPolicy.workspaceRoot] : []),
-        ]
-      : undefined,
-    context: {
-      runId: prepared.runTraceId,
-      teamId: prepared.workspace.organizationId,
-      workspaceId: prepared.workspace.id,
-      threadId: prepared.thread.id,
-      turnId: prepared.userMessage.id,
-      userId: prepared.userId,
-    },
-    searchSourcesTool,
-    traceContext,
-  });
+  const interpreterMiddleware = restricted
+    ? []
+    : createInterpreterMiddlewareForTurn({
+        allowedTools: interpreterAllowedTools,
+        backend: filesystemBackend.localFiles
+          ? backend
+          : filesystemBackend.backend,
+        readRoots: filesystemBackend.localFiles
+          ? [
+              "/kb",
+              ...(sandboxRuntime
+                ? [sandboxRuntime.pathPolicy.workspaceRoot]
+                : []),
+            ]
+          : undefined,
+        context: {
+          runId: prepared.runTraceId,
+          teamId: prepared.workspace.organizationId,
+          workspaceId: prepared.workspace.id,
+          threadId: prepared.thread.id,
+          turnId: prepared.userMessage.id,
+          userId: prepared.userId,
+        },
+        searchSourcesTool,
+        traceContext,
+      });
   const commandTargetToolName =
     prepared.commandSuccessCriteria.kind === "none"
       ? null
@@ -1103,12 +1265,7 @@ export async function buildThreadAgentAssembly(
     );
   }
 
-  const interruptOn = {
-    ...(sandboxRuntime?.interruptOn ?? {}),
-    ...(mcpToolRuntime?.interruptOn ?? {}),
-    ...connectorInterruptOn,
-    ...createSkillToolInterruptConfigs(),
-  };
+  const interruptOn = restricted ? {} : approvalGates;
   if (sandboxRuntime) {
     agentSandboxService.warnIfHitlBypassed({
       interruptOn,
@@ -1123,15 +1280,25 @@ export async function buildThreadAgentAssembly(
   const wallClockRunId = prepared.threadRunId ?? prepared.runTraceId;
   const turnStartedAtMs = Date.now();
   const childMiddleware = (subagentType: string) => [
+    // The general-purpose child would otherwise get the default filesystem
+    // tools, writes included; the read-scoped children bring their own.
+    ...(prepared.unattended && subagentType === "general-purpose"
+      ? [unattendedFilesystemMiddleware(backend)]
+      : []),
     fileImages.middleware(),
     ...createSourceWeftSubagentMiddlewareStack({
-      ...(subagentType === "general-purpose" ? { interruptOn } : {}),
+      ...(subagentType === "general-purpose" && !prepared.unattended
+        ? { interruptOn }
+        : {}),
+      askUser: !prepared.unattended,
       backend,
       chatProfileConfig: prepared.chatProfile.configJson,
       model,
       traceContext,
       runId: wallClockRunId,
       turnStartedAtMs,
+      creditCap: prepared.creditCap,
+      getBillingScope,
       toolObservabilityContext: {
         runId: prepared.runTraceId,
         teamId: prepared.workspace.organizationId,
@@ -1148,30 +1315,33 @@ export async function buildThreadAgentAssembly(
   // billing model, skills, HITL, and observability do not depend on Deep Agents'
   // partial parent-middleware propagation. The roster mirrors Claude's Agent
   // tool: general-purpose (full) plus the read-only explore and plan delegates.
-  const subagents = [
-    createGeneralPurposeSubagent({
-      availableTools: inheritableTools,
-      interruptOn,
-      middleware: childMiddleware("general-purpose"),
-      skills,
-    }),
-    createExploreSubagent({
-      availableTools: inheritableTools,
-      backend,
-      middleware: childMiddleware("explore"),
-      workingDirectory: filesystemBackend.localFiles
-        ? sandboxRuntime?.pathPolicy.workspaceRoot
-        : undefined,
-    }),
-    createPlanSubagent({
-      availableTools: inheritableTools,
-      backend,
-      middleware: childMiddleware("plan"),
-      workingDirectory: filesystemBackend.localFiles
-        ? sandboxRuntime?.pathPolicy.workspaceRoot
-        : undefined,
-    }),
-  ];
+  // A replace-tools turn delegates nothing; its `task` tool is excluded below.
+  const subagents = replaceTools
+    ? []
+    : [
+        createGeneralPurposeSubagent({
+          availableTools: inheritableTools,
+          interruptOn,
+          middleware: childMiddleware("general-purpose"),
+          skills,
+        }),
+        createExploreSubagent({
+          availableTools: inheritableTools,
+          backend,
+          middleware: childMiddleware("explore"),
+          workingDirectory: filesystemBackend.localFiles
+            ? sandboxRuntime?.pathPolicy.workspaceRoot
+            : undefined,
+        }),
+        createPlanSubagent({
+          availableTools: inheritableTools,
+          backend,
+          middleware: childMiddleware("plan"),
+          workingDirectory: filesystemBackend.localFiles
+            ? sandboxRuntime?.pathPolicy.workspaceRoot
+            : undefined,
+        }),
+      ];
 
   const agent = await createThreadAgent({
     model,
@@ -1183,14 +1353,27 @@ export async function buildThreadAgentAssembly(
     backend,
     filesystemMounts: promptFilesystemMounts,
     skills,
-    permissions: persona?.filesystemPermissions
-      ? [...persona.filesystemPermissions]
-      : filesystemPermissions,
+    permissions: restricted
+      ? UNATTENDED_FILESYSTEM_PERMISSIONS
+      : persona?.filesystemPermissions
+        ? [...persona.filesystemPermissions]
+        : filesystemPermissions,
     runtimePrompt,
     personaPrompt: persona?.systemPrompt,
     chatProfileConfig: prepared.chatProfile.configJson,
     commandExecutionPolicy: commandExecutionPolicyFor(prepared),
-    extraMiddleware: [...interpreterMiddleware, fileImages.middleware()],
+    extraMiddleware: [
+      ...(restricted ? [unattendedFilesystemMiddleware(backend)] : []),
+      ...(replaceTools ? [createOriginToolExclusionMiddleware()] : []),
+      ...interpreterMiddleware,
+      fileImages.middleware(),
+    ],
+    unattended: restricted,
+    // A replace-tools turn's provider prompt is its whole instruction set:
+    // no to-do list and no chat base prompt (evidence, citations, files).
+    ...(replaceTools ? { todoList: false, chatBasePrompt: false } : {}),
+    creditCap: prepared.creditCap,
+    getBillingScope,
     contextCompressionReportKey: prepared.userMessage.id,
     traceContext,
     runId: wallClockRunId,
@@ -1255,7 +1438,8 @@ export async function buildThreadAgentAssembly(
         })),
       },
     },
-    interruptOn,
+    // No gate is left to interrupt on, so no approval middleware is attached.
+    ...(restricted ? {} : { interruptOn }),
   });
 
   const agentMessages = [
@@ -1320,10 +1504,10 @@ export async function buildThreadAgentAssembly(
         });
       }
       if (skills) {
+        // Since deepagents 1.14 this channel holds the last value written (no
+        // merging reducer), so the turn's list replaces the stored one as is.
         const checkpointConfig = await agent.updateState(effectiveRunConfig, {
-          skillsMetadata: new Overwrite(
-            skillMetadataForTurn(prepared.enabledSkills),
-          ),
+          skillsMetadata: skillMetadataForTurn(prepared.enabledSkills),
         });
         if (!checkpointConfig || typeof checkpointConfig !== "object") {
           throw new ContentError(
@@ -1348,10 +1532,20 @@ export async function buildThreadAgentAssembly(
           },
         } as AgentRunnableConfig;
       }
-      return agent.streamEvents({ messages: messages as never }, {
-        ...effectiveRunConfig,
-        version: "v3",
-      } as never) as Promise<unknown>;
+      // Only a new user message pins: an approval resume re-enters with a
+      // Command and must not add the instructions a second time. The state key
+      // exists only when the skills middleware is mounted.
+      const pinnedSkills = skills ? pinnedSkillNamesForTurn(prepared) : [];
+      return agent.streamEvents(
+        {
+          messages,
+          ...(pinnedSkills.length > 0 ? { pinnedSkills } : {}),
+        } as never,
+        {
+          ...effectiveRunConfig,
+          version: "v3",
+        } as never,
+      ) as Promise<unknown>;
     };
     return stream();
   };
@@ -1449,7 +1643,7 @@ export async function buildToolCollection(
       : null;
   const mcpTools = mcpToolRuntime?.tools ?? [];
 
-  return {
+  const collection: ToolCollection = {
     capabilityTools: [...capabilityAgentTools.tools],
     skillTools: buildSkillAgentTools({
       teamId: prepared.workspace.organizationId,
@@ -1475,5 +1669,39 @@ export async function buildToolCollection(
     mcpTools,
     connectorToolContext,
     mcpToolRuntime,
+  };
+  return prepared.unattended
+    ? restrictToolCollectionForUnattendedRun(collection)
+    : collection;
+}
+
+/**
+ * What is left of a turn's tools when nobody is present: only what the
+ * unattended policy allows. Applied to the collection, and again at binding,
+ * so the runtime prompt never names a tool the turn does not have.
+ */
+export function restrictToolCollectionForUnattendedRun(
+  collection: ToolCollection,
+): ToolCollection {
+  const policy = {
+    gatedToolNames: new Set([
+      ...Object.keys(collection.mcpToolRuntime?.interruptOn ?? {}),
+      ...Object.keys(collection.connectorInterruptOn),
+      ...Object.keys(createSkillToolInterruptConfigs()),
+    ]),
+  };
+  return {
+    ...collection,
+    capabilityTools: filterToolsForUnattendedRun(
+      collection.capabilityTools,
+      policy,
+    ),
+    skillTools: [],
+    webTools: filterToolsForUnattendedRun(collection.webTools, policy),
+    artifactTools: [],
+    promptProviders: [],
+    connectorActionTools: [],
+    connectorInterruptOn: {},
+    mcpTools: filterToolsForUnattendedRun(collection.mcpTools, policy),
   };
 }

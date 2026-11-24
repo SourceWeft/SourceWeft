@@ -53,6 +53,11 @@ export type ChatThreadRunRecord = {
   startedAt: string | null;
   heartbeatAt: string | null;
   finishedAt: string | null;
+  /**
+   * How many credits this run cost. Null until the run settles; a run that
+   * settles nothing finishes with 0, never null — see `finishChatThreadRun`.
+   */
+  consumedCredits: number | null;
   createdAt: string;
   updatedAt: string;
 };

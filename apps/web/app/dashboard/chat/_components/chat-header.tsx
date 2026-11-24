@@ -26,6 +26,7 @@ import { useWorkspaceLayout } from "../../_components/dashboard-workspace-layout
 import { ChatWorkContext, type ChatCreationContext } from "./chat-work-context";
 
 import { useChatHubContext } from "./chat-hub-context";
+import { swipeBackProps } from "@/lib/left-edge-swipe";
 
 const HeaderModelSelector = dynamic(
   () =>
@@ -134,7 +135,7 @@ export function ChatHeader({
       <div
         className={cn(
           "flex h-full min-w-0 items-center gap-2 pr-3 sm:pr-4",
-          titlebarInset ? "pl-6" : "pl-3 sm:pl-4",
+          titlebarInset ? "pl-7" : "pl-3 sm:pl-4",
         )}
       >
         {showConversationToggle ? (
@@ -175,6 +176,7 @@ export function ChatHeader({
             {parentThread && !embedMode ? (
               <>
                 <button
+                  {...swipeBackProps}
                   className="flex min-w-0 max-w-[40%] shrink items-center gap-0.5 text-sm leading-5 text-muted-foreground transition-colors hover:text-foreground focus-visible:underline focus-visible:outline-none"
                   onClick={onOpenParentThread}
                   title={t("header.backToThread", {

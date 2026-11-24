@@ -7,18 +7,23 @@
   "exports": {
     ".": "./src/index.ts",
     "./providers": "./src/providers/index.ts",
-    "./formats": "./src/anydoc-formats.ts"
+    "./formats": "./src/anydoc-formats.ts",
+    "./file-types": "./src/source-file-types.ts",
+    "./youtube-url": "./src/youtube/url.ts",
+    "./youtube": "./src/youtube/index.ts"
   },
   "scripts": {
     "check-types": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
-    "@langchain/classic": "^1.0.42",
-    "@langchain/core": "^1.2.9",
-    "@langchain/textsplitters": "^1.0.1",
+    "@langchain/classic": "^1.0.61",
+    "@langchain/core": "^1.4.2",
+    "@langchain/textsplitters": "^1.0.2",
     "@sourceweft/anydoc": "workspace:*",
     "@sourceweft/capability-contracts": "workspace:*",
+    "eld": "2.1.1",
+    "fast-xml-parser": "5.7.3",
     "pdfjs-dist": "^6.2.108",
     "srt-parser-2": "1.2.3",
     "zod": "^4.6.6"

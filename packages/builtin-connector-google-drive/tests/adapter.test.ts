@@ -108,7 +108,7 @@ test("exchanges a code and reads the account from about.get", async () => {
     }
     throw new Error("Unexpected request");
   });
-  const token = await gdrive.exchangeOAuthCode({
+  const token = await gdrive.exchangeOAuthCode!({
     code: "code",
     redirectUri:
       "https://sourceweft.example/v1/connectors/oauth/google_drive/callback",
@@ -126,7 +126,7 @@ test("exchanges a code and reads the account from about.get", async () => {
 test("maps invalid_grant on refresh to a non-retryable OAuth failure", async () => {
   const gdrive = adapter(async () => json({ error: "invalid_grant" }, 400));
   await assert.rejects(
-    gdrive.refreshOAuthToken({
+    gdrive.refreshOAuthToken!({
       refreshToken: "refresh-token",
       scopes: [GOOGLE_DRIVE_FILE_SCOPE],
     }),

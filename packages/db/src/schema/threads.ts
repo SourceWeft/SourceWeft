@@ -1,6 +1,7 @@
 import { desc, sql } from "drizzle-orm";
 import { messageRoleSchema } from "@sourceweft/contracts/messages";
 import { threadRunStatusSchema } from "@sourceweft/contracts/stream";
+import { threadOriginSchema } from "@sourceweft/contracts/threads";
 import {
   compactToolCallOperations,
   expandToolCallOperations,
@@ -17,6 +18,7 @@ import {
   jsonb,
   numeric,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
@@ -61,7 +63,7 @@ type ThreadModelSettings = {
 };
 type MessageRole = (typeof messageRoleSchema.options)[number];
 type ThreadVisibility = "private" | "workspace" | "public_link";
-type ThreadOrigin = "user" | "subagent";
+type ThreadOrigin = (typeof threadOriginSchema.options)[number];
 /**
  * Domain enums live in @sourceweft/contracts so the wire schema, the column
  * type, and the CHECK constraint below cannot drift apart. The dependency only
@@ -151,7 +153,10 @@ export const threads = pgTable(
       "threads_chat_preferences_object_check",
       sql`jsonb_typeof(${table.chatPreferencesJson}) = 'object'`,
     ),
-    check("threads_origin_check", sql`${table.origin} in ('user', 'subagent')`),
+    check(
+      "threads_origin_check",
+      sql`${table.origin} in (${sqlEnumList(threadOriginSchema.options)})`,
+    ),
     index("threads_workspace_parent_idx").on(
       table.workspaceId,
       table.parentThreadId,
@@ -164,6 +169,40 @@ export const threads = pgTable(
     index("threads_workspace_last_message_idx").on(
       table.workspaceId,
       desc(table.lastMessageAt),
+    ),
+  ],
+);
+
+/**
+ * A member's own pinned chats. Pins are personal: one row per (chat, member),
+ * removed with the chat. Reads always re-apply chat visibility, so a pin on a
+ * chat the member can no longer see is simply not listed.
+ */
+export const threadPins = pgTable(
+  "thread_pins",
+  {
+    threadId: text("thread_id").notNull(),
+    userId: text("user_id").notNull(),
+    teamId: text("team_id").notNull(),
+    workspaceId: text("workspace_id").notNull(),
+    pinnedAt: timestamp("pinned_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      name: "thread_pins_pk",
+      columns: [table.threadId, table.userId],
+    }),
+    foreignKey({
+      name: "thread_pins_thread_fk",
+      columns: [table.threadId, table.workspaceId, table.teamId],
+      foreignColumns: [threads.id, threads.workspaceId, threads.teamId],
+    }).onDelete("cascade"),
+    index("thread_pins_user_workspace_idx").on(
+      table.userId,
+      table.workspaceId,
+      desc(table.pinnedAt),
     ),
   ],
 );
@@ -313,6 +352,9 @@ export const chatThreadRuns = pgTable(
       mode: "date",
     }),
     finishedAt: timestamp("finished_at", { withTimezone: true, mode: "date" }),
+    // How many credits this run cost, for a ticket's worker run to roll up
+    // against its credit cap. Null until the run settles; no default.
+    consumedCredits: numeric("consumed_credits"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .defaultNow(),
@@ -342,6 +384,10 @@ export const chatThreadRuns = pgTable(
     check(
       "chat_thread_runs_event_offset_check",
       sql`${table.eventOffset} >= 0`,
+    ),
+    check(
+      "chat_thread_runs_consumed_credits_check",
+      sql`${table.consumedCredits} is null or ${table.consumedCredits} >= 0`,
     ),
     uniqueIndex("chat_thread_runs_idempotency_uq").on(
       table.teamId,

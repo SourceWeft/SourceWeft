@@ -1,4 +1,3 @@
-import { connectorAccessPolicy } from "./access-policy";
 import { requireConnectorWorkspace } from "./permissions";
 import { tool } from "langchain";
 import type { ToolRuntime } from "@langchain/core/tools";
@@ -23,6 +22,7 @@ import {
   connectorActionApprovalPayload,
 } from "./agent-tool-payload";
 import { connectorToolResult } from "./agent-tool-errors";
+import { resolveCredential } from "./credential";
 import { ConnectorError, toConnectorError } from "./errors";
 import {
   resolveConnectorActionExecutionRef,
@@ -85,12 +85,48 @@ function jsonSchemaWithConnectorId(schema: Record<string, unknown>) {
 function actionDescription(input: {
   action: ConnectorActionSpec;
   manifest: ConnectorManifest;
+  accountNote?: string;
 }) {
   const base = input.action.description ?? input.action.displayName;
   const approval = input.action.requiresApproval
     ? " This action requires user approval before execution."
     : "";
-  return `${base} Connector: ${input.manifest.displayName}.${approval}`;
+  const account = input.accountNote ? ` ${input.accountNote}` : "";
+  return `${base} Connector: ${input.manifest.displayName}.${account}${approval}`;
+}
+
+/**
+ * Names the mailbox each Gmail tool acts as. Without it the model cannot tell
+ * the user's own address ("send it to me") and probes for it with a read call
+ * that Gmail rejects.
+ */
+async function gmailMailboxNote(input: {
+  connectors: SourceConnectorRecord[];
+  context: ConnectorActionToolContext;
+}) {
+  const mailboxes: Array<{ connectorId: string; email: string }> = [];
+  for (const connector of input.connectors) {
+    if (!connector.oauthAccountId) continue;
+    const account = await findOAuthAccountRecord({
+      teamId: input.context.teamId,
+      workspaceId: input.context.workspaceId,
+      accountId: connector.oauthAccountId,
+    });
+    if (account?.providerAccountEmail) {
+      mailboxes.push({
+        connectorId: connector.id,
+        email: account.providerAccountEmail,
+      });
+    }
+  }
+  if (mailboxes.length === 0) return undefined;
+  if (mailboxes.length === 1) {
+    return `Connected mailbox: ${mailboxes[0]!.email}; this is the user's own address and the sender of any email sent.`;
+  }
+  const list = mailboxes
+    .map((mailbox) => `${mailbox.email} (connectorId ${mailbox.connectorId})`)
+    .join(", ");
+  return `Connected mailboxes: ${list}; each is the user's own address and the sender of email sent through it.`;
 }
 
 function activeConnectorsByType(connectors: SourceConnectorRecord[]) {
@@ -221,6 +257,24 @@ function directConnectorActionMeta(input: {
     userId: input.context.userId,
     workspaceId: input.context.workspaceId,
   };
+}
+
+// Gmail results and, more broadly, any connector read result can carry a
+// person's private content (message bodies, issue/ticket text, …). Keep that
+// content out of the debug logs for every connector type, not just Gmail.
+// This also governs the failure log's `errorMessage`: an adapter's error class
+// may pass a provider's own error text straight through (for example Notion's
+// `parseNotionResponse` builds its message from the parsed response body), so
+// a read action's error message can carry the same private content as its
+// result.
+function shouldOmitConnectorActionResponseContent(input: {
+  action: ConnectorActionSpec;
+  connectorType: string;
+}) {
+  return (
+    input.connectorType === "gmail" ||
+    input.action.capabilities?.includes("connector_read") === true
+  );
 }
 
 export function createConnectorActionInterruptConfigs(
@@ -482,9 +536,7 @@ export async function createConnectorActionTools(
     teamId: context.teamId,
     workspaceId: context.workspaceId,
   });
-  const connectorsByType = activeConnectorsByType(
-    await connectorAccessPolicy.filterAvailable(connectors, context.userId),
-  );
+  const connectorsByType = activeConnectorsByType(connectors);
   const tools = [];
 
   for (const manifest of connectorRegistry.listManifests()) {
@@ -495,6 +547,10 @@ export async function createConnectorActionTools(
     if (activeConnectors.length === 0) {
       continue;
     }
+    const accountNote =
+      manifest.type === "gmail"
+        ? await gmailMailboxNote({ connectors: activeConnectors, context })
+        : undefined;
     for (const action of manifest.actions) {
       if (action.visibility !== "agent" || !action.agentToolName) {
         continue;
@@ -570,10 +626,6 @@ export async function createConnectorActionTools(
                     userId: context.userId,
                     permission: "connector.read",
                   });
-                await connectorAccessPolicy.requireConnection(
-                  connector,
-                  context.userId,
-                );
                 if (
                   connector.connectorType === "gmail" &&
                   action.capabilities?.includes("connector_read") &&
@@ -614,12 +666,16 @@ export async function createConnectorActionTools(
                   );
                 }
 
-                const accessToken = await connectorOAuthService.getRuntimeToken(
+                const accessToken = await resolveCredential(
+                  {
+                    getRuntimeToken: (input) =>
+                      connectorOAuthService.getRuntimeToken(input),
+                    getManifest: (type) => connectorRegistry.getManifest(type),
+                  },
                   {
                     teamId: context.teamId,
                     workspaceId: context.workspaceId,
-                    accountId: connector.oauthAccountId,
-                    connectorType: connector.connectorType,
+                    connector,
                   },
                 );
                 const adapter = connectorRegistry.getAdapter(
@@ -632,6 +688,11 @@ export async function createConnectorActionTools(
                   context,
                   idempotencyKey,
                 });
+                const omitResponseContent =
+                  shouldOmitConnectorActionResponseContent({
+                    action,
+                    connectorType: connector.connectorType,
+                  });
                 logger.debug("Connector action direct execution selected", {
                   ...logMeta,
                   connectorName: connector.name,
@@ -654,18 +715,28 @@ export async function createConnectorActionTools(
                     accessToken,
                     idempotencyKey,
                   })
-                  .catch((error) => {
+                  .catch(async (error) => {
+                    await connectorOAuthService.markBrokeredAccountReauthRequired(
+                      {
+                        teamId: context.teamId,
+                        workspaceId: context.workspaceId,
+                        accountId: connector.oauthAccountId,
+                        connectorType: connector.connectorType,
+                        error,
+                      },
+                    );
                     const connectorError = toConnectorError(error);
                     logger.debug(
                       "Connector action direct adapter execution failed",
                       {
                         ...logMeta,
                         errorCode: connectorError.code,
-                        errorMessage: connectorError.message,
+                        statusCode: connectorError.statusCode,
                         latencyMs: Date.now() - startedAt,
-                        ...(connector.connectorType === "gmail"
+                        ...(omitResponseContent
                           ? {}
                           : {
+                              errorMessage: connectorError.message,
                               rawResponseJson:
                                 connectorError.details?.rawResponseJson,
                             }),
@@ -679,7 +750,7 @@ export async function createConnectorActionTools(
                     ...logMeta,
                     externalId: result.externalId ?? null,
                     latencyMs: Date.now() - startedAt,
-                    ...(connector.connectorType === "gmail"
+                    ...(omitResponseContent
                       ? {}
                       : {
                           rawResponseJson: result.rawResponseJson,
@@ -697,11 +768,19 @@ export async function createConnectorActionTools(
               {
                 connectorType: manifest.type,
                 toolName: agentToolName,
+                // The error-level failure log follows the same omit rule as the
+                // debug logs: a Gmail or `connector_read` action's error can
+                // carry provider response text. The connector resolves to this
+                // manifest's type, so this matches the per-connector decision.
+                omitResponseContent: shouldOmitConnectorActionResponseContent({
+                  action,
+                  connectorType: manifest.type,
+                }),
               },
             ),
           {
             name: agentToolName,
-            description: actionDescription({ action, manifest }),
+            description: actionDescription({ action, manifest, accountNote }),
             schema: jsonSchemaWithConnectorId(action.inputSchema),
           },
         ),

@@ -1,4 +1,3 @@
-import { ConnectorAccessPolicy } from "./access-policy";
 import { createHash } from "node:crypto";
 import type { ContentBillingPort } from "../content/billing-port";
 import { SourceIndexingService } from "../sources";
@@ -11,6 +10,7 @@ import {
 } from "../sources";
 import { getBillingDeploymentCapabilities } from "../../billing-host/bindings";
 import { workspaceService } from "../workspace";
+import { resolveCredential, type CredentialDeps } from "./credential";
 import { ConnectorError, toConnectorError } from "./errors";
 import { IngestionPageBudget, isPagesLimitExceeded } from "./ingestion-budget";
 import { requireConnectorWorkspace } from "./permissions";
@@ -39,6 +39,11 @@ import {
 } from "./repository";
 import { ConnectorOAuthService } from "./oauth-service";
 import { ConnectorRegistry, connectorRegistry } from "./registry";
+import {
+  hasSyncReadinessMetadata,
+  withSyncReadinessMetadata,
+  withoutSyncReadinessMetadata,
+} from "./sync-readiness-metadata";
 import { resolveExtractedFile } from "./extracted-file";
 import { isConnectorExtractedFile, isConnectorItemSkipError } from "./types";
 import type {
@@ -74,7 +79,9 @@ class ConnectorSyncBlocked extends Error {
 }
 
 type UpsertItemResult =
-  | { kind: "indexed" }
+  // `updated` is true when the item already had a source row (a changed item or
+  // a revived archived one) and false when it was first indexed in this run.
+  | { kind: "indexed"; updated: boolean }
   | { kind: "unchanged" }
   | { kind: "oversized"; requestedPages: number; cycleCapacity: number }
   | { kind: "skipped"; reason: ConnectorItemSkipReason };
@@ -174,33 +181,6 @@ function resolveNextScheduledAt(frequencyMinutes: number | null) {
   return new Date(Date.now() + frequencyMinutes * 60 * 1000);
 }
 
-function withSyncReadinessMetadata(
-  configJson: Record<string, unknown>,
-  readiness: ConnectorSyncReadinessResult,
-) {
-  return {
-    ...configJson,
-    syncReadiness: {
-      ready: false,
-      reason: readiness.reason ?? "connector_not_ready",
-      message: readiness.message ?? "Connector is not ready to sync.",
-      checkedAt: new Date().toISOString(),
-    },
-  };
-}
-
-function hasSyncReadinessMetadata(configJson: Record<string, unknown>) {
-  return Object.prototype.hasOwnProperty.call(configJson, "syncReadiness");
-}
-
-function withoutSyncReadinessMetadata(configJson: Record<string, unknown>) {
-  if (!hasSyncReadinessMetadata(configJson)) {
-    return configJson;
-  }
-  const { syncReadiness: _syncReadiness, ...rest } = configJson;
-  return rest;
-}
-
 function skippedRunMetadata(
   readiness: ConnectorSyncReadinessResult,
   extra: Record<string, unknown> = {},
@@ -281,8 +261,11 @@ export class ConnectorSyncOrchestrator {
     this.indexingService = new SourceIndexingService(billing);
   }
 
-  private get access() {
-    return new ConnectorAccessPolicy(undefined, this.registry);
+  private credentialDeps(): CredentialDeps {
+    return {
+      getRuntimeToken: (input) => this.oauthService.getRuntimeToken(input),
+      getManifest: (type) => this.registry.getManifest(type),
+    };
   }
 
   async enqueueManualRun(input: {
@@ -322,7 +305,6 @@ export class ConnectorSyncOrchestrator {
       );
     }
 
-    await this.access.requireConnection(connector, input.userId);
     const readiness = await this.checkReadiness({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
@@ -651,25 +633,6 @@ export class ConnectorSyncOrchestrator {
     if (connector.syncBlock?.reason !== "PAGES_LIMIT_EXCEEDED") {
       return { queued: false as const, reason: "not_quota_blocked" };
     }
-    try {
-      await this.access.requireConnection(connector);
-    } catch (error) {
-      if (
-        !(error instanceof ConnectorError) ||
-        ![
-          "CONNECTOR_PREVIEW_ACCESS_DENIED",
-          "CONNECTOR_PREVIEW_OWNER_REQUIRED",
-        ].includes(error.code)
-      )
-        throw error;
-      // These records share a bounded oldest-first queue with eligible work.
-      // Advance the check timestamp so denied previews cannot starve that work.
-      await markConnectorSyncBlockChecked({
-        connectorId: connector.id,
-        checkedAt: new Date(),
-      });
-      return { queued: false as const, reason: "preview_denied" };
-    }
     const billingUserId = await this.resolveBillingActor({
       teamId: connector.teamId,
       ownerUserId: connector.createdBy,
@@ -834,6 +797,13 @@ export class ConnectorSyncOrchestrator {
       let discoveredCount = 0;
       let indexedCount = 0;
       let failedCount = 0;
+      // Of `indexedCount`, how many were already known (`updatedCount`); the
+      // rest of the discovered items were left alone (`unchangedCount`) or
+      // declined by the connector (`skippedCount`, which includes items too
+      // large for the page quota). Kept in the run metadata, not a column.
+      let updatedCount = 0;
+      let unchangedCount = 0;
+      let skippedCount = 0;
       const itemFailures: Array<Record<string, unknown>> = [];
       const oversizedItems: Array<Record<string, unknown>> = [];
       const skippedItems: Array<Record<string, unknown>> = [];
@@ -841,6 +811,9 @@ export class ConnectorSyncOrchestrator {
       // only it may clear the block; a webhook run for other items keeps it.
       const clearsSyncBlock = !input.targetExternalIds?.length;
       const runMetadata = () => ({
+        updatedCount,
+        unchangedCount,
+        skippedCount,
         ...(itemFailures.length ? { itemFailures } : {}),
         ...(oversizedItems.length ? { oversizedItems } : {}),
         ...(skippedItems.length ? { skippedItems } : {}),
@@ -849,17 +822,6 @@ export class ConnectorSyncOrchestrator {
       try {
         const checkAccess = async () => {
           const actor = run.createdBy;
-          if (
-            connector.connectorType === "gmail" &&
-            run.triggerType === "manual" &&
-            !actor
-          )
-            throw new ConnectorError(
-              403,
-              "CONNECTOR_PREVIEW_ACTOR_REQUIRED",
-              "Manual Gmail sync requires an actor",
-            );
-          await this.access.requireConnection(connector, actor ?? undefined);
           if (connector.connectorType === "gmail" && actor)
             await requireConnectorWorkspace({
               workspaceId: input.workspaceId,
@@ -896,11 +858,10 @@ export class ConnectorSyncOrchestrator {
         }
 
         const adapter = this.registry.getAdapter(connector.connectorType);
-        const accessToken = await this.oauthService.getRuntimeToken({
+        const accessToken = await resolveCredential(this.credentialDeps(), {
           teamId: input.teamId,
           workspaceId: input.workspaceId,
-          accountId: connector.oauthAccountId,
-          connectorType: connector.connectorType,
+          connector,
         });
         const targetExternalIdSet = input.targetExternalIds?.length
           ? new Set(input.targetExternalIds)
@@ -988,11 +949,22 @@ export class ConnectorSyncOrchestrator {
               });
               if (result.kind === "indexed") {
                 indexedCount += 1;
+                if (result.updated) updatedCount += 1;
                 await incrementSyncRunCounts({
                   ...input,
                   indexedDelta: 1,
+                  ...(result.updated
+                    ? { metadataPatch: { updatedCount } }
+                    : {}),
+                });
+              } else if (result.kind === "unchanged") {
+                unchangedCount += 1;
+                await incrementSyncRunCounts({
+                  ...input,
+                  metadataPatch: { unchangedCount },
                 });
               } else if (result.kind === "oversized") {
+                skippedCount += 1;
                 oversizedItems.push({
                   externalId: item.externalId,
                   title: item.title,
@@ -1001,9 +973,13 @@ export class ConnectorSyncOrchestrator {
                 });
                 await incrementSyncRunCounts({
                   ...input,
-                  metadataPatch: { oversizedItems: oversizedItems.slice(-20) },
+                  metadataPatch: {
+                    skippedCount,
+                    oversizedItems: oversizedItems.slice(-20),
+                  },
                 });
               } else if (result.kind === "skipped") {
+                skippedCount += 1;
                 skippedItems.push({
                   externalId: item.externalId,
                   title: item.title,
@@ -1011,7 +987,10 @@ export class ConnectorSyncOrchestrator {
                 });
                 await incrementSyncRunCounts({
                   ...input,
-                  metadataPatch: { skippedItems: skippedItems.slice(-20) },
+                  metadataPatch: {
+                    skippedCount,
+                    skippedItems: skippedItems.slice(-20),
+                  },
                 });
               }
             } catch (error) {
@@ -1546,7 +1525,7 @@ export class ConnectorSyncOrchestrator {
     }
     if (pages !== null) input.budget.consumed(pages);
 
-    return { kind: "indexed" };
+    return { kind: "indexed", updated: existing != null };
   }
 
   /**
@@ -1684,17 +1663,15 @@ export class ConnectorSyncOrchestrator {
       };
     }
 
-    await this.access.requireConnection(connector, input.userId);
     const adapter = this.registry.getAdapter(connector.connectorType);
     if (!adapter.checkSyncReadiness) {
       return { ready: true };
     }
 
-    const accessToken = await this.oauthService.getRuntimeToken({
+    const accessToken = await resolveCredential(this.credentialDeps(), {
       teamId: input.teamId,
       workspaceId: input.workspaceId,
-      accountId: connector.oauthAccountId,
-      connectorType: connector.connectorType,
+      connector,
     });
 
     return adapter.checkSyncReadiness({

@@ -27,6 +27,9 @@ import { processSyncModelPricingJob } from "./processors/sync-model-pricing";
 import { processProviderCostReconciliationJob } from "../shared/model-gateway/provider-cost-reconciliation";
 import { processThreadTitleGenerateJob } from "./processors/thread-title";
 import { processSourceGuideGenerateJob } from "./processors/source-guide";
+import { processStudyGenerateJob } from "./processors/study";
+import { processTableGenerateJob } from "./processors/table";
+import { processSourceResearchJob } from "./processors/research";
 import { processSkillOverviewGenerateJob } from "./processors/skill-overview-generate";
 import { SKILL_OVERVIEW_GENERATE_JOB } from "../modules/skills/market/overview-queue";
 import { processMcpReadmeFetchJob } from "./processors/mcp-readme-fetch";
@@ -54,6 +57,7 @@ import {
   interruptActiveChatRuns,
 } from "../modules/threads";
 import { connectorAdaptersReady } from "../modules/connectors";
+import { registerAssistantTurnProviders } from "../modules/assistants";
 
 validateBillingStartup();
 await syncGlobalModelGatewayConfigAtStartup({ syncPricing: false });
@@ -62,6 +66,9 @@ await ensureModelConfigAvailable();
 // Connectors are contributed by capabilities, so registering them reads
 // manifests. Await it before serving so the registry is never consulted empty.
 await connectorAdaptersReady();
+// Workspace assistant conversations get their tools and instructions from
+// these providers; a turn in one without its provider fails.
+registerAssistantTurnProviders();
 // Chat-run and billing counters are incremented in this process; without the
 // flush they would accumulate and never appear in the logs.
 metrics.startPeriodicFlush();
@@ -78,6 +85,9 @@ const primaryProcessors: Record<string, JobProcessor> = {
   "thread-chat-run": processThreadChatRunJob,
   "thread-title-generate": processThreadTitleGenerateJob,
   "source-guide-generate": processSourceGuideGenerateJob,
+  "study-generate": processStudyGenerateJob,
+  "table-generate": processTableGenerateJob,
+  "source-research": processSourceResearchJob,
   [SKILL_OVERVIEW_GENERATE_JOB]: processSkillOverviewGenerateJob,
   [MCP_README_FETCH_JOB]: (job) => processMcpReadmeFetchJob(job),
   [MCP_OVERVIEW_GENERATE_JOB]: processMcpOverviewGenerateJob,

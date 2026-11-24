@@ -14,12 +14,23 @@ export type VideoPresentationRenderPolicy = Readonly<{
   mimeType: "video/mp4";
   overallTimeoutMs: number;
   commandTimeoutMs: number;
+  /**
+   * Most frames one `render-scene` command may render. A scene longer than this
+   * renders as several ordered parts, each its own sandbox command, so a slow
+   * sandbox cannot push a single command past `commandTimeoutMs`.
+   */
+  maxFramesPerSceneCommand: number;
   maxOutputBytes: number;
   maxSampleBytes: number;
   outputSafetyRatio: number;
   audioBitrateBps: number;
   minimumVideoBitrateBps: number;
-  concurrency: number;
+  /**
+   * Browser tabs the sandbox renders with. "auto" lets `render-scene` size it
+   * to the sandbox it runs in (Remotion's own default: half the CPU threads,
+   * at most 8), so a larger sandbox renders faster without a code change.
+   */
+  concurrency: number | "auto";
 }>;
 
 export const VIDEO_PRESENTATION_RENDER_POLICY: VideoPresentationRenderPolicy =
@@ -34,12 +45,17 @@ export const VIDEO_PRESENTATION_RENDER_POLICY: VideoPresentationRenderPolicy =
     // correctness path.
     overallTimeoutMs: 8 * 60_000,
     commandTimeoutMs: 120_000,
+    // Measured on the 1-vCPU Daytona sandbox: a plain scene renders at ~6
+    // frames/s and a visually heavy one below 3.7. 90 frames is 15-25 s of
+    // render plus ~10-20 s of per-command browser start-up, well inside the
+    // 120 s command bound even at 1.5 frames/s.
+    maxFramesPerSceneCommand: 90,
     maxOutputBytes: ARTIFACT_STORAGE_MAX_DOWNLOAD_BYTES,
     maxSampleBytes: ARTIFACT_STORAGE_MAX_DOWNLOAD_BYTES,
     outputSafetyRatio: 0.9,
     audioBitrateBps: 128_000,
     minimumVideoBitrateBps: 150_000,
-    concurrency: 1,
+    concurrency: "auto" as const,
   });
 
 export function resolveVideoPresentationRenderPolicy(
@@ -769,30 +785,47 @@ export function createSandboxVideoPresentationRenderPort(input: {
 
           let frameCursor = 0;
           for (const scene of prepareInput.project.scenes) {
-            const from = frameCursor;
-            const to = from + scene.durationInFrames - 1;
-            frameCursor = to + 1;
-            const result = await execute(
-              "scene",
-              `SOURCEWEFT_VIDEO_BITRATE=${shellQuote(bitrate.remotionVideoBitrate)} SOURCEWEFT_VIDEO_CONCURRENCY=${policy.concurrency} pnpm run render-scene -- ${scene.slideNumber}`,
-              "scenesMs",
+            const sceneFrom = frameCursor;
+            frameCursor = sceneFrom + scene.durationInFrames;
+            const parts = Math.max(
+              1,
+              Math.ceil(
+                scene.durationInFrames / policy.maxFramesPerSceneCommand,
+              ),
             );
-            const report = reportLine(result.output, "render-scene");
-            if (
-              !report ||
-              report.ok !== true ||
-              report.slideNumber !== scene.slideNumber ||
-              numberField(report, "from") !== from ||
-              numberField(report, "to") !== to ||
-              (numberField(report, "byteLength") ?? 0) <= 0 ||
-              !parseDigest(report.contentDigest)
-            ) {
-              throw new VideoPresentationRenderError(
-                "VIDEO_RENDER_SCENE_REPORT_INVALID",
+            for (let part = 1; part <= parts; part += 1) {
+              // Even split; the script derives the same slice from the manifest.
+              const from =
+                sceneFrom +
+                Math.floor(((part - 1) * scene.durationInFrames) / parts);
+              const to =
+                sceneFrom +
+                Math.floor((part * scene.durationInFrames) / parts) -
+                1;
+              const result = await execute(
                 "scene",
-                `Scene ${scene.slideNumber} did not produce a valid chunk report.`,
-                { expectedFrom: from, expectedTo: to },
+                `SOURCEWEFT_VIDEO_BITRATE=${shellQuote(bitrate.remotionVideoBitrate)} SOURCEWEFT_VIDEO_CONCURRENCY=${policy.concurrency} pnpm run render-scene -- ${scene.slideNumber} ${part} ${parts}`,
+                "scenesMs",
               );
+              const report = reportLine(result.output, "render-scene");
+              if (
+                !report ||
+                report.ok !== true ||
+                report.slideNumber !== scene.slideNumber ||
+                numberField(report, "part") !== part ||
+                numberField(report, "parts") !== parts ||
+                numberField(report, "from") !== from ||
+                numberField(report, "to") !== to ||
+                (numberField(report, "byteLength") ?? 0) <= 0 ||
+                !parseDigest(report.contentDigest)
+              ) {
+                throw new VideoPresentationRenderError(
+                  "VIDEO_RENDER_SCENE_REPORT_INVALID",
+                  "scene",
+                  `Scene ${scene.slideNumber} part ${part}/${parts} did not produce a valid chunk report.`,
+                  { expectedFrom: from, expectedTo: to, part, parts },
+                );
+              }
             }
           }
 

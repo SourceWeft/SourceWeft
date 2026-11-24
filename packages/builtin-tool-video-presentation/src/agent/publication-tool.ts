@@ -836,7 +836,6 @@ export function createPublishVideoPresentationTool(input: {
       description:
         "Atomically publish the exact validated current draft as the current video_presentation artifact version. Requires protected validation authority and returns a host-built committed artifact result.",
       schema: publishVideoPresentationSchema,
-      returnDirect: true,
     },
   );
 }

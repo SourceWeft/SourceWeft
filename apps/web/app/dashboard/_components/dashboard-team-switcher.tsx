@@ -38,6 +38,8 @@ import {
 
 interface DashboardTeamSwitcherProps {
   className?: string;
+  /** Shown while the session's teams are still loading. */
+  fallback?: React.ReactNode;
   onAddTeam?: () => void;
   size?: "sm" | "default";
 }
@@ -51,6 +53,7 @@ function isTeamItemActive(
 
 export function DashboardTeamSwitcher({
   className,
+  fallback = null,
   onAddTeam,
   size = "default",
 }: DashboardTeamSwitcherProps) {
@@ -60,7 +63,7 @@ export function DashboardTeamSwitcher({
   const [open, setOpen] = React.useState(false);
 
   if (!currentItem) {
-    return null;
+    return fallback;
   }
 
   async function handleSwitch(item: DashboardTeamItem) {

@@ -1,4 +1,5 @@
 import type { DeliverableJobEnvelope } from "@sourceweft/capability-contracts";
+import type { TableColumnInput } from "@sourceweft/contracts/table";
 import { config } from "../../shared/config";
 import {
   deliverablesQueue,
@@ -230,6 +231,149 @@ export async function enqueueSourceGuideGenerateJob(
   });
 }
 
+export const STUDY_GENERATE_JOB = "study-generate";
+/** Queue attempts of one study generation; the engine resumes from its checkpoint. */
+export const STUDY_GENERATE_JOB_ATTEMPTS = 2;
+
+/**
+ * One study artifact version to generate. Built by the server from an
+ * authorized request; the processor still re-reads the artifact and takes its
+ * tenancy from the row it finds there.
+ */
+export type StudyGenerateJobPayload = {
+  teamId: string;
+  workspaceId: string;
+  threadId: string;
+  artifactId: string;
+  versionNo: number;
+  userId: string;
+  artifactType: "flashcards" | "quiz" | "mindmap";
+  sourceIds: string[];
+  options?: {
+    size?: "fewer" | "standard" | "more";
+    count?: number;
+    difficulty?: "easy" | "mixed" | "hard";
+    language?: string;
+    focus?: string;
+  };
+  uiLocale: string;
+};
+
+export function studyGenerateJobId(artifactId: string, versionNo: number) {
+  return `study_${artifactId}_${versionNo}`;
+}
+
+/**
+ * Queues the generation of one version. The job id is the version, so a second
+ * request for the same version finds the first job instead of adding another:
+ * `created: false` tells the caller it was already queued.
+ */
+export async function enqueueStudyGenerateJob(
+  payload: StudyGenerateJobPayload,
+) {
+  const jobId = studyGenerateJobId(payload.artifactId, payload.versionNo);
+  const existing = await jobsQueue.getJob(jobId);
+  if (existing) {
+    return { created: false as const };
+  }
+  await jobsQueue.add(STUDY_GENERATE_JOB, payload, {
+    jobId,
+    attempts: STUDY_GENERATE_JOB_ATTEMPTS,
+    backoff: { type: "exponential", delay: 5000 },
+    removeOnComplete: 100,
+    removeOnFail: 100,
+  });
+  return { created: true as const };
+}
+
+export const TABLE_GENERATE_JOB = "table-generate";
+/** Queue attempts of one table generation; the engine resumes from its checkpoint. */
+export const TABLE_GENERATE_JOB_ATTEMPTS = 2;
+
+/**
+ * One table version to generate. Built by the server from an authorized
+ * request; the processor still re-reads the artifact and takes its tenancy from
+ * the row it finds there.
+ */
+export type TableGenerateJobPayload = {
+  teamId: string;
+  workspaceId: string;
+  threadId: string;
+  artifactId: string;
+  versionNo: number;
+  userId: string;
+  sourceIds: string[];
+  columns: TableColumnInput[];
+  instruction?: string;
+  language?: string;
+  uiLocale: string;
+};
+
+export function tableGenerateJobId(artifactId: string, versionNo: number) {
+  return `table_${artifactId}_${versionNo}`;
+}
+
+/**
+ * Queues the generation of one table version. The job id is the version, so a
+ * second request for the same version finds the first job instead of adding
+ * another: `created: false` tells the caller it was already queued.
+ */
+export async function enqueueTableGenerateJob(payload: TableGenerateJobPayload) {
+  const jobId = tableGenerateJobId(payload.artifactId, payload.versionNo);
+  const existing = await jobsQueue.getJob(jobId);
+  if (existing) {
+    return { created: false as const };
+  }
+  await jobsQueue.add(TABLE_GENERATE_JOB, payload, {
+    jobId,
+    attempts: TABLE_GENERATE_JOB_ATTEMPTS,
+    backoff: { type: "exponential", delay: 5000 },
+    removeOnComplete: 100,
+    removeOnFail: 100,
+  });
+  return { created: true as const };
+}
+
+export const RESEARCH_JOB = "source-research";
+/** Queue attempts of one research run; the loop resumes from its saved ledger. */
+export const RESEARCH_JOB_ATTEMPTS = 2;
+
+/**
+ * One deep-research run to execute. Built by the server from an authorized
+ * request; the processor re-reads the run row and takes its tenancy from there.
+ */
+export type ResearchJobPayload = {
+  runId: string;
+  teamId: string;
+  workspaceId: string;
+  userId: string;
+};
+
+export function researchJobId(runId: string) {
+  return `research_${runId}`;
+}
+
+/**
+ * Queues one research run. The job id is the run, so a redelivered or repeated
+ * request for the same run finds the first job instead of adding another:
+ * `created: false` tells the caller it was already queued.
+ */
+export async function enqueueResearchJob(payload: ResearchJobPayload) {
+  const jobId = researchJobId(payload.runId);
+  const existing = await jobsQueue.getJob(jobId);
+  if (existing) {
+    return { created: false as const };
+  }
+  await jobsQueue.add(RESEARCH_JOB, payload, {
+    jobId,
+    attempts: RESEARCH_JOB_ATTEMPTS,
+    backoff: { type: "exponential", delay: 5000 },
+    removeOnComplete: 100,
+    removeOnFail: 100,
+  });
+  return { created: true as const };
+}
+
 const THREAD_CHAT_RUN_JOB_ID_PREFIX = `${THREAD_CHAT_RUN_JOB}_`;
 
 /** The deterministic queue job id of a durable chat run. */
@@ -252,6 +396,9 @@ export function parseThreadChatRunJobId(jobId: string): string | null {
 
 export async function enqueueThreadChatRunJob(
   payload: ThreadChatRunJobPayload,
+  // A priority above zero runs after every job without one, so background
+  // turns (scheduled runs) do not hold up a person waiting on a reply.
+  options: { priority?: number } = {},
 ) {
   const jobId = threadChatRunJobId(payload.runId);
   const existing = await jobsQueue.getJob(jobId);
@@ -262,6 +409,7 @@ export async function enqueueThreadChatRunJob(
   try {
     return await jobsQueue.add(THREAD_CHAT_RUN_JOB, payload, {
       jobId,
+      ...(options.priority ? { priority: options.priority } : {}),
       attempts: 1,
       removeOnComplete: 100,
       removeOnFail: 100,

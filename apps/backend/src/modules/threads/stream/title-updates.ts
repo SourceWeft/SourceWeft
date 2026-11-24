@@ -25,6 +25,8 @@ export type ThreadTitleJobCompletion = {
 export function shouldGenerateAutomaticThreadTitle(
   prepared: Awaited<ReturnType<ContentThreadTurnService["prepareThreadTurn"]>>,
 ) {
+  // A scheduled run's conversation is titled after its task and date.
+  if (prepared.unattended) return false;
   return prepared.isFirstAssistantResponse && prepared.isFirstAssistantAttempt;
 }
 

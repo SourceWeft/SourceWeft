@@ -147,7 +147,7 @@
         },
         "create": {
           "title": "讓成果成為下一步的起點",
-          "description": "將資料轉化為報告、演示、學習指南等成果。檢查輸出、提出修改，再回到儲存的對話與檔案中繼續完善。",
+          "description": "將資料轉化為報告、演示、學習指南、比較表格等成果。檢查輸出、提出修改，再回到儲存的對話與檔案中繼續完善。",
           "bullets": [
             "報告、演示與創作成果",
             "檢查並持續完善產生結果",
@@ -237,7 +237,7 @@
         },
         "artifacts": {
           "title": "AI 應當幫助人們打造經得起時間的成果",
-          "body": "不止於對話，SourceWeft 旨在把來源材料轉化為可反覆回顧的學習指南、常見問答、時間軸、簡報與音訊概覽。"
+          "body": "不止於對話，SourceWeft 旨在把來源材料轉化為可反覆回顧的學習指南、常見問答、時間軸、簡報、比較表格與音訊概覽。"
         }
       }
     },
@@ -1006,7 +1006,9 @@
       "chat": "對話",
       "more": "更多",
       "me": "我",
-      "mainNavigation": "主導覽"
+      "mainNavigation": "主導覽",
+      "scheduled": "排程任務",
+      "assistant": "助理"
     },
     "sidebar": {
       "newChat": "新對話",
@@ -1041,13 +1043,42 @@
       "all": "所有對話",
       "shared": "共享",
       "private": "私密",
+      "scheduled": "排程任務",
+      "assistant": "助理",
       "archived": "封存",
       "clearFilter": "清除{filter}篩選",
       "openActions": "開啟對話操作",
       "makePrivate": "設為私密",
       "makeVisible": "設為工作區可見",
       "archive": "封存",
+      "unarchive": "取消封存",
+      "archiveError": "無法封存此對話。",
+      "unarchiveError": "無法取消封存此對話。",
+      "rename": "重新命名",
+      "renameLabel": "對話標題",
+      "renameError": "無法重新命名此對話。",
+      "pin": "置頂",
+      "unpin": "取消置頂",
+      "pinError": "無法更新置頂。",
+      "pinLimit": "最多可置頂 {count} 個對話，請先取消一個置頂。",
+      "pinned": "已置頂",
+      "archivedBadge": "已封存",
+      "searching": "正在搜尋…",
+      "searchEmpty": "沒有符合的對話。",
+      "searchError": "搜尋失敗，請重試。",
+      "export": "匯出為 Markdown",
+      "exporting": "正在準備匯出…",
+      "exportError": "無法匯出此對話。",
+      "share": "分享",
       "delete": "刪除",
+      "deleteDialog": {
+        "title": "刪除這個對話？",
+        "description": "「{title}」將被永久刪除，包括其中的訊息和它建立的子代理程式對話。如果它有公開連結，連結將失效。此操作無法撤銷。",
+        "cancel": "取消",
+        "confirm": "刪除",
+        "deleting": "正在刪除…",
+        "error": "無法刪除此對話。"
+      },
       "nowPrivate": "對話已設為私密",
       "nowVisible": "對話現在對工作區可見",
       "visibilityError": "無法更改此對話的可見性。",
@@ -1065,6 +1096,8 @@
       "filterEmpty": {
         "shared": "沒有共享對話。",
         "private": "沒有私密對話。",
+        "scheduled": "沒有排程任務的結果。",
+        "assistant": "沒有助理工單。",
         "archived": "沒有已封存對話。"
       },
       "loading": "載入中…",
@@ -1080,7 +1113,23 @@
       "clearAllButton": "清除全部",
       "addSubagent": "新增子代理程式",
       "openInNewWindow": "在新視窗中開啟",
-      "openBesideParent": "在父工作階段旁開啟"
+      "openBesideParent": "在父工作階段旁開啟",
+      "shareDialog": {
+        "title": "分享對話",
+        "notSharedDescription": "拿到連結的人可以看到這個對話現在的樣子。之後的新訊息不會公開，除非你更新連結。",
+        "createLink": "建立連結",
+        "copy": "複製",
+        "copied": "已複製",
+        "updateLink": "更新連結",
+        "stopSharing": "停止分享",
+        "stopSharingConfirm": "停止分享這個對話？連結將失效。",
+        "snapshotFrom": "快照時間：{date}",
+        "allowSearchEngines": "允許搜尋引擎收錄",
+        "allowSearchEnginesOff": "關閉時，只有拿到連結的人能看到。",
+        "views": "{count} 次瀏覽",
+        "updateError": "無法更新分享設定。",
+        "forbidden": "只有對話的建立者或工作區管理員可以分享。"
+      }
     },
     "account": {
       "accountAndSettings": "帳戶與設定",
@@ -1105,36 +1154,27 @@
     "mobileMe": {
       "signOut": "登出",
       "signingOut": "正在登出…",
-      "endSession": "結束此工作階段",
-      "observeDescription": "LLM 追蹤、指標和時間軸",
       "panels": {
         "account": {
-          "label": "個人資料",
-          "description": "帳戶、大頭貼、主題和偏好設定"
+          "label": "個人資料"
         },
         "team": {
-          "label": "團隊",
-          "description": "團隊切換、成員和邀請"
+          "label": "團隊"
         },
         "workspace": {
-          "label": "工作區",
-          "description": "誰可以檢視和使用此工作區"
+          "label": "工作區"
         },
         "usage": {
-          "label": "用量",
-          "description": "方案用量和近期活動"
+          "label": "用量"
         },
         "billing": {
-          "label": "帳單",
-          "description": "訂閱、方案和帳單入口"
+          "label": "帳單"
         },
         "approvals": {
-          "label": "核准",
-          "description": "你選擇始終允許的操作"
+          "label": "核准"
         },
         "about": {
-          "label": "關於",
-          "description": "版本和建置詳細資訊"
+          "label": "關於"
         }
       }
     },
@@ -1683,6 +1723,124 @@
       "logo": "{name} 標誌"
     }
   },
+  "dashboardAssistant": {
+    "page": {
+      "title": "工作區助理",
+      "subtitle": "在共享動態裡提出工作請求。助理會為每個請求開一個工單，並在這裡回報進度。",
+      "loading": "正在載入助理…",
+      "loadError": "無法載入助理。",
+      "feedHeading": "動態",
+      "ticketsHeading": "工單",
+      "steward": "負責人：{name}"
+    },
+    "status": {
+      "active": "執行中",
+      "paused": "已暫停"
+    },
+    "statusReason": {
+      "steward_left": "負責人已離開工作區，助理已暫停。管理員可以指定新的負責人，然後恢復執行。",
+      "by_admin": "已由工作區成員暫停。"
+    },
+    "enable": {
+      "title": "助理尚未啟用",
+      "body": "啟用後，成員在共享動態裡提出工作請求，助理把每個請求作為單獨的工單來處理，費用由提出請求的人支付。",
+      "button": "啟用助理",
+      "askAdmin": "請聯絡工作區管理員啟用助理。"
+    },
+    "feed": {
+      "empty": "還沒有訊息。在下方向助理提出請求吧。",
+      "loadError": "無法載入動態。",
+      "loadOlder": "載入更早的訊息",
+      "showMore": "展開",
+      "showLess": "收起",
+      "you": "你",
+      "assistant": "助理",
+      "formerMember": "已離開的成員",
+      "ticket": "工單：{title}",
+      "openConversation": "開啟對話",
+      "event": {
+        "created": "新工單",
+        "ready": "已完成",
+        "waiting": "等待答覆",
+        "blocked": "受阻",
+        "failed": "失敗",
+        "dropped": "已放棄"
+      }
+    },
+    "composer": {
+      "label": "給助理傳送訊息",
+      "placeholder": "請助理幫你做點什麼…",
+      "send": "傳送",
+      "sending": "正在傳送…",
+      "hint": "按 {shortcut} 傳送。",
+      "paused": "助理已暫停，暫不接收新訊息。",
+      "readOnly": "你可以檢視動態，但不能在這個工作區傳送訊息。",
+      "tooLong": "訊息最多 {max} 個字元。",
+      "sendFailed": "訊息沒有傳送成功，內容還在輸入框裡，請重試。"
+    },
+    "tickets": {
+      "groups": {
+        "needsPerson": "需要你處理",
+        "inProgress": "進行中",
+        "idle": "閒置"
+      },
+      "empty": "沒有未結束的工單。",
+      "loadError": "無法載入工單。",
+      "requestedBy": "由 {name} 提出",
+      "retry": "重試",
+      "close": "關閉",
+      "openConversation": "開啟對話",
+      "stage": {
+        "queued": "排隊中",
+        "working": "處理中",
+        "waiting_person": "等待處理",
+        "idle": "閒置",
+        "ended": "已結束"
+      },
+      "blockedReason": {
+        "credit_cap": "已停止：達到額度上限。",
+        "insufficient_credits": "已停止：提出請求的人額度不足。",
+        "repeated_failure": "已停止：多次執行失敗。"
+      }
+    },
+    "menu": {
+      "open": "助理操作",
+      "pause": "暫停",
+      "resume": "恢復",
+      "changeSteward": "更換負責人",
+      "viewWorkLog": "檢視工作記錄"
+    },
+    "steward": {
+      "title": "更換負責人",
+      "body": "助理無法處理訊息時會通知負責人。請選擇能存取這個工作區的成員。",
+      "label": "負責人",
+      "save": "儲存",
+      "cancel": "取消"
+    },
+    "toasts": {
+      "enabled": "助理已啟用。",
+      "paused": "助理已暫停。",
+      "resumed": "助理已恢復。",
+      "stewardChanged": "負責人已更換。",
+      "retried": "工單已重新開始處理。",
+      "closed": "工單已關閉。"
+    },
+    "errors": {
+      "ASSISTANT_ALREADY_ENABLED": "助理已經啟用。",
+      "ASSISTANT_FORBIDDEN": "你沒有權限執行這個操作。",
+      "ASSISTANT_NOT_FOUND": "這個工作區還沒有啟用助理。",
+      "ASSISTANT_TICKET_NOT_FOUND": "這個工單已不存在。",
+      "ASSISTANT_TICKET_NOT_PAYER": "只有為這個工單付費的成員才能重試。",
+      "ASSISTANT_PAUSED": "助理已暫停。",
+      "ASSISTANT_VERSION_CONFLICT": "助理剛被別人修改過，請重試。",
+      "generic": "出了點問題，請重試。"
+    },
+    "threadNotice": {
+      "router": "這是助理的工作記錄。助理會自行執行，這裡不接收訊息。",
+      "ticket": "這個對話屬於助理的一個工單，這裡不接收訊息。",
+      "open": "去和助理對話"
+    }
+  },
   "dashboardChat": {
     "common": {
       "files": "檔案",
@@ -2012,6 +2170,19 @@
       "collapse": "收起",
       "show": "展開",
       "addImage": "新增圖片",
+      "dictation": {
+        "start": "語音輸入",
+        "stop": "停止語音輸入",
+        "transcribing": "正在轉錄…",
+        "permissionDenied": "麥克風權限被拒絕。請在瀏覽器或系統設定中允許本站使用麥克風，然後重試。",
+        "noDevice": "找不到麥克風。",
+        "insufficientCredits": "點數不足，無法繼續語音輸入。",
+        "failed": "轉錄失敗，已輸入的文字會保留。",
+        "rateLimited": "語音輸入過於頻繁，請稍後再試。",
+        "silenceTimeout": "一分鐘內沒有偵測到語音，語音輸入已停止。",
+        "maxDuration": "語音輸入已達到 10 分鐘上限，已停止。",
+        "deviceLost": "麥克風已斷開。"
+      },
       "draftSaveFailedNoRefresh": "儲存草稿失敗。請暫時不要重新整理。",
       "draftRestoreFailed": "無法恢復你的草稿。",
       "retry": "重試",
@@ -3055,9 +3226,25 @@
       "completed": "完成於 {date}",
       "public": "公開",
       "awaitingApproval": "等待核准",
+      "status": {
+        "pending": "排隊中",
+        "running": "產生中",
+        "ready": "已完成",
+        "failed": "失敗",
+        "archived": "已封存"
+      },
       "couldNotLoad": "無法載入該製品。",
       "loadFailed": "載入製品失敗。",
-      "loadMoreFailed": "載入更多製品失敗。"
+      "loadMoreFailed": "載入更多製品失敗。",
+      "types": {
+        "audio_overview": "音訊",
+        "video_overview": "影片",
+        "video_presentation": "影片演示",
+        "table": "資料表",
+        "flashcards": "閃卡",
+        "quiz": "測驗",
+        "mindmap": "心智圖"
+      }
     },
     "skills": {
       "gallery": "技能庫",
@@ -3177,12 +3364,22 @@
       "readinessNoPages": "已連接 · 未共享任何頁面",
       "readinessSetupRequired": "已連接 · 需要設定",
       "readinessNotReady": "連接器尚未就緒，無法同步。",
+      "readiness": {
+        "feed_blocked_address": "該訂閱源指向 SourceWeft 無法存取的網路位址。請使用公開的 https 訂閱源網址。",
+        "feed_timeout": "訂閱源伺服器回應逾時。",
+        "feed_too_large": "訂閱源過大，無法建立索引。",
+        "feed_not_a_feed": "該網址提供的不是 RSS 或 Atom 訂閱源。",
+        "feed_http_error": "訂閱源伺服器傳回了錯誤。",
+        "feed_unreachable": "無法連接到訂閱源伺服器。",
+        "feed_https_required": "訂閱源網址必須以 https:// 開頭。"
+      },
       "cta": {
         "connecting": "連接中…",
         "connected": "已連接",
         "configure": "設定",
         "connect": "連接",
-        "reconnect": "重新連接"
+        "reconnect": "重新連接",
+        "addFeed": "新增訂閱源"
       },
       "detail": {
         "syncing": "連接器操作正在執行。",
@@ -3194,7 +3391,8 @@
         "lastSync": "上次同步 {date}",
         "connectedAutoCreate": "已存在授權但沒有使用中的連接器。重新連接以建立連接器。",
         "connectedConfigure": "OAuth 已連接。設定此連接器以啟用同步。",
-        "available": "可透過 {name} OAuth 進行連接。"
+        "available": "可透過 {name} OAuth 進行連接。",
+        "availableAddFeed": "新增公開 RSS 或 Atom 訂閱源的網址。"
       },
       "syncBlock": {
         "pagesLimit": "頁數額度已用完。上次同步索引了 {count} 條內容後暫停，額度恢復後會自動繼續同步。",
@@ -3223,6 +3421,21 @@
         "Communication": "溝通協作"
       },
       "settingsDescription": "連接器設定、執行歷史和提供方事件。",
+      "rss": {
+        "feedUrl": "訂閱源網址",
+        "dialog": {
+          "description": "輸入公開 RSS 或 Atom 訂閱源的網址。SourceWeft 會先檢查訂閱源，再為其中的文章建立索引並保持同步。",
+          "nameLabel": "名稱（選填）",
+          "check": "檢查訂閱源",
+          "checking": "檢查中…",
+          "found": "已找到訂閱源",
+          "itemCount": "{count, plural, other {# 篇文章}}",
+          "invalidUrl": "請輸入以 https:// 開頭的訂閱源網址，且不要包含使用者名稱或密碼。",
+          "checkFailed": "無法檢查此訂閱源，請重試。",
+          "nameConflict": "此工作區中已存在同名連接器，或已新增過相同的訂閱源。請更改名稱，或使用已有的連接器。",
+          "addFailed": "新增訂閱源失敗。"
+        }
+      },
       "gmail": {
         "modeTitle": "選擇 Gmail 用途",
         "modeDescription": "連接前選擇初始模式，之後仍可在連接器設定中修改。",
@@ -3243,6 +3456,10 @@
         "modeScopeNote": "所有模式都會向 Google 申請讀取和傳送權限；每封郵件傳送前都必須審核。",
         "modeCancel": "取消",
         "modeContinue": "繼續前往 Google",
+        "brokerNoticeTitle": "透過 Composio 連接 Gmail",
+        "brokerNoticeBody": "SourceWeft 透過 Composio 連接 Gmail。Google 的授權頁會顯示 Composio 的名稱，並請求存取你的整個信箱。SourceWeft 只會搜尋你的郵件、讀取你詢問的郵件，並且只在你確認後傳送郵件。經過的郵件內容會由 Composio 保留最長一年。",
+        "brokerNoticeContinue": "繼續前往 Google",
+        "toolsOnlyCardDescription": "搜尋並閱讀郵件，經確認後傳送郵件。",
         "liveSearch": "即時搜尋 Gmail",
         "indexMail": "將選定郵件索引到此工作區",
         "indexNotice": "索引會將選定郵件內容存入工作區資料來源。關閉索引會使保留的郵件不再參與代理檢索；刪除連接器可移除儲存副本。定期同步需另行選擇。",
@@ -3283,6 +3500,150 @@
           "empty_content": "沒有可讀內容",
           "unreadable": "無法讀取檔案",
           "unknown": "因未知原因被跳過"
+        }
+      },
+      "selection": {
+        "count": "{count} / {limit}",
+        "missing": "已不存在",
+        "remove": "移除 {name}",
+        "lastSynced": "{date} 已同步",
+        "limitReached": "最多可選擇 {limit} 項。請先移除部分內容再新增。",
+        "containerIndexedCount": "{count, plural, other {已索引 # 個檔案}}",
+        "untitled": "未命名",
+        "nameUnavailable": "名稱不可用",
+        "browser": {
+          "title": "從 {provider} 選擇",
+          "breadcrumbLabel": "路徑",
+          "searchLabel": "依名稱搜尋 {provider}",
+          "searchPlaceholder": "搜尋 {provider}",
+          "emptyContainer": "這裡沒有內容。",
+          "noResults": "沒有與搜尋符合的內容。",
+          "loadMore": "載入更多",
+          "refresh": "重新整理",
+          "select": "選擇 {name}",
+          "alreadyAdded": "已新增",
+          "selectedCount": "已選擇 {count} 項",
+          "cancel": "取消",
+          "add": "新增"
+        },
+        "error": {
+          "reconnect": "你的 {provider} 帳號需要重新連接。重新連接後再試。",
+          "notFound": "此連接器不可用。請重新整理後重試。",
+          "notFoundItem": "此項在 {provider} 中已不存在。",
+          "tryLater": "{provider} 暫時繁忙。請稍後再試。",
+          "reopen": "列表已變化，請重新開啟後繼續。",
+          "generic": "無法連接到 {provider}。請重試。"
+        },
+        "state": {
+          "skipped": "已跳過",
+          "indexed": "已索引",
+          "processing": "同步中",
+          "failed": "失敗",
+          "waiting": "等待同步",
+          "unavailable": "已在 {provider} 中刪除或失去存取權限"
+        },
+        "skipReason": {
+          "unsupported_type": "不支援的檔案類型",
+          "too_large": "檔案過大，無法索引",
+          "needs_ocr": "掃描版 PDF 暫不支援",
+          "export_too_large": "匯出內容過大，無法索引",
+          "empty_content": "沒有可讀內容",
+          "unreadable": "無法讀取檔案",
+          "unknown": "因未知原因被跳過"
+        },
+        "disabledReason": {
+          "unknown": "無法選擇此項"
+        },
+        "default": {
+          "itemsTitle": "已選內容",
+          "itemsDescription": "選擇此連接器可以存取的內容。",
+          "choose": "選擇",
+          "empty": "尚未選擇任何內容。",
+          "browser": {
+            "description": "開啟某一項檢視其中內容，然後勾選要包含的內容。"
+          }
+        },
+        "byType": {
+          "dropbox": {
+            "itemsTitle": "檔案和資料夾",
+            "itemsDescription": "選擇要索引的 Dropbox 檔案和資料夾。所選內容都會按連接器的同步排程保持同步。",
+            "choose": "選擇檔案",
+            "empty": "尚未選擇任何內容。選擇檔案或資料夾以進行索引。",
+            "kinds": {
+              "folder": "資料夾",
+              "file": "檔案"
+            },
+            "disabledReason": {
+              "unsupported": "此檔案類型無法索引"
+            },
+            "browser": {
+              "description": "開啟資料夾檢視其中內容，然後勾選要索引的檔案和資料夾。",
+              "root": "Dropbox",
+              "note": "資料夾合計最多同步 1,000 個檔案",
+              "emptyContainer": "此資料夾為空。"
+            }
+          },
+          "github": {
+            "itemsTitle": "儲存庫",
+            "itemsDescription": "這個工作區所有成員的代理程式都能搜尋和讀取這些儲存庫裡的 issue、拉取請求和討論，且僅限這些儲存庫。",
+            "choose": "選擇儲存庫",
+            "empty": "還沒有選擇。選擇儲存庫之前，代理程式讀不到 GitHub 裡的任何內容。",
+            "kinds": {
+              "account": "帳號",
+              "repository": "儲存庫"
+            },
+            "helpLink": {
+              "add_repositories": "在 GitHub 上新增儲存庫"
+            },
+            "browser": {
+              "description": "開啟一個帳號檢視已安裝應用的儲存庫，然後勾選允許代理程式搜尋和讀取的儲存庫。",
+              "root": "GitHub",
+              "emptyRoot": "應用還沒有安裝到任何帳號。請先在 GitHub 上新增儲存庫，然後點選重新整理。"
+            }
+          },
+          "linear": {
+            "itemsTitle": "團隊和專案",
+            "itemsDescription": "這個工作區所有成員的代理程式都能搜尋和讀取你選中的團隊和專案裡的 issue，且僅限這些。選中團隊即包含它的全部 issue 和專案。",
+            "choose": "選擇團隊和專案",
+            "empty": "還沒有選擇。選擇團隊或專案之前，代理程式讀不到 Linear 裡的任何內容。",
+            "kinds": {
+              "team": "團隊",
+              "project": "專案"
+            },
+            "browser": {
+              "description": "點開團隊可以看到它的專案，然後勾選要包含的團隊和專案。",
+              "root": "Linear"
+            }
+          },
+          "jira": {
+            "itemsTitle": "專案",
+            "itemsDescription": "這個工作區所有成員的代理程式都能搜尋和讀取你所選專案中的 issue，且僅限這些專案。",
+            "choose": "選擇專案",
+            "empty": "還沒有選擇。至少選擇一個專案後，代理程式才能搜尋。",
+            "kinds": {
+              "site": "站點",
+              "project": "專案"
+            },
+            "browser": {
+              "description": "點開站點可以看到它的專案，然後勾選要包含的專案。",
+              "root": "Jira 站點"
+            }
+          },
+          "confluence": {
+            "itemsTitle": "空間和頁面",
+            "itemsDescription": "這個工作區所有成員的代理程式都能搜尋和讀取你所選的空間和頁面，且僅限這些。選中頁面會包含它的子頁面。",
+            "choose": "選擇空間和頁面",
+            "empty": "還沒有選擇。至少選擇一個空間或頁面後，代理程式才能搜尋。",
+            "kinds": {
+              "site": "站點",
+              "space": "空間",
+              "page": "頁面"
+            },
+            "browser": {
+              "description": "依次點開站點和空間可以看到頁面，然後勾選要包含的空間和頁面。",
+              "root": "Confluence 站點"
+            }
+          }
         }
       },
       "settingsTab": {
@@ -3366,6 +3727,7 @@
       "deleteOption": "刪除連接器及其所有已索引內容",
       "deleteOptionDesc": "永久刪除此連接器、其本機授權，以及它匯入的所有內容。此操作無法撤銷。",
       "disconnectNote": "SourceWeft 不會撤銷第三方提供方中的存取權限。",
+      "disconnectNoteComposio": "刪除會同時移除 Composio 上的連接，從而結束對此帳號的存取。停用會保留該連接。",
       "deleting": "刪除中…",
       "disabling": "停用中…",
       "deleteConfirm": "刪除連接器及內容",
@@ -3404,12 +3766,15 @@
         "reason": "原因",
         "requestPreview": "請求",
         "riskLevel": "風險",
+        "skippedCount": "已跳過",
         "source": "來源",
         "targetExternalIds": "目標",
         "targetExternalIdCount": "目標數量",
         "targeted": "已定向",
         "syncRunId": "關聯同步",
-        "triggerType": "觸發方式"
+        "triggerType": "觸發方式",
+        "unchangedCount": "未變化",
+        "updatedCount": "已更新"
       }
     },
     "sourceGuide": {
@@ -3469,6 +3834,38 @@
       },
       "add": "發現"
     },
+    "youtube": {
+      "dialogTitle": "新增 YouTube 影片",
+      "playlist": "播放清單",
+      "channel": "頻道",
+      "byChannel": "來自 {channel}",
+      "videoCount": "{count} 部影片",
+      "loading": "正在載入影片…",
+      "empty": "這個連結中沒有可新增的影片。",
+      "transcriptNote": "影片由 AI 根據音訊轉錄，轉錄文字可能有誤。",
+      "costNote": "轉錄影片會消耗點數。",
+      "import": "匯入 {count} 部影片",
+      "imported": "已新增 {count} 部影片",
+      "retry": "重試",
+      "errorBusy": "暫時無法列出影片，請稍後再試。",
+      "rateLimited": "已達到列出影片的上限（與查詢來源共用），將在 {time} 恢復（還需 {wait}）。",
+      "chooseVideos": "選擇影片",
+      "collectionHint": "這是 YouTube {kind, select, playlist {播放清單} other {頻道}}連結，下一步選擇要新增的影片。",
+      "videoHint": "SourceWeft 將用 AI 轉錄這部影片，並為轉錄文字建立搜尋索引。轉錄影片會消耗點數。",
+      "aiTranscription": "AI 轉錄",
+      "aiTranscriptionHint": "由 AI 根據影片音訊轉錄，可能有誤。",
+      "error": {
+        "YOUTUBE_URL_UNSUPPORTED": "不支援這個 YouTube 連結，請使用影片、播放清單或頻道連結。",
+        "YOUTUBE_COLLECTION_URL": "這是播放清單或頻道連結，請從中選擇要新增的影片。",
+        "YOUTUBE_TRANSCRIPTION_NOT_CONFIGURED": "此伺服器未啟用 YouTube 轉錄。",
+        "YOUTUBE_VIDEO_UNAVAILABLE": "這部影片無法觀看，可能是私密影片或已被刪除。",
+        "YOUTUBE_NO_SPEECH": "這部影片中沒有偵測到語音，因此沒有轉錄文字。",
+        "YOUTUBE_TRANSCRIPT_FAILED": "無法轉錄這部影片，請稍後再試。",
+        "YOUTUBE_LISTING_FAILED": "無法列出影片，請稍後再試。",
+        "YOUTUBE_CHANNEL_NOT_FOUND": "找不到這個頻道。",
+        "YOUTUBE_PLAYLIST_NOT_FOUND": "找不到這個播放清單。"
+      }
+    },
     "noteOrigin": {
       "title": "已儲存的筆記",
       "edit": "編輯",
@@ -3513,7 +3910,7 @@
       "open": "開啟",
       "noContentSaved": "未儲存任何引用內容。",
       "loading": "正在載入來源預覽…",
-      "sourceUnavailable": "來源已不可用",
+      "sourceUnavailable": "來源已無法使用",
       "sourceUnavailableNote": "原始來源已被刪除，因此只能顯示隨此回答儲存的引用快照。",
       "deletedSourceFallback": "已刪除的來源",
       "preservedCitation": "已保留的引用",
@@ -3610,6 +4007,7 @@
         "disabledConflict": "已存在同名的已停用連接器。請先啟用或刪除後再重新連接。",
         "enableFailed": "啟用 {name} 連接器失敗。",
         "authFailed": "{name} 授權失敗。",
+        "setupIncomplete": "{name} 已授權，但設定未能完成。請重新連接。",
         "connectionCanceled": "{name} 連接已取消。",
         "webhookCopied": "Webhook URL 已複製。",
         "webhookCopyFailed": "無法複製 webhook URL。",
@@ -3627,6 +4025,54 @@
         "disabledCanReenable": "連接器已停用。稍後可再次啟用。",
         "oauthAccountInUse": "此授權已關聯到其他連接器，無法安全刪除。",
         "removeFailed": "移除連接器失敗。"
+      }
+    },
+    "generate": {
+      "button": "產生",
+      "menu": "用所選來源產生",
+      "needsSelection": "先選擇要使用的來源",
+      "needsThread": "開始對話後才能用來源產生",
+      "openFailed": "已開始產生，但無法開啟結果。請在製品中檢視。",
+      "table": "資料表",
+      "flashcards": "閃卡",
+      "quiz": "測驗",
+      "mindmap": "心智圖"
+    },
+    "research": {
+      "add": "深度研究",
+      "title": "深度研究",
+      "description": "描述一個主題，SourceWeft 會在背景搜尋網頁、閱讀內容並撰寫帶引用的報告。",
+      "topicPlaceholder": "例如：固態電池商業化",
+      "costNote": "深度研究會消耗點數，可能需要幾分鐘。執行期間可以關閉此視窗。",
+      "start": "開始研究",
+      "starting": "正在啟動…",
+      "startFailed": "無法啟動研究，請稍後重試。",
+      "cancel": "取消",
+      "cancelled": "此研究已取消。",
+      "progress": "已搜尋 {searches} 次 · 已讀 {pages} 個網頁",
+      "phase": {
+        "planning": "規劃中",
+        "searching": "搜尋中",
+        "reading": "閱讀網頁中",
+        "reporting": "撰寫報告中"
+      },
+      "saveNote": "將報告儲存為筆記",
+      "saved": "報告已儲存為筆記",
+      "saveFailed": "無法儲存報告，請重試。",
+      "sources": "報告引用的網頁",
+      "importSources": "{count, plural, =0 {匯入所選來源} other {匯入 # 個所選來源}}",
+      "savedLabel": "已儲存",
+      "image": "圖片",
+      "newResearch": "新的研究",
+      "error": {
+        "WEB_PROVIDER_UNAVAILABLE": "網頁搜尋暫時無法使用。",
+        "NO_RESULTS": "搜尋沒有找到與該主題相關的可用網頁，請換個方式描述。",
+        "RESEARCH_QUALITY_TOO_LOW": "找到的資料不夠可靠，無法撰寫報告，請嘗試更具體的主題。",
+        "INSUFFICIENT_CREDITS": "點數不足，無法進行此研究。",
+        "MODEL_UNAVAILABLE": "研究所用的模型暫時無法使用，請稍後重試。",
+        "TIME_LIMIT": "研究在完成前已達到時間上限。",
+        "ACCESS_LOST": "你已不再擁有該工作區的存取權限，研究已停止。",
+        "UNKNOWN": "研究失敗。"
       }
     }
   },
@@ -3706,6 +4152,7 @@
         "system": "系統"
       },
       "items": {
+        "overview": "概覽",
         "mcpReview": "MCP 審核",
         "skillReview": "技能審核",
         "reports": "檢舉",
@@ -3714,7 +4161,8 @@
         "blog": "部落格",
         "marketSettings": "市場設定"
       },
-      "backToApp": "返回應用"
+      "backToApp": "返回應用",
+      "pending": "{count} 項待處理"
     },
     "checkingAccess": "正在檢查管理權限…",
     "accessCheckFailed": "無法檢查管理權限，請重試。",
@@ -3746,7 +4194,25 @@
       "chmodExec": "chmod +x",
       "internalAddress": "內部/後設資料位址"
     },
-    "footer": "只有列入 <code>MARKET_ADMIN_USER_IDS</code> 的使用者才能存取此頁面。核准與拒絕操作使用同一份允許名單。"
+    "footer": "只有列入 <code>MARKET_ADMIN_USER_IDS</code> 的使用者才能存取此頁面。核准與拒絕操作使用同一份允許名單。",
+    "overview": {
+      "title": "概覽",
+      "description": "各分區裡等待處理的事項。",
+      "refresh": "重新載入數量",
+      "retry": "重試",
+      "loading": "正在載入數量…",
+      "loadFailed": "無法載入數量，各分區仍可正常使用。",
+      "summary": "{count, plural, =0 {沒有等待處理的事項。} other {有 # 項等待處理。}}",
+      "queues": "待辦佇列",
+      "content": "內容",
+      "hints": {
+        "mcpReview": "被標記的 MCP 提交",
+        "skillReview": "{review} 個新提交 · {listing} 個上架決定",
+        "reports": "未處理的檢舉"
+      },
+      "blogDrafts": "{count} 個草稿版本",
+      "blogPublished": "{count} 個已發布版本"
+    }
   },
   "dashboardObservability": {
     "notices": {
@@ -3883,7 +4349,9 @@
       "sessionPrefix": "工作階段：{value}",
       "emptyNoTraces": "找不到追蹤。",
       "emptyNoMatch": "沒有符合目前搜尋條件的追蹤。",
-      "loadOlder": "載入更早的追蹤",
+      "previousPage": "上一頁",
+      "nextPage": "下一頁",
+      "pageNumber": "第 {page} 頁",
       "columns": {
         "timestamp": "時間戳記",
         "name": "名稱",
@@ -4341,7 +4809,9 @@
       "secrets:env-access": "讀取環境變數",
       "scope:other-skill-file": "讀取其他技能的檔案",
       "tool:sensitive": "請求程式碼執行類工具",
-      "binary:executable": "附帶可執行二進位檔案"
+      "binary:executable": "附帶可執行二進位檔案",
+      "capability:undeclared-scripts": "附帶說明裡沒有提到的腳本",
+      "script:out-of-bundle-path": "腳本存取技能目錄之外的檔案"
     },
     "community": {
       "overview": {
@@ -4736,7 +5206,10 @@
       "publish": "核准並發布",
       "reject": "拒絕",
       "footnote": "技能審核與 MCP 市場使用相同的管理員允許清單。",
-      "flagCount": "{count, plural, =0 {無標記} other {# 個標記}}"
+      "flagCount": "{count, plural, =0 {無標記} other {# 個標記}}",
+      "loadMore": "載入更多",
+      "loadMoreFailed": "無法載入佇列的更多內容。",
+      "shownOf": "已顯示 {shown} / {total}"
     },
     "ownerListing": {
       "label": "允許在公開市場上架",
@@ -4813,6 +5286,8 @@
       "scope:other-skill-file": "讀取其他技能的檔案",
       "tool:sensitive": "請求程式碼執行工具",
       "binary:executable": "附帶可執行二進位檔案",
+      "capability:undeclared-scripts": "附帶說明裡沒有提到的腳本",
+      "script:out-of-bundle-path": "腳本存取技能目錄之外的檔案",
       "sticky-review": "暫緩審核：較早的版本尚未處理"
     },
     "escalation": {
@@ -4947,7 +5422,9 @@
         "gateway_config_unavailable": "全域模型閘道器設定尚未同步。",
         "provider_not_found": "全域模型閘道器設定中沒有提供方「{provider}」。",
         "provider_capability_missing": "提供方「{provider}」未宣告支援 chat 和 json_schema。",
-        "provider_credential_headers": "提供方「{provider}」的定義自帶憑證請求標頭，系統模型不會沿用。"
+        "provider_credential_headers": "提供方「{provider}」的定義自帶憑證請求標頭，系統模型不會沿用。",
+        "provider_routing_invalid": "SYSTEM_MODEL_PROVIDER_ONLY 裡有空的條目。",
+        "provider_routing_unsupported": "已設定 SYSTEM_MODEL_PROVIDER_ONLY，但提供方「{provider}」不是 OpenRouter 提供方。"
       },
       "failed": "無法儲存。",
       "loadFailed": "無法載入概覽設定。",
@@ -5368,7 +5845,6 @@
       "or": "或",
       "namePlaceholder": "姓名",
       "emailPlaceholder": "個人或工作電子郵件",
-      "appleComingSoon": "Apple 登入即將推出。",
       "termsNotice": "繼續即表示你同意 SourceWeft 的<terms>服務條款</terms>，並知悉我們的<privacy>隱私政策</privacy>。",
       "signUpSuccessNoSession": "帳號已建立，但無法啟動你的工作階段。請登入。",
       "signInErrorNoSession": "已登入，但工作階段不可用。請重試。",
@@ -5456,11 +5932,18 @@
         "unsupported_response_type": "不支援此登入方式。",
         "invalid_scope": "請求的存取權限無效。",
         "server_error": "登入伺服器發生錯誤。",
-        "temporarily_unavailable": "登入服務暫時不可用，請稍後重試。",
+        "temporarily_unavailable": "登入服務暫時無法使用，請稍後重試。",
         "invalid_token": "你的登入連結無效或已過期。",
         "account_not_linked": "此帳號尚未連結，請嘗試其他登入方式。",
         "email_not_verified": "登入前請先驗證你的電子郵件。",
-        "user_not_found": "找不到與此次登入符合的帳號。"
+        "user_not_found": "找不到與此次登入符合的帳號。",
+        "SSO_ACCOUNT_LINK_DENIED": "無法將此登入關聯到已有帳號，請聯絡管理員。",
+        "SSO_SEAT_LIMIT": "團隊席位已滿，請聯絡管理員增加席位。",
+        "SSO_PROVISIONING_FAILED": "無法將你加入團隊，請重試或聯絡管理員。",
+        "SSO_DOMAIN_NOT_VERIFIED": "該網域尚未完成驗證，請聯絡管理員完成設定。",
+        "SSO_PROVIDER_NOT_FOUND": "該電子郵件未設定企業單一登入。",
+        "SSO_SAML_ALGORITHM_NOT_ALLOWED": "身分提供者回傳的 SAML 回應使用了不支援的簽名設定。請聯絡管理員改用 SHA-256 簽名，並傳送未加密的斷言。",
+        "SSO_ORGANIZATION_REQUIRED": "此團隊暫時無法使用單一登入，請聯絡管理員。"
       }
     },
     "guestInvite": {
@@ -5712,8 +6195,359 @@
       "approvalAsk": "此版本請求讀取並修改<strong>共享資料</strong>，所有能開啟它的人都會看到這些資料。核准通過前，它無法使用共享資料。"
     }
   },
+  "table": {
+    "summary": "{sources} 個來源 · {columns} 欄",
+    "source": "來源",
+    "region": "比較表",
+    "empty": "這張表裡還沒有內容。",
+    "cell": {
+      "notFound": "來源未提及",
+      "unverified": "無法核實",
+      "unverifiedHint": "模型給出過答案，但原文無法證實，因此不顯示該值。",
+      "missing": "無值"
+    },
+    "row": {
+      "failed": "這個來源處理失敗。重新產生這張表即可重試。",
+      "notIndexed": "這個來源尚未建立索引，已跳過。",
+      "stale": "來源已更新",
+      "sourceDeleted": "來源已刪除"
+    },
+    "sort": {
+      "label": "按 {column} 排序"
+    },
+    "columns": {
+      "button": "欄設定",
+      "label": "要顯示的欄",
+      "showAll": "全部顯示"
+    },
+    "toolbar": {
+      "regenerate": "重新產生"
+    },
+    "evidence": {
+      "show": "檢視原文片段",
+      "hide": "隱藏原文片段",
+      "sourceChanged": "來源原文在產生這張表之後發生了變化，下方顯示的是當時的片段。",
+      "openSource": "在來源中開啟"
+    },
+    "stale": {
+      "message": "有來源在產生這張表之後發生了變化，重新產生即可更新。",
+      "sourceDeleted": "有來源已被刪除，這張表仍可使用。",
+      "regenerate": "重新產生"
+    },
+    "status": {
+      "queued": "等待開始…",
+      "generating": "已完成 {completed} / {total} 個來源"
+    },
+    "error": {
+      "generateAgain": "如需重試，請在資料中心選擇這些資料，重新產生一個表格。",
+      "cannotDisplay": "無法顯示這張表。",
+      "code": {
+        "INSUFFICIENT_CREDITS": "點數不足，無法產生這張表。",
+        "INPUT_TOO_LARGE": "所選來源太大，一張表容納不下。請減少來源，或選擇較短的來源。",
+        "NO_INDEXED_SOURCES": "所選來源都還沒有建立索引。",
+        "MODEL_UNAVAILABLE": "模型暫時無法使用，請稍後再試。",
+        "GENERATION_QUALITY_TOO_LOW": "太多答案無法在原文中核實，所以沒有產生這張表。",
+        "SOURCE_NOT_READABLE": "有來源無法讀取。",
+        "UNKNOWN": "無法產生這張表。"
+      }
+    },
+    "export": {
+      "menu": "匯出",
+      "csv": "下載 CSV",
+      "csvWithEvidence": "下載 CSV（含原文片段）",
+      "markdown": "複製為 Markdown",
+      "copied": "已複製",
+      "source": "來源",
+      "evidenceSuffix": "原文片段"
+    },
+    "editor": {
+      "label": "欄定義",
+      "name": "第 {position} 欄的欄名",
+      "namePlaceholder": "欄名，例如：價格",
+      "description": "第 {position} 欄的說明",
+      "descriptionPlaceholder": "在每個來源中要找什麼（選填）",
+      "type": "第 {position} 欄的值類型",
+      "types": {
+        "text": "文字",
+        "number": "數字",
+        "date": "日期",
+        "boolean": "是 / 否"
+      },
+      "add": "新增欄",
+      "remove": "刪除第 {position} 欄",
+      "max": "一張表最多 {max} 欄。"
+    },
+    "generate": {
+      "title": "產生資料表",
+      "regenerateTitle": "調整並重新產生",
+      "description": "每個來源一列，每個問題一欄，每個值都附有來源原文片段。",
+      "sources": "{count} 個來源",
+      "addSource": "新增來源",
+      "searchSources": "搜尋來源",
+      "noSources": "沒有符合的來源。",
+      "moreResults": "顯示更多",
+      "sourcesLimit": "一張表最多比較 {max} 個來源。",
+      "untitledSource": "未命名來源",
+      "unavailableSource": "來源已無法使用",
+      "instruction": "想比較什麼？（選填）",
+      "instructionPlaceholder": "例如：比較價格和保固條款",
+      "columns": "欄定義",
+      "suggest": "建議欄",
+      "suggesting": "正在建議…",
+      "problems": {
+        "noSources": "至少新增一個來源。",
+        "none": "至少新增一欄。",
+        "nameMissing": "每一欄都需要欄名。",
+        "tooMany": "一張表最多 {max} 欄。",
+        "tooManySources": "一張表最多比較 {max} 個來源，請減少所選來源。",
+        "tooManyCells": "{sources} 個來源 × {columns} 欄共 {cells} 個儲存格，一張表最多 {max} 個。請減少來源或欄。"
+      },
+      "estimate": {
+        "loading": "正在估算規模…",
+        "summary": "{sources} 個來源 · 需填寫 {cells} 個儲存格",
+        "regenerateSummary": "{sources} 個來源 · {columns} 欄；未改動的儲存格會沿用",
+        "skipped": "{count} 個來源尚未建立索引，將被跳過。",
+        "exceedsLimit": "所選來源太大，一張表容納不下。請減少來源，或選擇較短的來源。",
+        "failed": "無法估算這張表的規模。"
+      },
+      "submit": "產生資料表",
+      "regenerateSubmit": "重新產生",
+      "cancel": "取消",
+      "started": "正在產生資料表，也會出現在製品中。",
+      "reused": "這張表已經在產生中。",
+      "regenerating": "正在重新產生。新版本完成前仍顯示目前版本。",
+      "errors": {
+        "TABLE_TOO_MANY_RUNNING": "同時產生的資料表和學習製品太多，請等其中一個完成。",
+        "TABLE_NOT_READY": "只有已完成的資料表才能重新產生。",
+        "TABLE_CONTENT_UNREADABLE": "無法讀取這張表，因此不能重新產生。",
+        "TABLE_REGENERATION_IN_PROGRESS": "這張表已經在重新產生中。",
+        "VALIDATION_ERROR": "請檢查欄定義和來源後重試。",
+        "THREAD_NOT_FOUND": "這個對話已無法使用。",
+        "ARTIFACT_NOT_FOUND": "這張表已不存在。",
+        "recipeUnavailable": "這張表無法調整。請從來源中心產生一張新表。",
+        "loadFailed": "無法開啟這張表以重新產生。",
+        "suggestFailed": "無法建議欄，請重試。",
+        "generic": "無法產生資料表，請重試。"
+      }
+    },
+    "regenerationFailed": {
+      "message": "上次重新產生失敗，目前顯示的仍是上一版表格。"
+    }
+  },
+  "study": {
+    "status": {
+      "queued": "等待開始…",
+      "generating": "正在產生… 已完成 {completed} / {total} 步"
+    },
+    "error": {
+      "generateAgain": "如需重試，請在來源中心選擇來源後重新產生。",
+      "cannotDisplay": "無法顯示這份學習內容。",
+      "code": {
+        "INSUFFICIENT_CREDITS": "點數不足，無法產生。",
+        "INPUT_TOO_LARGE": "所選來源太大，一次產生容納不下。請減少來源，或選擇較短的來源。",
+        "NO_INDEXED_SOURCES": "所選來源都還沒有建立索引。",
+        "MODEL_UNAVAILABLE": "模型暫時無法使用，請稍後再試。",
+        "GENERATION_QUALITY_TOO_LOW": "能在原文中核實的項目太少，所以沒有產生。",
+        "SOURCE_NOT_READABLE": "有來源無法讀取。",
+        "UNKNOWN": "無法產生。"
+      }
+    },
+    "evidence": {
+      "show": "檢視原文片段",
+      "hide": "隱藏原文片段",
+      "sourceChanged": "來源原文在產生之後發生了變化，下方顯示的是當時的片段。",
+      "openSource": "在來源中開啟"
+    },
+    "stale": {
+      "message": "有來源在產生之後發生了變化，重新產生即可更新。",
+      "sourceDeleted": "有來源已被刪除，這份內容仍可使用。",
+      "regenerate": "重新產生"
+    },
+    "flashcards": {
+      "label": "閃卡",
+      "mode": {
+        "browse": "瀏覽",
+        "review": "複習"
+      },
+      "progress": "{current} / {total}",
+      "exportAnki": "匯出到 Anki（CSV）",
+      "showFront": "顯示正面",
+      "showBack": "顯示答案",
+      "showingFront": "正在顯示正面",
+      "showingBack": "正在顯示答案",
+      "gradeFailed": "評分沒有儲存成功，請重試。",
+      "nothingDue": "現在沒有需要複習的卡片。",
+      "done": "本輪完成：共 {total} 張，已複習 {graded} 張。",
+      "restart": "重新開始",
+      "previous": "上一張",
+      "next": "下一張",
+      "hintFlip": "按 Space 或 Enter 鍵翻面",
+      "hintGrade": "按 1–4 評價掌握程度",
+      "gradeLabel": "掌握得怎麼樣？",
+      "grade": {
+        "again": "重來",
+        "hard": "困難",
+        "good": "良好",
+        "easy": "簡單"
+      },
+      "hintBrowse": "切換到「複習」才能評分",
+      "summary": "新卡 {new} 張 · 學習中 {learning} 張 · 已學會 {learned} 張",
+      "status": {
+        "new": "新卡",
+        "learning": "學習中",
+        "learned": "已學會"
+      },
+      "due": {
+        "now": "已到期",
+        "minutes": "{count} 分鐘後複習",
+        "hours": "{count} 小時後複習",
+        "days": "{count} 天後複習"
+      },
+      "nextDue": "下一張：{when}。"
+    },
+    "quiz": {
+      "loading": "正在載入測驗…",
+      "intro": "共 {total} 題，提交後批改。",
+      "start": "開始",
+      "saveFailed": "答案沒有儲存成功，已保留在本頁。",
+      "questionOf": "第 {current} 題，共 {total} 題",
+      "previous": "上一題",
+      "submit": "提交",
+      "next": "下一題",
+      "true": "對",
+      "false": "錯",
+      "chooseOne": "選擇一個答案",
+      "chooseAll": "選擇所有正確答案",
+      "yourAnswer": "你的答案",
+      "referenceAnswer": "參考答案",
+      "showReference": "顯示參考答案",
+      "selfGrade": {
+        "knew": "我答對了",
+        "missed": "我沒答對"
+      },
+      "result": {
+        "score": "答對 {correct} / {total} 題",
+        "selfGraded": "問答題：自評答對 {knew} / {total} 題"
+      },
+      "practiceMistakes": "重練錯題",
+      "mistakesToCards": "把錯題做成閃卡",
+      "mistakesToCardsDone": "已用錯題做成 {count} 張閃卡。",
+      "mistakesToCardsOpen": "開啟閃卡",
+      "mistakesToCardsFailed": "沒能做成閃卡，請重試。",
+      "restart": "重新開始",
+      "verdict": {
+        "correct": "正確",
+        "wrong": "錯誤",
+        "self": {
+          "knew": "自評：答對了",
+          "missed": "自評：沒答對",
+          "none": "未自評"
+        }
+      },
+      "correctAnswer": "答案："
+    },
+    "mindmap": {
+      "view": {
+        "map": "圖",
+        "outline": "大綱"
+      },
+      "exportMarkdown": "匯出 Markdown",
+      "exportJson": "匯出 JSON",
+      "detailLabel": "所選要點",
+      "askPrompt": "根據我的來源，進一步說明「{label}」。",
+      "askInChat": "在聊天中追問",
+      "expand": "展開",
+      "collapse": "收起",
+      "outlineLabel": "心智圖大綱"
+    },
+    "generate": {
+      "title": {
+        "flashcards": "產生閃卡",
+        "quiz": "產生測驗",
+        "mindmap": "產生心智圖"
+      },
+      "description": {
+        "flashcards": "用於間隔複習的卡片，每張卡片都註明出自哪段原文。",
+        "quiz": "附解析的題目，每題都註明出自哪段原文。",
+        "mindmap": "主要觀點及其關係，每個要點都註明出自哪段原文。"
+      },
+      "regenerateTitle": "調整並重新產生",
+      "regenerateSources": "使用與目前版本相同的 {count} 個來源。",
+      "sources": "{count} 個來源",
+      "addSource": "新增來源",
+      "searchSources": "搜尋來源",
+      "noSources": "沒有符合的來源。",
+      "moreResults": "顯示更多",
+      "sourcesLimit": "最多使用 {max} 個來源。",
+      "untitledSource": "未命名來源",
+      "unavailableSource": "來源已無法使用",
+      "size": {
+        "label": "數量",
+        "fewer": "較少",
+        "standard": "標準",
+        "more": "較多",
+        "flashcards": "{size} · {count} 張",
+        "quiz": "{size} · {count} 題",
+        "mindmap": "{size} · 最多 {count} 個要點"
+      },
+      "difficulty": {
+        "label": "難度",
+        "easy": "簡單",
+        "mixed": "混合",
+        "hard": "困難"
+      },
+      "focus": {
+        "label": "側重點（選填）",
+        "placeholder": "例如：定義和關鍵日期",
+        "counter": "{used} / {max}",
+        "tooLong": "側重點最多 {max} 個字元。"
+      },
+      "language": {
+        "label": "語言",
+        "follow": "與來源相同"
+      },
+      "problems": {
+        "noSources": "至少新增一個來源。",
+        "tooManySources": "最多使用 {max} 個來源，請減少所選來源。"
+      },
+      "estimate": {
+        "loading": "正在估算規模…",
+        "summary": {
+          "flashcards": "最多 {count} 張閃卡，來自 {sources} 個來源",
+          "quiz": "最多 {count} 題，來自 {sources} 個來源",
+          "mindmap": "最多 {count} 個要點，來自 {sources} 個來源"
+        },
+        "parts": "來源較長，會分 {groups} 部分閱讀，所需時間稍長。",
+        "exceedsLimit": "所選來源太大，一次產生容納不下。請減少來源，或選擇較短的來源。",
+        "failed": "無法估算規模。"
+      },
+      "submit": "產生",
+      "regenerateSubmit": "重新產生",
+      "cancel": "取消",
+      "started": "正在產生，也會出現在製品中。",
+      "reused": "已經在產生中。",
+      "regenerating": "正在重新產生。新版本完成前仍顯示目前版本。",
+      "manageBilling": "管理計費",
+      "errors": {
+        "STUDY_TOO_MANY_RUNNING": "同時產生的資料表和學習製品太多，請等其中一個完成。",
+        "STUDY_NOT_READY": "只有已完成的學習內容才能重新產生。",
+        "STUDY_CONTENT_UNREADABLE": "無法讀取這份學習內容，因此不能重新產生。",
+        "STUDY_REGENERATION_IN_PROGRESS": "這份學習內容已經在重新產生中。",
+        "VALIDATION_ERROR": "請檢查選項和來源後重試。",
+        "THREAD_NOT_FOUND": "這個對話已無法使用。",
+        "ARTIFACT_NOT_FOUND": "這份學習內容已不存在。",
+        "recipeUnavailable": "這份學習內容無法調整。請從來源中心重新產生。",
+        "loadFailed": "無法開啟這份學習內容以重新產生。",
+        "generic": "無法產生，請重試。"
+      }
+    },
+    "regenerationFailed": {
+      "message": "上次重新產生失敗，目前顯示的仍是上一個版本。"
+    }
+  },
   "mobileRouteSheet": {
-    "supplementaryPage": "SourceWeft 補充頁面"
+    "supplementaryPage": "SourceWeft 補充頁面",
+    "loading": "正在載入…"
   },
   "authLocale": {
     "core": {
@@ -5872,6 +6706,122 @@
       }
     },
     "plugins": {
+      "sso": {
+        "signInWithSso": "使用企業 SSO 登入",
+        "ssoTitle": "企業單一登入",
+        "ssoDescription": "輸入工作電子郵件，透過公司的登入方式繼續。",
+        "workEmail": "工作電子郵件",
+        "continue": "繼續",
+        "backToSignIn": "返回登入",
+        "ssoEmailRequired": "請輸入你的工作電子郵件。",
+        "ssoRateLimited": "操作過於頻繁，請稍等一分鐘後重試。",
+        "ssoNoSetup": "該電子郵件未設定企業單一登入。",
+        "orgTabLabel": "單一登入",
+        "orgTitle": "單一登入",
+        "orgDescription": "讓已驗證電子郵件網域的成員使用你的身分提供者登入。",
+        "orgTeamsOnly": "單一登入僅對團隊開放。",
+        "orgNoPermission": "只有團隊擁有者和管理員可以管理單一登入。",
+        "orgAddProvider": "新增身分提供者",
+        "orgProviderLimitReached": "每個團隊最多可以新增 5 個身分提供者。",
+        "orgEmptyTitle": "尚未設定身分提供者",
+        "orgEmptyDescription": "接入一個身分提供者（OIDC 或 SAML），並驗證你掌控的電子郵件網域，成員即可使用單一登入。",
+        "orgColumnProvider": "身分提供者",
+        "orgColumnDomain": "網域",
+        "orgColumnType": "類型",
+        "orgColumnStatus": "狀態",
+        "orgColumnActions": "操作",
+        "orgStatusVerified": "已驗證",
+        "orgStatusPending": "待驗證",
+        "orgProtocolOidc": "OIDC",
+        "orgProtocolSaml": "SAML",
+        "orgDetails": "詳細資訊",
+        "orgEdit": "編輯",
+        "orgDelete": "刪除",
+        "orgCreateTitle": "新增身分提供者",
+        "orgEditTitle": "編輯身分提供者",
+        "orgCreateDescription": "為你的團隊掌控的網域註冊一個 OIDC 或 SAML 身分提供者。",
+        "orgEditDescription": "更新此身分提供者。金鑰留空表示保持不變。",
+        "orgProtocol": "登入協定",
+        "orgProviderId": "身分提供者 ID",
+        "orgProviderIdHint": "由小寫字母、數字和連字元組成，3–47 個字元。",
+        "orgProviderIdImmutableHint": "身分提供者 ID 建立後無法更改。",
+        "orgDomain": "電子郵件網域",
+        "orgDomainChangeWarning": "更改網域需要重新驗證，驗證完成前將無法使用單一登入。",
+        "orgIssuer": "Issuer 地址",
+        "orgIssuerHint": "我們會根據 issuer 自動發現 OIDC 端點。內部網路／私有 issuer 會被拒絕。",
+        "orgClientId": "Client ID",
+        "orgClientIdKeepHint": "留空表示保持目前 Client ID 不變。",
+        "orgClientSecret": "Client Secret",
+        "orgClientSecretKeepHint": "留空表示保持目前金鑰不變。",
+        "orgScopes": "Scopes",
+        "orgScopesHint": "以空格分隔。預設為 openid email profile。",
+        "orgSamlConfigHint": "在下方填寫 IdP 登入地址、簽名憑證和實體 ID，或貼上 IdP metadata XML 自動填入。",
+        "orgEntryPoint": "IdP 登入地址",
+        "orgIdpEntityId": "IdP 實體 ID / issuer",
+        "orgCertificate": "IdP 簽名憑證",
+        "orgCertificateHint": "貼上 IdP 簽名憑證（PEM 格式），或從下方 metadata 自動填入。",
+        "orgSamlMetadata": "從 IdP metadata XML 自動填入",
+        "orgSamlMetadataHint": "貼上 IdP metadata XML 以填充上面的欄位。metadata 本身不會被儲存。",
+        "orgSamlKeepHint": "留空表示保持目前值不變。",
+        "orgRoleAttribute": "角色屬性（選填）",
+        "orgRoleAttributeHint": "攜帶成員角色的 claim（OIDC）或屬性（SAML）。",
+        "orgAdminRoleValue": "管理員角色值（選填）",
+        "orgAdminRoleValueHint": "角色屬性等於該值的成員會成為管理員；不符的成員在每次登入時都會被設為普通成員。擁有者永不會被更改。",
+        "orgSamlSecurityNote": "身分提供者必須使用 RSA-SHA256 或 RSA-SHA512 簽名、SHA-256 或 SHA-512 摘要對 SAML 斷言簽名，並以未加密方式傳送。",
+        "orgSave": "儲存",
+        "orgCancel": "取消",
+        "orgCreateSuccess": "身分提供者已新增。",
+        "orgUpdateSuccess": "身分提供者已更新。",
+        "orgFieldRequired": "此項為必填。",
+        "orgProviderIdInvalid": "請使用 3–47 個小寫字母、數字或連字元。",
+        "orgEntryPointInvalid": "請輸入有效的登入地址。",
+        "orgCertificateInvalid": "請輸入 IdP 簽名憑證（PEM）或 base64 值。",
+        "orgMetadataTooLarge": "metadata XML 過大（上限 100 KB）。",
+        "orgMetadataParseError": "無法讀取 metadata XML。請檢查後重新貼上，或手動填寫各欄位。",
+        "orgMetadataNoEntryPoint": "無法從 metadata 讀取登入地址，請手動填寫。",
+        "orgMetadataNoEntityId": "無法從 metadata 讀取實體 ID，請手動填寫。",
+        "orgMetadataNoCert": "無法從 metadata 讀取 IdP 簽名憑證，請手動貼上。",
+        "orgMetadataMultipleCerts": "偵測到多張 IdP 簽名憑證，預設使用第一張，請確認它是否為目前生效的那張。",
+        "orgSamlNeedsConfig": "請填寫登入地址、簽名憑證和實體 ID，或貼上 metadata XML。",
+        "orgRateLimited": "操作過於頻繁，請稍等一分鐘後重試。",
+        "orgProviderIdTaken": "已存在使用該 ID 的身分提供者，請改用其他 ID。",
+        "orgProviderIdReserved": "該身分提供者 ID 為保留字，請改用其他 ID。",
+        "orgIssuerInvalid": "請輸入以 http:// 或 https:// 開頭的有效 issuer 地址。",
+        "orgIssuerUnreachable": "SourceWeft 無法存取該 issuer。OIDC 身分提供者必須能從 SourceWeft 伺服器經公網存取，並提供有效的發現文件。若身分提供者僅在內部網路可用，請改用 SAML。",
+        "orgIdentityLocked": "已有成員使用該身分提供者登入後，這些設定不能再修改。如需修改，請刪除該身分提供者後重新新增。",
+        "orgIdentityLockedHint": "已有成員使用該身分提供者登入後，Issuer、Client ID 以及 SAML 登入地址、簽名憑證和實體 ID 都無法再修改。如需修改，請刪除該身分提供者後重新新增。",
+        "orgRoleMappingIncomplete": "請同時填寫角色屬性和管理員角色值，或兩者都留空。",
+        "orgErrDomainVerificationFailed": "暫時還查不到該 TXT 記錄。DNS 更改可能需要幾分鐘，請稍後再驗證。",
+        "orgErrNoPendingVerification": "該驗證請求已過期。請重新取得 TXT 記錄後再驗證。",
+        "orgErrInvalidDomain": "無法驗證該網域。請檢查身分提供者上設定的電子郵件網域。",
+        "orgErrIdentifierTooLong": "身分提供者 ID 過長，無法為其建立 DNS 記錄。",
+        "orgErrProviderChanged": "該身分提供者在操作過程中發生了變更。請重新整理頁面後重試。",
+        "orgServiceProviderPending": "設定身分提供者 ID 後，這裡會顯示服務提供者資訊。",
+        "orgDirectSignInDescription": "分享此連結，可讓成員直接進入本團隊的單一登入。",
+        "orgDirectSignInNone": "待身分提供者的網域驗證通過後，成員即可使用單一登入。",
+        "orgDirectSignInMany": "存在多個已驗證身分提供者時，成員請選擇「使用企業 SSO 登入」並輸入工作電子郵件。",
+        "orgDomainVerification": "驗證網域歸屬",
+        "orgDomainVerificationDescription": "將此 TXT 記錄新增到 {domain} 的 DNS，以證明你擁有該網域：",
+        "orgTxtRecordHost": "TXT 記錄名稱",
+        "orgTxtRecordValue": "TXT 記錄值",
+        "orgDnsPropagationNote": "DNS 更改可能需要幾分鐘才會生效。",
+        "orgVerify": "驗證",
+        "orgVerifying": "驗證中…",
+        "orgVerifySuccess": "網域已驗證。",
+        "orgCopy": "複製",
+        "orgCopied": "已複製",
+        "orgServiceProviderInfo": "服務提供者資訊",
+        "orgServiceProviderDescription": "請將這些資訊提供給你的身分提供者管理員。",
+        "orgOidcRedirectUri": "OIDC 回呼地址",
+        "orgSamlAcsUrl": "SAML ACS 地址",
+        "orgSamlMetadataUrl": "SAML SP metadata 地址",
+        "orgSamlEntityId": "SAML SP 實體 ID",
+        "orgDirectSignInLink": "直達登入連結",
+        "orgDeleteTitle": "刪除身分提供者",
+        "orgDeleteDescription": "使用該網域登入的成員將無法再使用單一登入。此操作無法撤銷。",
+        "orgDeleteConfirm": "刪除身分提供者",
+        "orgDeleteSuccess": "身分提供者已刪除。"
+      },
       "magicLink": {
         "magicLink": "免密登入連結",
         "sendMagicLink": "傳送免密登入連結",
@@ -6045,7 +6995,7 @@
         "lastPage": "末頁",
         "pageOf": "第 {{page}} 頁，共 {{pages}} 頁",
         "rowsPerPage": "每頁行數",
-        "columns": "列",
+        "columns": "欄",
         "selectedCount": "已選擇 {{count}} 項",
         "selectRow": "選擇此行",
         "selectAllRows": "選擇本頁所有行",
@@ -6169,5 +7119,243 @@
     "privacyPolicy": "隱私政策",
     "agree": "同意並繼續",
     "decline": "不同意並登出"
+  },
+  "dashboardScheduled": {
+    "rule": {
+      "manual": "僅在你手動啟動時執行",
+      "daily": "每天 {time}",
+      "weekdays": "工作日 {time}",
+      "weekly": "每{days} {time}",
+      "cron": "Cron {expr}",
+      "once": "僅一次，{at}"
+    },
+    "status": {
+      "draft": "草稿",
+      "active": "執行中",
+      "paused": "已暫停",
+      "blocked": "已阻塞",
+      "completed": "已完成",
+      "archived": "已刪除"
+    },
+    "statusReason": {
+      "user_paused": "已由你暫停。",
+      "owner_left": "負責人已離開該工作區，任務已暫停。",
+      "repeated_failure": "連續失敗後已暫停。請檢視執行歷史，處理後再恢復。",
+      "insufficient_credits": "已阻塞：額度不足，無法執行。",
+      "tools_unavailable": "已阻塞：任務使用的資料或 MCP 服務已無法使用。",
+      "auth_expired": "已阻塞：已連接的帳號需要重新登入。"
+    },
+    "runStatus": {
+      "pending": "等待中",
+      "dispatching": "啟動中",
+      "queued": "執行中",
+      "succeeded": "成功",
+      "failed": "失敗",
+      "skipped": "已跳過",
+      "blocked": "已阻塞",
+      "cancelled": "已取消"
+    },
+    "skipReason": {
+      "missed_platform_down": "平臺停機期間錯過。",
+      "previous_run_active": "上一次執行尚未結束。",
+      "user_concurrency_limit": "你同時執行的任務過多。",
+      "user_daily_cap": "已達到每日定時執行上限。",
+      "insufficient_credits": "額度不足。",
+      "owner_left": "負責人已離開該工作區。",
+      "tools_unavailable": "資料或 MCP 服務不可用。",
+      "auth_expired": "已連接的帳號需要重新登入。",
+      "rate_limited": "短時間內執行次數過多。"
+    },
+    "trigger": {
+      "schedule": "定時",
+      "manual": "立即執行",
+      "api": "API",
+      "event": "事件"
+    },
+    "errors": {
+      "generic": "出錯了，請重試。",
+      "AGENT_TASK_LIMIT_REACHED": "已達到目前方案的啟用任務數上限。請先暫停或刪除一個任務。",
+      "AGENT_TASK_RUN_RATE_LIMITED": "本小時手動執行次數過多，請稍後再試。",
+      "AGENT_TASK_RUN_CONFLICT": "該任務正在執行。",
+      "AGENT_TASK_INVALID_STATE": "該任務目前不能執行此操作。",
+      "AGENT_TASK_VERSION_CONFLICT": "該任務已在別處被修改。請重新開啟後再試。",
+      "AGENT_TASK_NOT_FOUND": "該任務已不存在。",
+      "AGENT_TASK_SCHEDULE_INVALID": "該時間安排無效。執行間隔至少 1 小時，且必須在未來。"
+    },
+    "toasts": {
+      "runStarted": "已開始執行",
+      "paused": "任務已暫停",
+      "resumed": "任務已恢復",
+      "enabled": "任務已啟用",
+      "deleted": "任務已刪除",
+      "saved": "任務已儲存",
+      "created": "任務已建立"
+    },
+    "frequency": {
+      "daily": "每天",
+      "weekdays": "工作日",
+      "weekly": "每週的某幾天",
+      "once": "僅一次",
+      "cron": "Cron 規則",
+      "manual": "僅手動執行"
+    },
+    "form": {
+      "title": "新增排程任務",
+      "editTitle": "編輯排程任務",
+      "description": "儲存一段提示詞，按時間安排以你的身份執行，並把結果放進一個新對話。",
+      "name": "名稱",
+      "namePlaceholder": "每日早報",
+      "prompt": "提示詞",
+      "promptPlaceholder": "每次執行，助理應該做什麼？",
+      "promptHint": "執行期間無人看守，只能讀取和總結，不能修改任何內容。",
+      "frequency": "重複",
+      "time": "時間",
+      "runAt": "日期和時間",
+      "cron": "Cron 規則（5 段）",
+      "days": "星期",
+      "timezone": "時區",
+      "manualHint": "該任務沒有時間安排。儲存後，可隨時點「立即執行」。",
+      "nextRuns": "接下來的幾次執行",
+      "previewLoading": "正在檢查時間安排…",
+      "previewEmpty": "填好時間安排後可預覽接下來的幾次執行。",
+      "offsetHint": "實際執行可能比所示時間晚最多 {minutes} 分鐘。",
+      "webAccess": "允許聯網搜尋",
+      "webAccessHint": "允許任務搜尋並閱讀公開網頁。",
+      "notifyOnSuccess": "執行成功時通知我",
+      "notifyEmail": "出問題時也寄電子郵件給我",
+      "notifyEmailHint": "包括失敗、暫停和被阻塞的執行。",
+      "mcp": "MCP 服務",
+      "mcpHint": "只會使用這些服務的唯讀工具。",
+      "readOnlyNote": "定時執行是唯讀的：不能寫檔案、發布產物，也不能向你提問。",
+      "cancel": "取消",
+      "save": "儲存",
+      "saveDraft": "存為草稿",
+      "createAndEnable": "建立並啟用",
+      "sources": "資料來源",
+      "sourcesHint": "執行會讀取下面選中的資料來源。留空則不使用工作區資料來源。",
+      "addSource": "新增資料來源",
+      "searchSources": "搜尋資料來源",
+      "noSources": "沒有找到資料來源。",
+      "sourcesLimit": "最多 {count} 個資料來源。",
+      "untitledSource": "未命名資料來源",
+      "unavailableSource": "資料來源已無法使用",
+      "skills": "技能",
+      "skillsHint": "執行只能使用這些技能。",
+      "addSkill": "新增技能",
+      "searchSkills": "搜尋技能",
+      "noSkills": "沒有可用的技能。",
+      "skillsLimit": "最多 {count} 個技能。",
+      "unavailableSkill": "技能已無法使用",
+      "showMore": "顯示更多"
+    },
+    "actions": {
+      "open": "{name} 的操作",
+      "runNow": "立即執行",
+      "pause": "暫停",
+      "resume": "恢復",
+      "enable": "啟用",
+      "edit": "編輯",
+      "delete": "刪除"
+    },
+    "delete": {
+      "title": "刪除「{name}」？",
+      "body": "任務將停止執行，已有的執行記錄和對話會保留。"
+    },
+    "list": {
+      "nextRun": "下次執行 {at}"
+    },
+    "page": {
+      "title": "排程任務",
+      "subtitle": "按時間安排執行的提示詞，結果會放進對話裡。",
+      "new": "新增任務",
+      "tabTasks": "任務",
+      "tabInbox": "通知",
+      "loading": "載入中…",
+      "loadError": "無法載入排程任務。",
+      "emptyTitle": "還沒有排程任務",
+      "emptyBody": "儲存一次提示詞，讓它每天早上、每週一或你指定的時間自動執行。"
+    },
+    "detail": {
+      "back": "全部任務",
+      "notFound": "找不到該任務。",
+      "prompt": "提示詞",
+      "history": "執行歷史",
+      "noRuns": "還沒有執行記錄。",
+      "catchUp": "補跑",
+      "openResult": "開啟結果"
+    },
+    "inbox": {
+      "loading": "載入中…",
+      "loadError": "無法載入通知。",
+      "empty": "暫無通知。",
+      "repeated": "{count} 次",
+      "loadMore": "載入更多",
+      "markAllRead": "全部標為已讀"
+    },
+    "bell": {
+      "label": "通知",
+      "labelUnread": "通知，{count} 條未讀",
+      "title": "通知",
+      "viewAll": "檢視全部"
+    },
+    "notification": {
+      "task_run_succeeded": "「{taskName}」已完成。",
+      "task_run_failed": "「{taskName}」執行失敗。",
+      "task_run_catch_up": "「{taskName}」已補跑之前錯過的一次。",
+      "task_blocked_quota": "「{taskName}」未能執行：額度不足。",
+      "task_needs_approval": "「{taskName}」需要你的核准。",
+      "task_paused_owner_left": "「{taskName}」因負責人離開而暫停。",
+      "task_tools_unavailable": "「{taskName}」無法執行：它使用的資料或 MCP 服務不可用。",
+      "task_blocked_auth": "「{taskName}」無法執行：需要重新登入它使用的已連接帳號。",
+      "task_paused_repeated_failure": "「{taskName}」連續失敗後已暫停。",
+      "research_ready": "你關於「{topic}」的研究已完成。",
+      "research_failed": "你關於「{topic}」的研究未能完成。",
+      "artifact_generation_failed": "「{title}」產生失敗。在資料中心的「製品」中開啟它，可檢視原因。",
+      "artifact_regeneration_failed": "「{title}」重新產生失敗，上一個版本仍保留。開啟它可檢視原因。",
+      "assistant_reply": "助理回覆了你的訊息。",
+      "assistant_question": "「{taskName}」有問題要問你。",
+      "assistant_ticket_blocked": "「{taskName}」已停止：{reason, select, credit_cap {達到額度上限} insufficient_credits {你的額度不足} other {多次執行失敗}}。",
+      "assistant_messages_blocked": "你傳給助理的訊息正在等待：你的額度不足。",
+      "assistant_unavailable": "助理有 {count} 則訊息無法處理。",
+      "unknown": "關於「{taskName}」的更新。"
+    },
+    "composer": {
+      "schedule": "按時間安排執行"
+    },
+    "threadNotice": {
+      "from": "來自排程任務「{name}」。",
+      "open": "開啟任務",
+      "problem": {
+        "failed": "這次排程任務沒有完成。",
+        "timedOut": "這次排程任務用時過長，已被停止。",
+        "cancelled": "這次排程任務已被停止。",
+        "needsApproval": "這次排程任務需要你的核准，而排程任務無法請求核准。"
+      }
+    }
+  },
+  "sharedChat": {
+    "sharedOnAsOf": "在 SourceWeft 上分享 · 內容截至 {date}",
+    "user": "使用者",
+    "assistant": "助理",
+    "stopped": "已停止",
+    "madeWith": "由 SourceWeft 製作",
+    "unavailable": "這個分享不可用",
+    "sources": "來源",
+    "artifactKinds": {
+      "file": "檔案",
+      "html": "網頁",
+      "report": "報告",
+      "slides": "投影片",
+      "mindmap": "心智圖",
+      "podcast": "Podcast",
+      "audio_overview": "音訊概覽",
+      "video_overview": "影片概覽",
+      "video_presentation": "影片演示",
+      "flashcards": "閃卡",
+      "quiz": "測驗",
+      "table": "表格",
+      "infographic": "資訊圖",
+      "image": "圖片"
+    }
   }
 }

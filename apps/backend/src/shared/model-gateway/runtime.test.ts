@@ -7,6 +7,7 @@ import {
 import {
   buildRoutedModelGatewayConfig,
   getOrCreateRoutedGatewayClient,
+  getOrCreateStandaloneGatewayClient,
   normalizeRouteProviderRouting,
   withOpenRouterAttributionHeaders,
 } from "./runtime";
@@ -238,4 +239,35 @@ test("getOrCreateRoutedGatewayClient evicts clients from superseded config versi
     routedConfigFixture("version-a"),
   );
   assert.notEqual(firstAgain, first);
+});
+
+test("a standalone provider client never evicts the active version's routed client", () => {
+  const routed = getOrCreateRoutedGatewayClient(
+    routedConfigFixture("version-active"),
+  );
+  const standalone = getOrCreateStandaloneGatewayClient(
+    routedConfigFixture("standalone:feature"),
+  );
+  assert.notEqual(standalone, routed);
+
+  // Both stay cached: alternating calls must not rebuild either client.
+  assert.equal(
+    getOrCreateRoutedGatewayClient(routedConfigFixture("version-active")),
+    routed,
+  );
+  assert.equal(
+    getOrCreateStandaloneGatewayClient(
+      routedConfigFixture("standalone:feature"),
+    ),
+    standalone,
+  );
+});
+
+test("a changed standalone snapshot (a rotated key) rebuilds its client", () => {
+  const first = getOrCreateStandaloneGatewayClient(
+    routedConfigFixture("standalone:rotate"),
+  );
+  const rotated = routedConfigFixture("standalone:rotate");
+  rotated.providers.primary!.apiKey = "rotated-key";
+  assert.notEqual(getOrCreateStandaloneGatewayClient(rotated), first);
 });

@@ -285,7 +285,7 @@
       "retrieval": "檢索",
       "retrieval_rerank": "檢索重排序",
       "source_ingestion": "來源匯入",
-      "ingestion__asr": "語音轉寫",
+      "ingestion__asr": "語音轉錄",
       "artifact__image": "影像產生",
       "artifact__video_presentation__asset": "影片素材產生",
       "artifact__video_presentation__narration": "影片旁白產生",

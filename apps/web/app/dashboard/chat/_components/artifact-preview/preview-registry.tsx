@@ -13,6 +13,9 @@ import {
   artifactPrimaryPreviewFile,
 } from "@sourceweft/builtin-tool-publish-artifact/ui";
 import { Preview } from "@sourceweft/preview/react";
+import { GroundedEvidenceSourcePreview } from "./grounded-evidence-source";
+import { TableRegenerateDialogHost } from "../table-generate/table-regenerate";
+import { StudyRegenerateDialogHost } from "../study-generate/study-regenerate";
 
 export const artifactPreviewRenderers: ArtifactPreviewRenderer[] = [
   videoFilePreviewRenderer,
@@ -54,7 +57,17 @@ export function resolveArtifactPreviewRenderer(
       blocksDefaultOpen: owned.blocksDefaultOpen,
       id: owned.id,
       match: () => true,
-      render: () => owned.content,
+      render: () => (
+        <>
+          {owned.content}
+          {/* Where a viewer's "open source at this quote" lands. */}
+          <GroundedEvidenceSourcePreview />
+          {/* Where a table viewer's "regenerate" lands. */}
+          <TableRegenerateDialogHost />
+          {/* Where a study viewer's "regenerate" lands. */}
+          <StudyRegenerateDialogHost />
+        </>
+      ),
     };
   }
 

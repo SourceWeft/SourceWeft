@@ -114,6 +114,14 @@ function parseCsv(value: string | undefined): string[] {
     .filter((item) => item.length > 0);
 }
 
+/** SYSTEM_MODEL_PROVIDER_ONLY: blank means no restriction. */
+function parseProviderOnly(value: string | undefined): string[] {
+  if (!value?.trim()) {
+    return [];
+  }
+  return value.split(",").map((item) => item.trim());
+}
+
 /**
  * Confidential OAuth clients for MCP providers that don't support Dynamic Client
  * Registration (e.g. Stripe, GitHub). Parsed from a JSON array of
@@ -267,15 +275,18 @@ const APPLE_KEY_VARIABLES = [
 ] as const;
 
 /**
- * Sign in with Apple settings. The bundle id turns it on; the team id, key id
- * and private key are the Sign in with Apple key the backend signs its
- * client_secret with, which it needs to obtain a refresh token at sign-in and
- * to revoke it when the account is deleted (App Store guideline 5.1.1(v)).
- * Apple sign-in without revocation is not allowed, so a bundle id without the
- * key, or key variables without a bundle id, fail configuration loading.
+ * Sign in with Apple settings. The bundle id turns on native sign-in in the iOS
+ * app; the Services ID turns on the web redirect flow (the web sign-in page,
+ * which the desktop app also uses). Either one needs the team id, key id and
+ * private key: the Sign in with Apple key the backend signs its client_secret
+ * with, which it needs to obtain refresh tokens and to revoke them when the
+ * account is deleted (App Store guideline 5.1.1(v)). Apple sign-in without
+ * revocation is not allowed, so a client id without the key, or key variables
+ * without a client id, fail configuration loading.
  */
 function resolveAppleSignIn() {
   const appBundleId = process.env.AUTH_APPLE_APP_BUNDLE_ID?.trim() || "";
+  const servicesId = process.env.AUTH_APPLE_SERVICES_ID?.trim() || "";
   const teamId = process.env.AUTH_APPLE_TEAM_ID?.trim() || "";
   const keyId = process.env.AUTH_APPLE_KEY_ID?.trim() || "";
   // Env editors often store a PEM on one line with literal "\n" sequences.
@@ -288,20 +299,30 @@ function resolveAppleSignIn() {
     AUTH_APPLE_PRIVATE_KEY: privateKey,
   };
 
-  if (!appBundleId) {
+  if (!appBundleId && !servicesId) {
     const set = APPLE_KEY_VARIABLES.filter((name) => values[name]);
     if (set.length > 0) {
       throw new Error(
-        `${set.join(", ")} set without AUTH_APPLE_APP_BUNDLE_ID. Set the bundle id to turn Sign in with Apple on, or remove these variables.`,
+        `${set.join(", ")} set without AUTH_APPLE_APP_BUNDLE_ID or AUTH_APPLE_SERVICES_ID. Set the bundle id (iOS app) or the Services ID (web) to turn Sign in with Apple on, or remove these variables.`,
       );
     }
-    return { appBundleId, teamId, keyId, privateKey };
+    return { appBundleId, servicesId, teamId, keyId, privateKey };
+  }
+
+  if (servicesId && servicesId === appBundleId) {
+    throw new Error(
+      "AUTH_APPLE_SERVICES_ID must be the web Services ID, not the iOS app's bundle id.",
+    );
   }
 
   const missing = APPLE_KEY_VARIABLES.filter((name) => !values[name]);
   if (missing.length > 0) {
+    const setClients = [
+      appBundleId ? "AUTH_APPLE_APP_BUNDLE_ID" : "",
+      servicesId ? "AUTH_APPLE_SERVICES_ID" : "",
+    ].filter(Boolean);
     throw new Error(
-      `AUTH_APPLE_APP_BUNDLE_ID is set but ${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} missing. Sign in with Apple needs the Sign in with Apple key to revoke tokens when an account is deleted.`,
+      `${setClients.join(" and ")} ${setClients.length === 1 ? "is" : "are"} set but ${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} missing. Sign in with Apple needs the Sign in with Apple key to revoke tokens when an account is deleted.`,
     );
   }
 
@@ -322,7 +343,7 @@ function resolveAppleSignIn() {
     );
   }
 
-  return { appBundleId, teamId, keyId, privateKey };
+  return { appBundleId, servicesId, teamId, keyId, privateKey };
 }
 
 function parsePositiveInteger(value: string | undefined, fallback: number) {
@@ -839,6 +860,10 @@ export const config = {
     provider: process.env.SYSTEM_MODEL_PROVIDER?.trim() || "",
     apiKey: process.env.SYSTEM_MODEL_API_KEY?.trim() || "",
     model: process.env.SYSTEM_MODEL_NAME?.trim() || "",
+    // OpenRouter hosts the system model is restricted to (`provider.only`),
+    // comma-separated. Entries are kept as written, empty ones included, so
+    // a malformed list is reported by readiness instead of quietly shrunk.
+    providerOnly: parseProviderOnly(process.env.SYSTEM_MODEL_PROVIDER_ONLY),
   },
   openrouterModelsApiUrl:
     process.env.OPENROUTER_MODELS_API_URL ||
@@ -871,6 +896,9 @@ export const config = {
     // accepted. Empty leaves Sign in with Apple off. When it is set, the Sign
     // in with Apple key (team id, key id, private key) must be set too.
     appleAppBundleId: appleSignIn.appBundleId,
+    // Apple Services ID of the web sign-in (the browser redirect flow). Empty
+    // leaves web Sign in with Apple off; when set, the key must be set too.
+    appleServicesId: appleSignIn.servicesId,
     appleTeamId: appleSignIn.teamId,
     appleKeyId: appleSignIn.keyId,
     applePrivateKey: appleSignIn.privateKey,

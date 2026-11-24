@@ -20,6 +20,11 @@ export const CLIENT_NAMESPACES = {
    * privacy, terms). `authLocale` feeds Better Auth's localization through
    * `useMessages()` in `app/providers.tsx`. `authPages.oneTap` is read by
    * `GoogleOneTap`, which mounts in the root providers on every route.
+   * `table` and `study` are read by the table and study viewers on the
+   * public share page. The public shared-chat page (`app/chat/[token]`) has
+   * no provider of its own either, but it is a server component (its
+   * `sharedChat` namespace is read with `getTranslations`, never shipped to
+   * the browser), so it needs no entry here.
    */
   root: [
     "artifactShare",
@@ -33,6 +38,8 @@ export const CLIENT_NAMESPACES = {
     "header",
     "languageSwitcher",
     "mobileRouteSheet",
+    "study",
+    "table",
     "ui",
   ],
   /** `app/[locale]`: public marketing, MCP and Skills pages. */
@@ -62,6 +69,9 @@ export const CLIENT_NAMESPACES = {
   ],
   /** `app/auth`: sign-in, invitations, consent, desktop hand-off. */
   auth: [
+    // The hand-written mobile login view links to `/auth/sso` with the SSO
+    // plugin's own copy; the rest of the auth UI reads it through Better Auth.
+    "authLocale.plugins.sso",
     "authPages.acceptInvitation",
     "authPages.additionalField",
     "authPages.consent",
@@ -79,6 +89,7 @@ export const CLIENT_NAMESPACES = {
     "catalogBadge",
     "chatRecovery",
     "dashboardAdmin",
+    "dashboardAssistant",
     "dashboardBlogAdmin",
     "dashboardChat",
     "dashboardChatCanvas",
@@ -90,6 +101,7 @@ export const CLIENT_NAMESPACES = {
     "dashboardNav",
     "dashboardObservability",
     "dashboardPersonas",
+    "dashboardScheduled",
     "dashboardSettings",
     "dashboardSkillOverview.admin",
     "dashboardSkillOverview.block",
@@ -108,6 +120,8 @@ export const CLIENT_NAMESPACES = {
     "mcp.authMethod",
     "mcp.badges.runtime",
     "mcp.readme",
+    "study",
+    "table",
   ],
   /** `app/artifact-preview`: renders the chat canvas around a shared artifact. */
   artifactPreview: [
@@ -115,10 +129,12 @@ export const CLIENT_NAMESPACES = {
     "artifactShare.storage",
     "catalogBadge",
     "chatRecovery",
+    "dashboardAssistant",
     "dashboardChat",
     "dashboardChatCanvas",
     "dashboardChatFiles",
     "dashboardMcpPanel",
+    "dashboardScheduled",
     "dashboardSkills",
     "dashboardSkillsMarket",
     "dashboardSkillsMarketAdmin",
@@ -128,6 +144,8 @@ export const CLIENT_NAMESPACES = {
     "mcp.authMethod",
     "mcp.badges.runtime",
     "mcp.readme",
+    "study",
+    "table",
   ],
 } as const satisfies Record<string, readonly string[]>;
 

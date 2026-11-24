@@ -6,6 +6,10 @@ import type {
   ArtifactRecordsStatus,
   ArtifactSharedCollectionsResponse,
 } from "@sourceweft/contracts/artifact-records";
+import type {
+  DictationAvailabilityResponse,
+  DictationSegmentResponse,
+} from "@sourceweft/contracts/dictation";
 import type { ThreadSourceSelectionResponse, UpdateThreadSourceSelectionRequest } from "@sourceweft/contracts";
 import type {
   ListSavedNotesResponse,
@@ -16,8 +20,31 @@ import type {
   SourceDiscoveryAvailabilityResponse,
   SourceDiscoveryResponse,
   SourceGuideResponse,
+  YouTubeListingRequest,
+  YouTubeListingResponse,
 } from "@sourceweft/contracts/sources";
+import type { ResearchRun } from "@sourceweft/contracts/source-research";
 import type { RegistryVersionsResponse, RegistryVersionDetail } from "@sourceweft/contracts";
+import type {
+  DeriveCardsResponse,
+  QuizAttemptListResponse,
+  QuizAttemptView,
+  ReviewProgressResponse,
+  ReviewQueueResponse,
+  ReviewRequest,
+  ReviewState,
+  StartQuizAttempt,
+  StudyGenerateRequest,
+  StudyOptions,
+  SubmitAnswers,
+} from "@sourceweft/contracts/study";
+import type {
+  TableColumnInput,
+  TableFreshness,
+  TableGenerateRequest,
+  TableRegenerateRequest,
+  TableSuggestColumnsRequest,
+} from "@sourceweft/contracts/table";
 import type {
   MarketMcpLocale,
   MarketSkillLocale,
@@ -32,6 +59,9 @@ import type {
   UpdateArtifactShareRequest,
   ShareResponse,
   GetShareResponse,
+  CreateThreadShareRequest,
+  UpdateThreadShareRequest,
+  ThreadShare,
   CitationDetailResponse,
   CreateByokCredentialRequest,
   CreateByokCredentialResponse,
@@ -53,6 +83,13 @@ import type {
   DeleteWorkspaceMcpInstallResponse,
   DeleteSourceResponse,
   DeleteThreadResponse,
+  ArchiveThreadRequest,
+  ArchiveThreadResponse,
+  PinThreadResponse,
+  RenameThreadRequest,
+  RenameThreadResponse,
+  SearchThreadsRequest,
+  SearchThreadsResponse,
   DeleteWorkingFileResponse,
   DeleteWorkspaceSkillResponse,
   EnableWorkspaceSkillRequest,
@@ -211,6 +248,82 @@ function encode(value: string) {
   return encodeURIComponent(value);
 }
 
+/* ---- Study artifact generation ---------------------------------------- */
+
+export type StudyEstimateResponse = {
+  mode: "single" | "mapreduce";
+  inputTokensEstimate: number;
+  groups: number;
+  maxItems: number;
+  exceedsLimit: boolean;
+};
+
+export type StudyGenerateResponse = {
+  artifactId: string;
+  versionNo: number;
+  status: "pending";
+  /** Follows the thread; the requested visibility is not a separate control. */
+  visibility: "private" | "workspace";
+  /** True when an identical request in the last minutes already opened it. */
+  reused: boolean;
+};
+
+export type StudyRegenerateRequest = {
+  /** Omitted fields come from the current version's recipe. */
+  options?: StudyOptions;
+  focus?: string;
+};
+
+export type StudyRegenerateResponse = {
+  artifactId: string;
+  versionNo: number;
+  status: "pending";
+};
+
+export type StudyFreshnessResponse = {
+  state: "fresh" | "stale" | "source_deleted";
+  changedSourceIds: string[];
+  deletedSourceIds: string[];
+};
+
+/* ---- Data table generation -------------------------------------------- */
+
+export type TableSuggestColumnsResponse = {
+  columns: TableColumnInput[];
+};
+
+export type TableEstimateResponse = {
+  /** Selected sources, including those that cannot be read yet. */
+  sources: number;
+  /** Sources that are not indexed yet; their rows will be skipped. */
+  skippedSources: number;
+  columns: number;
+  /** Cells the model has to fill: readable sources × columns. */
+  cells: number;
+  /** Model calls the fill needs. */
+  calls: number;
+  inputTokensEstimate: number;
+  exceedsLimit: boolean;
+};
+
+export type TableGenerateResponse = {
+  artifactId: string;
+  versionNo: number;
+  status: "pending";
+  /** Follows the thread; the requested visibility is not a separate control. */
+  visibility: "private" | "workspace";
+  /** True when an identical request in the last minutes already opened it. */
+  reused: boolean;
+};
+
+export type TableRegenerateResponse = {
+  artifactId: string;
+  versionNo: number;
+  status: "pending";
+};
+
+export type TableFreshnessResponse = TableFreshness;
+
 export class ContentClient {
   constructor(private readonly http: HttpClient) {}
 
@@ -321,6 +434,40 @@ export class ContentClient {
     return this.http.patch<ShareResponse>(
       `/v1/workspaces/${encode(workspaceId)}/artifacts/${encode(artifactId)}/share`,
       input,
+    );
+  }
+
+  getThreadShare(workspaceId: string, threadId: string) {
+    return this.http.get<{ share: ThreadShare | null }>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/share`,
+    );
+  }
+
+  shareThread(
+    workspaceId: string,
+    threadId: string,
+    input: CreateThreadShareRequest = {},
+  ) {
+    return this.http.post<{ share: ThreadShare }>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/share`,
+      input,
+    );
+  }
+
+  updateThreadShare(
+    workspaceId: string,
+    threadId: string,
+    input: UpdateThreadShareRequest,
+  ) {
+    return this.http.patch<{ share: ThreadShare }>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/share`,
+      input,
+    );
+  }
+
+  revokeThreadShare(workspaceId: string, threadId: string) {
+    return this.http.delete<{ revoked: true }>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/share`,
     );
   }
 
@@ -632,6 +779,49 @@ export class ContentClient {
     );
   }
 
+  /** Lists the videos of a YouTube playlist or channel link, for import. */
+  listYouTubeCollection(workspaceId: string, input: YouTubeListingRequest) {
+    return this.http.post<YouTubeListingResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/sources/youtube/listing`,
+      input,
+    );
+  }
+
+  /** Starts a deep-research run in the background. */
+  startResearch(workspaceId: string, topic: string) {
+    return this.http.post<{ run: ResearchRun }>(
+      `/v1/workspaces/${encode(workspaceId)}/source-research`,
+      { topic },
+    );
+  }
+
+  getResearch(workspaceId: string, id: string) {
+    return this.http.get<{ run: ResearchRun }>(
+      `/v1/workspaces/${encode(workspaceId)}/source-research/${encode(id)}`,
+    );
+  }
+
+  listResearch(workspaceId: string) {
+    return this.http.get<{ runs: ResearchRun[] }>(
+      `/v1/workspaces/${encode(workspaceId)}/source-research`,
+    );
+  }
+
+  cancelResearch(workspaceId: string, id: string) {
+    return this.http.post<{ cancelled: boolean }>(
+      `/v1/workspaces/${encode(workspaceId)}/source-research/${encode(id)}/cancel`,
+      {},
+    );
+  }
+
+  /** Saves a `ready` run's report as a note, indexed like any other source. */
+  saveResearchNote(workspaceId: string, id: string) {
+    return this.http.post<SavedAnswerNote>(
+      `/v1/workspaces/${encode(workspaceId)}/source-research/${encode(id)}/save-note`,
+      {},
+    );
+  }
+
   getNoteOrigin(workspaceId: string, sourceId: string) {
     return this.http.get<NoteOriginResponse>(
       `/v1/workspaces/${encode(workspaceId)}/sources/${encode(sourceId)}/note`,
@@ -767,6 +957,12 @@ export class ContentClient {
     }
     if (input.cursor) {
       params.set("cursor", input.cursor);
+    }
+    if (input.archived) {
+      params.set("archived", "true");
+    }
+    if (input.pinned) {
+      params.set("pinned", "true");
     }
 
     const query = params.toString();
@@ -984,6 +1180,66 @@ export class ContentClient {
     return this.http.patch<UpdateThreadChatPreferencesResponse>(
       `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/chat-preferences`,
       input,
+    );
+  }
+
+  archiveThread(
+    workspaceId: string,
+    threadId: string,
+    input: ArchiveThreadRequest,
+  ) {
+    return this.http.patch<ArchiveThreadResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/archive`,
+      input,
+    );
+  }
+
+  renameThread(
+    workspaceId: string,
+    threadId: string,
+    input: RenameThreadRequest,
+  ) {
+    return this.http.patch<RenameThreadResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/title`,
+      input,
+    );
+  }
+
+  pinThread(workspaceId: string, threadId: string) {
+    return this.http.put<PinThreadResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/pin`,
+      {},
+    );
+  }
+
+  unpinThread(workspaceId: string, threadId: string) {
+    return this.http.delete<PinThreadResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/pin`,
+    );
+  }
+
+  /** Downloads a chat as Markdown, or as a zip when it has images. */
+  exportThread(
+    workspaceId: string,
+    threadId: string,
+    input: { locale: string; timeZone: string },
+  ) {
+    const params = new URLSearchParams({
+      locale: input.locale,
+      timeZone: input.timeZone,
+    });
+    return this.http.getDownload(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/export?${params.toString()}`,
+    );
+  }
+
+  searchThreads(workspaceId: string, input: SearchThreadsRequest) {
+    const params = new URLSearchParams({ q: input.q });
+    if (typeof input.limit === "number") {
+      params.set("limit", String(input.limit));
+    }
+    return this.http.get<SearchThreadsResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/search?${params.toString()}`,
     );
   }
 
@@ -1587,6 +1843,202 @@ export class ContentClient {
         mode: "edit",
         stream: false,
       },
+    );
+  }
+
+  /* ---- Dictation --------------------------------------------------------- */
+
+  getDictationAvailability(workspaceId: string) {
+    return this.http.get<DictationAvailabilityResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/dictation`,
+    );
+  }
+
+  transcribeDictationSegment(
+    workspaceId: string,
+    input: { sessionId: string; seq: number; wav: Uint8Array; signal?: AbortSignal },
+  ) {
+    const formData = new FormData();
+    formData.append(
+      "file",
+      new Blob([input.wav.slice()], { type: "audio/wav" }),
+      "segment.wav",
+    );
+    formData.append("sessionId", input.sessionId);
+    formData.append("seq", String(input.seq));
+
+    return this.http.postForm<DictationSegmentResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/dictation/segments`,
+      formData,
+      { signal: input.signal },
+    );
+  }
+
+  /* ---- Study artifact generation -------------------------------------- */
+
+  /** Size of a study generation, without calling a model. */
+  estimateStudy(workspaceId: string, input: StudyGenerateRequest) {
+    return this.http.post<StudyEstimateResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/study/estimate`,
+      input,
+    );
+  }
+
+  /** Opens a pending study artifact and queues its generation (202). */
+  generateStudyArtifact(workspaceId: string, input: StudyGenerateRequest) {
+    return this.http.post<StudyGenerateResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/study/artifacts`,
+      input,
+    );
+  }
+
+  /** Queues the next version of a ready study artifact (202). */
+  regenerateStudyArtifact(
+    workspaceId: string,
+    artifactId: string,
+    input: StudyRegenerateRequest = {},
+  ) {
+    return this.http.post<StudyRegenerateResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/study/artifacts/${encode(artifactId)}/regenerate`,
+      input,
+    );
+  }
+
+  /** Whether the sources of the current version changed since it was made. */
+  getStudyFreshness(workspaceId: string, artifactId: string) {
+    return this.http.get<StudyFreshnessResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/study/artifacts/${encode(artifactId)}/freshness`,
+    );
+  }
+
+  /* ---- Data table generation ------------------------------------------ */
+
+  /** Proposes columns from the sources' summaries; the requester pays (200). */
+  suggestTableColumns(workspaceId: string, input: TableSuggestColumnsRequest) {
+    return this.http.post<TableSuggestColumnsResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/tables/columns/suggest`,
+      input,
+    );
+  }
+
+  /** Size of a table generation, without calling a model. */
+  estimateTable(workspaceId: string, input: TableGenerateRequest) {
+    return this.http.post<TableEstimateResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/tables/estimate`,
+      input,
+    );
+  }
+
+  /** Opens a pending table and queues its generation (202). */
+  generateTable(workspaceId: string, input: TableGenerateRequest) {
+    return this.http.post<TableGenerateResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/tables/artifacts`,
+      input,
+    );
+  }
+
+  /** Queues the next version of a ready table (202); left-out fields keep the recipe. */
+  regenerateTable(
+    workspaceId: string,
+    artifactId: string,
+    input: TableRegenerateRequest = {},
+  ) {
+    return this.http.post<TableRegenerateResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/tables/artifacts/${encode(artifactId)}/regenerate`,
+      input,
+    );
+  }
+
+  /** Whether the sources of the current version changed since it was made, row by row. */
+  getTableFreshness(workspaceId: string, artifactId: string) {
+    return this.http.get<TableFreshnessResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/tables/artifacts/${encode(artifactId)}/freshness`,
+    );
+  }
+
+  /* Study learning state (flashcard review, quiz attempts) --------------- */
+
+  getStudyReviewQueue(
+    workspaceId: string,
+    input: { limit?: number; artifactId?: string } = {},
+  ) {
+    const query = new URLSearchParams();
+    if (input.limit !== undefined) query.set("limit", String(input.limit));
+    if (input.artifactId) query.set("artifactId", input.artifactId);
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
+    return this.http.get<ReviewQueueResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/study/review/queue${suffix}`,
+    );
+  }
+
+  /** Current version by default; name one with `artifactVersionId` or `versionNo`. */
+  getStudyReviewProgress(
+    workspaceId: string,
+    artifactId: string,
+    version: { artifactVersionId?: string; versionNo?: number } = {},
+  ) {
+    const query = new URLSearchParams();
+    if (version.artifactVersionId) {
+      query.set("artifactVersionId", version.artifactVersionId);
+    }
+    if (version.versionNo !== undefined) {
+      query.set("versionNo", String(version.versionNo));
+    }
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
+    return this.http.get<ReviewProgressResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/study/artifacts/${encode(artifactId)}/progress${suffix}`,
+    );
+  }
+
+  gradeStudyCard(workspaceId: string, artifactId: string, input: ReviewRequest) {
+    return this.http.post<ReviewState>(
+      `/v1/workspaces/${encode(workspaceId)}/study/artifacts/${encode(artifactId)}/review`,
+      input,
+    );
+  }
+
+  startStudyQuizAttempt(
+    workspaceId: string,
+    artifactId: string,
+    input: StartQuizAttempt,
+  ) {
+    return this.http.post<QuizAttemptView>(
+      `/v1/workspaces/${encode(workspaceId)}/study/artifacts/${encode(artifactId)}/quiz/attempts`,
+      input,
+    );
+  }
+
+  /** Newest first; with `artifactVersionId`, only the attempts at that version. */
+  listStudyQuizAttempts(
+    workspaceId: string,
+    artifactId: string,
+    version: { artifactVersionId?: string } = {},
+  ) {
+    const query = new URLSearchParams();
+    if (version.artifactVersionId) {
+      query.set("artifactVersionId", version.artifactVersionId);
+    }
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
+    return this.http.get<QuizAttemptListResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/study/artifacts/${encode(artifactId)}/quiz/attempts${suffix}`,
+    );
+  }
+
+  saveStudyQuizAnswers(
+    workspaceId: string,
+    attemptId: string,
+    input: SubmitAnswers,
+  ) {
+    return this.http.put<QuizAttemptView>(
+      `/v1/workspaces/${encode(workspaceId)}/study/quiz/attempts/${encode(attemptId)}`,
+      input,
+    );
+  }
+
+  deriveStudyCardsFromAttempt(workspaceId: string, attemptId: string) {
+    return this.http.post<DeriveCardsResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/study/quiz/attempts/${encode(attemptId)}/derive-cards`,
+      {},
     );
   }
 }

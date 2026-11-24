@@ -100,6 +100,51 @@ export async function updateThreadSourceSelection(input: {
   };
 }
 
+/**
+ * Gives a conversation the host has just created its starting selection: the
+ * requested sources that still exist in the workspace. Sources that are gone
+ * are left out instead of failing, and a selection that is already there is
+ * kept, so calling this again for the same conversation changes nothing.
+ * Returns the selection the conversation ends up with.
+ */
+export async function seedThreadSourceSelection(
+  scope: SelectionScope & { sourceIds: string[] },
+): Promise<string[]> {
+  const current = await loadThreadSourceSelection(scope);
+  if (current.revision > 0 || scope.sourceIds.length === 0) {
+    return current.selectedSourceIds;
+  }
+  const resolved = await resolveSourceTreeScope({
+    teamId: scope.teamId,
+    workspaceId: scope.workspaceId,
+    selectedSourceIds: scope.sourceIds,
+  });
+  const available = new Set(resolved.effectiveSourceIds);
+  const selection: ThreadSourceSelection = {
+    revision: current.revision + 1,
+    selectedSourceIds: [...new Set(scope.sourceIds)].filter((id) =>
+      available.has(id),
+    ),
+  };
+  const result = await database.query<{ source_selection_json: unknown }>(
+    `update threads set source_selection_json=$4::jsonb
+     where team_id=$1 and workspace_id=$2 and id=$3 and source_selection_json=$5::jsonb
+     returning source_selection_json`,
+    [
+      scope.teamId,
+      scope.workspaceId,
+      scope.threadId,
+      JSON.stringify(selection),
+      JSON.stringify(current),
+    ],
+  );
+  // Lost a race with another dispatcher seeding the same conversation.
+  if (!result.rows[0]) {
+    return (await loadThreadSourceSelection(scope)).selectedSourceIds;
+  }
+  return selection.selectedSourceIds;
+}
+
 function conflict() {
   return new ContentError(
     409,

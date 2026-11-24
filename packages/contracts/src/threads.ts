@@ -29,7 +29,16 @@ export type ThreadRunFailureSummary = {
   errorMessage: string;
 };
 
-export const threadOriginSchema = z.enum(["user", "subagent"]);
+// `scheduled` marks a conversation a scheduled task run created.
+// `assistant_router` is a workspace assistant's own standing router thread;
+// `assistant_ticket` is one of its tickets' worker threads.
+export const threadOriginSchema = z.enum([
+  "user",
+  "subagent",
+  "scheduled",
+  "assistant_router",
+  "assistant_ticket",
+]);
 
 export const threadSchema = z.object({
   id: z.string(),
@@ -189,6 +198,82 @@ export const deleteThreadResponseSchema = z.object({
 export const listThreadsRequestSchema = z.object({
   limit: z.number().int().min(1).max(100).optional(),
   cursor: z.string().trim().min(1).max(1024).optional(),
+  /** List archived chats instead of the main list. */
+  archived: z.boolean().optional(),
+  /** List the viewer's own pinned chats (at most 50, newest pin first). */
+  pinned: z.boolean().optional(),
+});
+
+/**
+ * Archives a top-level chat, or brings it back with `archived: false`. Its
+ * sub-agent conversations stay nested under it either way.
+ */
+export const archiveThreadRequestSchema = z.object({
+  archived: z.boolean(),
+});
+
+export const archiveThreadResponseSchema = z.object({
+  threadId: z.string(),
+  archived: z.boolean(),
+});
+
+/** Renames a top-level chat. Automatic titling never overwrites it. */
+export const renameThreadRequestSchema = z.object({
+  title: z.string().trim().min(1).max(200),
+});
+
+export const renameThreadResponseSchema = z.object({
+  threadId: z.string(),
+  title: z.string(),
+});
+
+/** At most this many pinned chats are listed. */
+export const MAX_PINNED_THREADS = 50;
+
+/** Pins are personal: they never change another member's list. */
+export const pinThreadResponseSchema = z.object({
+  threadId: z.string(),
+  pinned: z.boolean(),
+});
+
+export const searchThreadsRequestSchema = z.object({
+  q: z.string().trim().min(1).max(200),
+  limit: z.number().int().min(1).max(50).optional(),
+});
+
+export const exportThreadLocaleSchema = z.enum(["en", "zh-CN", "zh-TW"]);
+
+function isValidTimeZone(value: string) {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Query for `GET /threads/:id/export`: the labels' language and the clock. */
+export const exportThreadRequestSchema = z.object({
+  locale: exportThreadLocaleSchema.default("en"),
+  timeZone: z
+    .string()
+    .trim()
+    .min(1)
+    .default("UTC")
+    .refine(isValidTimeZone, "Unknown time zone"),
+});
+
+export const threadSearchResultSchema = z.object({
+  thread: threadWithChatPreferencesSchema,
+  archived: z.boolean(),
+  match: z.object({
+    kind: z.enum(["title", "message"]),
+    snippet: z.string(),
+  }),
+});
+
+export const searchThreadsResponseSchema = z.object({
+  items: z.array(threadSearchResultSchema),
 });
 
 export const threadListItemSchema = threadWithChatPreferencesSchema.extend({
@@ -269,6 +354,16 @@ export type CreateThreadResponse = z.infer<typeof createThreadResponseSchema>;
 export type GetThreadResponse = z.infer<typeof getThreadResponseSchema>;
 export type DeleteThreadResponse = z.infer<typeof deleteThreadResponseSchema>;
 export type ListThreadsRequest = z.infer<typeof listThreadsRequestSchema>;
+export type ArchiveThreadRequest = z.infer<typeof archiveThreadRequestSchema>;
+export type ArchiveThreadResponse = z.infer<typeof archiveThreadResponseSchema>;
+export type RenameThreadRequest = z.infer<typeof renameThreadRequestSchema>;
+export type RenameThreadResponse = z.infer<typeof renameThreadResponseSchema>;
+export type PinThreadResponse = z.infer<typeof pinThreadResponseSchema>;
+export type SearchThreadsRequest = z.infer<typeof searchThreadsRequestSchema>;
+export type ExportThreadLocale = z.infer<typeof exportThreadLocaleSchema>;
+export type ExportThreadRequest = z.infer<typeof exportThreadRequestSchema>;
+export type ThreadSearchResult = z.infer<typeof threadSearchResultSchema>;
+export type SearchThreadsResponse = z.infer<typeof searchThreadsResponseSchema>;
 export type ListThreadsResponse = z.infer<typeof listThreadsResponseSchema>;
 export type ThreadCommandRequest = z.infer<typeof threadCommandRequestSchema>;
 export type UpdateThreadModelSettingsRequest = z.infer<

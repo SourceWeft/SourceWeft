@@ -7,7 +7,9 @@ const chat = (
   id: string,
   visibility: ChatItem["visibility"],
   minute: number,
+  origin?: ChatItem["origin"],
 ): ChatItem => ({
+  ...(origin ? { origin } : {}),
   id,
   title: id,
   visibility,
@@ -63,7 +65,9 @@ test("archived chats stay isolated even when another loaded page contains the sa
     false,
   );
   assert.deepEqual(
-    getSidebarChatItems({ ...reloaded, filter: "archived" }).map((item) => item.id),
+    getSidebarChatItems({ ...reloaded, filter: "archived" }).map(
+      (item) => item.id,
+    ),
     ["archived-private", "archived-shared"],
   );
 });
@@ -104,5 +108,42 @@ test("later pages are merged into the current shared filter in update order", ()
       filter: "shared",
     }),
     [],
+  );
+});
+
+test("the scheduled filter keeps only the conversations a task run created", () => {
+  const filtered = getSidebarChatItems({
+    ...input,
+    privateChats: [
+      chat("run-1", "private", 7, "scheduled"),
+      chat("ordinary", "private", 5, "user"),
+    ],
+    sharedChats: [chat("run-2", "workspace", 8, "scheduled")],
+    filter: "scheduled",
+  });
+  assert.deepEqual(
+    filtered.map((item) => item.id),
+    ["run-2", "run-1"],
+  );
+});
+
+test("the assistant filter keeps only assistant ticket conversations", () => {
+  const filtered = getSidebarChatItems({
+    ...input,
+    privateChats: [
+      chat("ticket-1", "private", 7, "assistant_ticket"),
+      chat("ordinary", "private", 5, "user"),
+      chat("run", "private", 4, "scheduled"),
+    ],
+    sharedChats: [
+      chat("ticket-2", "workspace", 8, "assistant_ticket"),
+      // The Router's own conversation is a work log, never a listed ticket.
+      chat("router", "workspace", 9, "assistant_router"),
+    ],
+    filter: "assistant",
+  });
+  assert.deepEqual(
+    filtered.map((item) => item.id),
+    ["ticket-2", "ticket-1"],
   );
 });

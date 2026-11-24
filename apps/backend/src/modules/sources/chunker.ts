@@ -15,5 +15,7 @@ export async function chunkSourceContent(
     endIndex: chunk.endIndex,
     tokenCount: chunk.tokenCount,
     ...(chunk.embedding ? { embedding: [...chunk.embedding] } : {}),
+    ...(chunk.headingPath ? { headingPath: chunk.headingPath } : {}),
+    ...(chunk.language ? { language: chunk.language } : {}),
   }));
 }

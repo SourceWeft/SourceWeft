@@ -202,3 +202,73 @@ test("normalizes generated image custom progress events", () => {
     null,
   );
 });
+
+test("video validation progress becomes a replaceable validation step", () => {
+  const start = buildArtifactGenerationStep({
+    phase: "generating",
+    toolCallId: "call-v",
+    toolName: "validate_video_presentation",
+  });
+  assert.ok(start);
+  assert.equal(start.id, "video-validation");
+  assert.equal(start.status, "in_progress");
+
+  const event = normalizeGeneratedPresentationProgressEvent({
+    type: "validate_video_presentation_progress",
+    tool: "validate_video_presentation",
+    toolCallId: "call-v",
+    stage: "install",
+  });
+  assert.ok(event);
+  assert.equal(event.tool, "validate_video_presentation");
+  assert.equal(event.toolCallId, "call-v");
+
+  const installing = buildPresentationProgressThinkingStep({
+    data: event.data,
+    toolCallId: "call-v",
+  });
+  const rendering = buildPresentationProgressThinkingStep({
+    data: { ...event.data, stage: "render" },
+    toolCallId: "call-v",
+  });
+  assert.ok(installing);
+  assert.ok(rendering);
+  // One stable id, so each stage replaces the previous item instead of
+  // appending a new step to the turn.
+  assert.equal(installing.id, "video-validation");
+  assert.equal(rendering.id, installing.id);
+  assert.equal(installing.status, "in_progress");
+  assert.deepEqual(installing.items, ["Installing project dependencies"]);
+  assert.deepEqual(rendering.items, ["Rendering the final video"]);
+  assert.equal(installing.metadata?.toolCallId, "call-v");
+});
+
+test("video validation closes its step on the validation verdict", () => {
+  const passed = buildArtifactGenerationStep({
+    phase: "completed",
+    toolCallId: "call-v",
+    toolName: "validate_video_presentation",
+  });
+  const failed = buildArtifactGenerationStep({
+    error: "VIDEO_PROJECT_VALIDATION_FAILED",
+    phase: "failed",
+    toolCallId: "call-v",
+    toolName: "validate_video_presentation",
+  });
+  assert.equal(passed?.status, "completed");
+  assert.equal(passed?.title, "Video presentation validated");
+  assert.equal(failed?.status, "completed");
+  assert.equal(failed?.title, "Video presentation validation failed");
+  assert.equal(failed?.description, "VIDEO_PROJECT_VALIDATION_FAILED");
+});
+
+test("a progress event type no capability declares is not routed", () => {
+  assert.equal(
+    normalizeGeneratedPresentationProgressEvent({
+      type: "validate_video_unknown_progress",
+      toolCallId: "call-v",
+      stage: "install",
+    }),
+    null,
+  );
+});

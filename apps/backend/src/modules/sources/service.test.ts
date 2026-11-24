@@ -80,7 +80,7 @@ for (const url of [
       (error: unknown) => {
         assert.equal(
           (error as { code?: string }).code,
-          "WEB_SOURCE_YOUTUBE_UNSUPPORTED",
+          "YOUTUBE_URL_UNSUPPORTED",
         );
         assert.equal((error as { statusCode?: number }).statusCode, 422);
         return true;

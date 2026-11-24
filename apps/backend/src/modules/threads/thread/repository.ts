@@ -17,6 +17,7 @@ import {
   type ThreadChatPreferencesPatch,
 } from "../chat-preferences";
 import type { ThreadChatPreferences } from "@sourceweft/contracts";
+import { MAX_PINNED_THREADS } from "@sourceweft/contracts";
 import type { ThreadExecutionTarget } from "@sourceweft/contracts";
 
 type RawThreadRow = {
@@ -65,6 +66,10 @@ const THREAD_RETURNING_SQL = `
  * so brand-new threads fall back to `created_at`.
  */
 const THREAD_ACTIVITY_SQL = "coalesce(last_message_at, created_at)";
+
+/** The viewer's (`$3`) pin row on the `threads` row in scope. */
+const VIEWER_PIN_SQL =
+  "select 1 from thread_pins p where p.thread_id = threads.id and p.user_id = $3";
 
 /**
  * Raw-SQL predicate hiding other members' private threads. `public_link` is an
@@ -177,7 +182,12 @@ export async function createThreadRecord(input: {
         execution_target_json
       )
       values ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10, $11, $12::jsonb)
-      on conflict (id) do nothing
+      -- No conflict target: two concurrent inserts of one id can trip
+      -- threads_id_workspace_team_uq before the primary key, and an
+      -- "on conflict (id)" arbiter does not cover it. Every unique
+      -- constraint on threads includes id, so this still only skips a row
+      -- with the same id.
+      on conflict do nothing
       returning ${THREAD_RETURNING_SQL}
     `,
     [
@@ -228,7 +238,13 @@ export async function listThreadRecordsByWorkspace(input: {
     id: string;
     activityAt: string;
   };
+  /** The archived chats instead of the main list. */
+  archived?: boolean;
+  /** The viewer's own pinned, non-archived chats, newest pin first. */
+  pinned?: boolean;
 }) {
+  if (input.pinned) return listPinnedThreadRecords(input);
+
   const cursorDate = input.cursor ? new Date(input.cursor.activityAt) : null;
   const hasValidCursor =
     Boolean(input.cursor) &&
@@ -259,9 +275,13 @@ export async function listThreadRecordsByWorkspace(input: {
       from threads
       where team_id = $1
         and workspace_id = $2
-        and archived = false
+        and archived = ${input.archived ? "true" : "false"}
         and parent_thread_id is null
+        -- A workspace assistant's Router conversation is its own working
+        -- thread, not a chat anyone opened; it stays out of the chat list.
+        and origin <> 'assistant_router'
         and ${visibility}
+        ${input.archived ? "" : `and not exists (${VIEWER_PIN_SQL})`}
         ${cursorSql}
       order by ${THREAD_ACTIVITY_SQL} desc, id desc
       limit $${limitParam}
@@ -351,16 +371,300 @@ export async function deleteThreadRecord(input: {
   const deletableClause = input.isContentAdmin
     ? threadVisibilityClause(4)
     : `(created_by = $4 or created_by is null)`;
+  //
+  // The sub-agent threads the thread's own `task` calls opened go with it, in
+  // the same statement and only when the thread itself is deleted. They are
+  // transcripts of its turns, so the caller's right to delete the thread covers
+  // them whoever ran the turn. A sub-agent thread a member created under it is
+  // their own conversation: it stays, and the foreign key clears its parent.
   const result = await database.query<{ id: string }>(
     `
-      delete from threads
+      with deleted_thread as (
+        delete from threads
+        where id = $1
+          and team_id = $2
+          and workspace_id = $3
+          and ${deletableClause}
+        returning id
+      ),
+      deleted_delegate_threads as (
+        delete from threads
+        where parent_thread_id = $1
+          and team_id = $2
+          and workspace_id = $3
+          and origin = 'subagent'
+          and exists (select 1 from deleted_thread)
+        returning id
+      )
+      select id from deleted_thread
+    `,
+    [input.threadId, input.teamId, input.workspaceId, input.viewerUserId],
+  );
+
+  return result.rows.length > 0;
+}
+
+async function listPinnedThreadRecords(input: {
+  teamId: string;
+  workspaceId: string;
+  viewerUserId: string;
+  limit: number;
+}) {
+  const result = await database.query<RawThreadRow>(
+    `
+      select ${THREAD_RETURNING_SQL}
+      from threads
+      join lateral (
+        select p.pinned_at from thread_pins p
+        where p.thread_id = threads.id and p.user_id = $3
+      ) pin on true
+      where team_id = $1
+        and workspace_id = $2
+        and archived = false
+        and parent_thread_id is null
+        and ${threadVisibilityClause(3)}
+      order by pin.pinned_at desc, id desc
+      limit $4
+    `,
+    [
+      input.teamId,
+      input.workspaceId,
+      input.viewerUserId,
+      Math.min(input.limit, MAX_PINNED_THREADS),
+    ],
+  );
+
+  const sourceCounts = await countUsedSourceIdsByThread({
+    teamId: input.teamId,
+    workspaceId: input.workspaceId,
+    threadIds: result.rows.map((row) => row.id),
+  });
+
+  return result.rows.map((row) =>
+    mapRawThread(row, sourceCounts.get(row.id) ?? 0),
+  );
+}
+
+/**
+ * Renames a top-level chat under the same rule as archive and delete. Returns
+ * false when the chat is missing, a sub-agent chat, or not the viewer's to
+ * rename.
+ */
+export async function renameThreadRecord(input: {
+  threadId: string;
+  teamId: string;
+  workspaceId: string;
+  viewerUserId: string;
+  isContentAdmin: boolean;
+  title: string;
+}) {
+  const renamableClause = input.isContentAdmin
+    ? threadVisibilityClause(4)
+    : `(created_by = $4 or created_by is null)`;
+  const result = await database.query<{ id: string }>(
+    `
+      update threads
+      set title = $5,
+          updated_at = now()
       where id = $1
         and team_id = $2
         and workspace_id = $3
-        and ${deletableClause}
+        and parent_thread_id is null
+        and ${renamableClause}
       returning id
     `,
-    [input.threadId, input.teamId, input.workspaceId, input.viewerUserId],
+    [
+      input.threadId,
+      input.teamId,
+      input.workspaceId,
+      input.viewerUserId,
+      input.title,
+    ],
+  );
+
+  return result.rows.length > 0;
+}
+
+/**
+ * Pins or unpins a top-level chat for the viewer only.
+ *
+ * - Pin: "not_found" when the viewer cannot see the chat, "limit" when they
+ *   already have MAX_PINNED_THREADS other listable pins here (so no pin falls
+ *   off the pinned list), otherwise "ok".
+ * - Unpin: always removes the viewer's own pin row and returns "ok", even when
+ *   the chat is no longer visible to them.
+ */
+export async function setThreadPinnedRecord(input: {
+  threadId: string;
+  teamId: string;
+  workspaceId: string;
+  viewerUserId: string;
+  pinned: boolean;
+}): Promise<"ok" | "not_found" | "limit"> {
+  if (!input.pinned) {
+    await database.query(
+      `delete from thread_pins
+       where thread_id = $1 and user_id = $2 and workspace_id = $3`,
+      [input.threadId, input.viewerUserId, input.workspaceId],
+    );
+    return "ok";
+  }
+
+  const result = await database.query<{ visible: number; pinned: number }>(
+    `
+      with target as (
+        select id, team_id, workspace_id
+        from threads
+        where id = $1
+          and team_id = $2
+          and workspace_id = $3
+          and parent_thread_id is null
+          and ${threadVisibilityClause(4)}
+      ),
+      -- Pins the viewer can see in the pinned list, other than this chat.
+      listed_pins as (
+        select count(*)::int as n
+        from thread_pins p
+        join threads t on t.id = p.thread_id
+        where p.user_id = $4
+          and p.workspace_id = $3
+          and p.thread_id <> $1
+          and t.archived = false
+          and t.parent_thread_id is null
+          and (t.visibility <> 'private' or t.created_by = $4)
+      ),
+      pin_write as (
+        insert into thread_pins (thread_id, user_id, team_id, workspace_id)
+        select id, $4, team_id, workspace_id from target
+        where (select n from listed_pins) < $5
+        on conflict (thread_id, user_id) do nothing
+      )
+      select
+        (select count(*)::int from target) as visible,
+        (select n from listed_pins) as pinned
+    `,
+    [
+      input.threadId,
+      input.teamId,
+      input.workspaceId,
+      input.viewerUserId,
+      MAX_PINNED_THREADS,
+    ],
+  );
+
+  const row = result.rows[0];
+  if (!row || row.visible === 0) return "not_found";
+  if (row.pinned >= MAX_PINNED_THREADS) return "limit";
+  return "ok";
+}
+
+/** Escapes `\`, `%` and `_` so a search query matches them literally. */
+function escapeLikePattern(query: string) {
+  return query.replace(/[\\%_]/g, (char) => `\\${char}`);
+}
+
+/**
+ * Top-level chats visible to the viewer whose title or user/assistant message
+ * text contains `query` (case-insensitive), archived ones included, newest
+ * activity first. `hitContent` is the newest matching message, if any.
+ */
+export async function searchThreadRecords(input: {
+  teamId: string;
+  workspaceId: string;
+  viewerUserId: string;
+  query: string;
+  limit: number;
+}) {
+  const result = await database.query<
+    RawThreadRow & {
+      archived: boolean;
+      title_match: boolean;
+      hit_content: string | null;
+    }
+  >(
+    `
+      select ${THREAD_RETURNING_SQL},
+        archived,
+        (title ilike $4 escape '\\') as title_match,
+        hit.content as hit_content
+      from threads
+      left join lateral (
+        select m.content
+        from messages m
+        where m.thread_id = threads.id
+          and m.role in ('user', 'assistant')
+          and m.content ilike $4 escape '\\'
+        order by m.created_at desc
+        limit 1
+      ) hit on true
+      where team_id = $1
+        and workspace_id = $2
+        and parent_thread_id is null
+        and ${threadVisibilityClause(3)}
+        and (title ilike $4 escape '\\' or hit.content is not null)
+      order by ${THREAD_ACTIVITY_SQL} desc, id desc
+      limit $5
+    `,
+    [
+      input.teamId,
+      input.workspaceId,
+      input.viewerUserId,
+      `%${escapeLikePattern(input.query)}%`,
+      input.limit,
+    ],
+  );
+
+  const sourceCounts = await countUsedSourceIdsByThread({
+    teamId: input.teamId,
+    workspaceId: input.workspaceId,
+    threadIds: result.rows.map((row) => row.id),
+  });
+
+  return result.rows.map((row) => ({
+    thread: mapRawThread(row, sourceCounts.get(row.id) ?? 0),
+    archived: row.archived,
+    titleMatch: row.title_match,
+    hitContent: row.hit_content,
+  }));
+}
+
+/**
+ * Archives or restores a top-level thread. The right to do so is the right to
+ * delete it: a plain editor only their own (or legacy creator-less) threads, a
+ * content admin any thread visible to them. A sub-agent thread, an invisible
+ * thread or one out of scope matches no row and returns false. Its sub-agent
+ * threads keep their own flag and stay nested under it.
+ */
+export async function setThreadArchivedRecord(input: {
+  threadId: string;
+  teamId: string;
+  workspaceId: string;
+  viewerUserId: string;
+  isContentAdmin: boolean;
+  archived: boolean;
+}) {
+  const archivableClause = input.isContentAdmin
+    ? threadVisibilityClause(4)
+    : `(created_by = $4 or created_by is null)`;
+  const result = await database.query<{ id: string }>(
+    `
+      update threads
+      set archived = $5,
+          updated_at = now()
+      where id = $1
+        and team_id = $2
+        and workspace_id = $3
+        and parent_thread_id is null
+        and ${archivableClause}
+      returning id
+    `,
+    [
+      input.threadId,
+      input.teamId,
+      input.workspaceId,
+      input.viewerUserId,
+      input.archived,
+    ],
   );
 
   return result.rows.length > 0;
@@ -410,45 +714,39 @@ export async function updateThreadChatPreferencesRecord(input: {
   workspaceId: string;
   chatPreferences: ThreadChatPreferencesPatch;
 }) {
-  const current = await findThreadRecord({
-    threadId: input.threadId,
-    teamId: input.teamId,
-    workspaceId: input.workspaceId,
-  });
-  if (!current) return null;
-
   const updatedAt = new Date();
-  const nextPreferences = mergeThreadChatPreferences(
-    current.chatPreferences,
-    input.chatPreferences,
-  );
-  const result = await database.query<RawThreadRow>(
-    `
+  // The patch is merged into the stored preferences, so the read and the
+  // write must not interleave with another patch: a new chat saves several
+  // preferences at once, and an unlocked read lets the later write restore
+  // the fields the earlier one just changed. The row lock makes concurrent
+  // patches apply one after another.
+  const result = await db.transaction(async (tx) => {
+    const current = await tx.execute<{ chat_preferences_json: unknown }>(sql`
+      select chat_preferences_json
+      from threads
+      where id = ${input.threadId}
+        and team_id = ${input.teamId}
+        and workspace_id = ${input.workspaceId}
+      for update
+    `);
+    const currentRow = current.rows[0];
+    if (!currentRow) return null;
+
+    const nextPreferences = mergeThreadChatPreferences(
+      normalizeThreadChatPreferences(currentRow.chat_preferences_json),
+      input.chatPreferences,
+    );
+    return tx.execute<RawThreadRow>(sql`
       update threads
-      set chat_preferences_json = $4::jsonb,
-          updated_at = greatest(updated_at, $5::timestamptz)
-      where id = $1
-        and team_id = $2
-        and workspace_id = $3
-      returning
-        id,
-        team_id,
-        workspace_id,
-        title,
-        model_settings_json,
-        chat_preferences_json,
-        created_by,
-        created_at,
-        updated_at
-    `,
-    [
-      input.threadId,
-      input.teamId,
-      input.workspaceId,
-      JSON.stringify(nextPreferences),
-      updatedAt.toISOString(),
-    ],
-  );
+      set chat_preferences_json = ${JSON.stringify(nextPreferences)}::jsonb,
+          updated_at = greatest(updated_at, ${updatedAt.toISOString()}::timestamptz)
+      where id = ${input.threadId}
+        and team_id = ${input.teamId}
+        and workspace_id = ${input.workspaceId}
+      returning ${sql.raw(THREAD_RETURNING_SQL)}
+    `);
+  });
+  if (!result) return null;
 
   const row = result.rows[0];
   if (!row) return null;

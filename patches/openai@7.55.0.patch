@@ -1,0 +1,149 @@
+diff --git a/client.d.mts b/client.d.mts
+index 51457796ce304c466d5c06d1116da5a1880036f1..9f7440c71ca5d2e1ae1c15912297ec92b857ce08 100644
+--- a/client.d.mts
++++ b/client.d.mts
+@@ -61,6 +61,15 @@ export interface ClientOptions {
+      * - Mutually exclusive with `workloadIdentity`.
+      */
+     apiKey?: string | ApiKeySetter | null | undefined;
++    /**
++     * SourceWeft opt-in for deployment-owned OpenAI-compatible services without
++     * credentials. Defaults to false; no implicit OPENAI_CUSTOM_HEADERS are used.
++     * Callers must pass apiKey/adminAPIKey: null to suppress environment credentials;
++     * this mode also permits requests without authentication headers.
++     */
++    allowUnauthenticated?: boolean;
++    /** SourceWeft opt-in: use only explicitly supplied headers, ignoring OPENAI_CUSTOM_HEADERS. */
++    ignoreEnvironmentHeaders?: boolean;
+     /**
+      * Defaults to process.env['OPENAI_ADMIN_KEY'].
+      */
+diff --git a/client.d.ts b/client.d.ts
+index a52f8600f08aeb53e4f089fabaa653d724a53792..060fc0264dda05756e1a2df09dffa0f598f944a6 100644
+--- a/client.d.ts
++++ b/client.d.ts
+@@ -61,6 +61,15 @@ export interface ClientOptions {
+      * - Mutually exclusive with `workloadIdentity`.
+      */
+     apiKey?: string | ApiKeySetter | null | undefined;
++    /**
++     * SourceWeft opt-in for deployment-owned OpenAI-compatible services without
++     * credentials. Defaults to false; no implicit OPENAI_CUSTOM_HEADERS are used.
++     * Callers must pass apiKey/adminAPIKey: null to suppress environment credentials;
++     * this mode also permits requests without authentication headers.
++     */
++    allowUnauthenticated?: boolean;
++    /** SourceWeft opt-in: use only explicitly supplied headers, ignoring OPENAI_CUSTOM_HEADERS. */
++    ignoreEnvironmentHeaders?: boolean;
+     /**
+      * Defaults to process.env['OPENAI_ADMIN_KEY'].
+      */
+diff --git a/client.js b/client.js
+index 715395d4832f5609347baa05206210b7c2bb10ae..3df7b238619f589d54b3b665726869035210cf44 100644
+--- a/client.js
++++ b/client.js
+@@ -230,7 +230,7 @@ class OpenAI {
+         if (apiKey && workloadIdentity) {
+             throw new Errors.OpenAIError('The `apiKey` and `workloadIdentity` options are mutually exclusive');
+         }
+-        if (!providerRuntime && !apiKey && !adminAPIKey && !workloadIdentity) {
++        if (options.allowUnauthenticated !== true && !providerRuntime && !apiKey && !adminAPIKey && !workloadIdentity) {
+             throw new Errors.OpenAIError('Missing credentials. Please pass an `apiKey`, `workloadIdentity`, `adminAPIKey`, or set the `OPENAI_API_KEY` or `OPENAI_ADMIN_KEY` environment variable.');
+         }
+         if (!options.dangerouslyAllowBrowser && isRunningInBrowserOrBrowserWorker()) {
+@@ -251,7 +251,7 @@ class OpenAI {
+         this.maxRetries = tslib_1.__classPrivateFieldGet(this, _OpenAI_instances, "m", _OpenAI_normalizeRetries).call(this, options.maxRetries);
+         this.fetch = options.fetch ?? Shims.getDefaultFetch();
+         tslib_1.__classPrivateFieldSet(this, _OpenAI_encoder, Opts.FallbackEncoder, "f");
+-        const customHeadersEnv = provider || credential ? undefined : (0, env_1.readEnv)('OPENAI_CUSTOM_HEADERS');
++        const customHeadersEnv = provider || credential || options.allowUnauthenticated === true || options.ignoreEnvironmentHeaders === true ? undefined : (0, env_1.readEnv)('OPENAI_CUSTOM_HEADERS');
+         if (customHeadersEnv) {
+             const parsed = {};
+             for (const line of customHeadersEnv.split('\n')) {
+@@ -372,7 +372,7 @@ class OpenAI {
+         bearerAuth: true,
+         adminAPIKeyAuth: true,
+     }) {
+-        if (values.get('authorization') || values.get('api-key')) {
++        if (this._options.allowUnauthenticated === true || values.get('authorization') || values.get('api-key')) {
+             return;
+         }
+         if (nulls.has('authorization') || nulls.has('api-key')) {
+diff --git a/client.mjs b/client.mjs
+index deb5b9fa344b5c42fe50f1967c2e9fe910d819dd..4e5cae4bfc29aa3689c163bb786dc2e15f927c68 100644
+--- a/client.mjs
++++ b/client.mjs
+@@ -227,7 +227,7 @@ export class OpenAI {
+         if (apiKey && workloadIdentity) {
+             throw new Errors.OpenAIError('The `apiKey` and `workloadIdentity` options are mutually exclusive');
+         }
+-        if (!providerRuntime && !apiKey && !adminAPIKey && !workloadIdentity) {
++        if (options.allowUnauthenticated !== true && !providerRuntime && !apiKey && !adminAPIKey && !workloadIdentity) {
+             throw new Errors.OpenAIError('Missing credentials. Please pass an `apiKey`, `workloadIdentity`, `adminAPIKey`, or set the `OPENAI_API_KEY` or `OPENAI_ADMIN_KEY` environment variable.');
+         }
+         if (!options.dangerouslyAllowBrowser && isRunningInBrowserOrBrowserWorker()) {
+@@ -248,7 +248,7 @@ export class OpenAI {
+         this.maxRetries = __classPrivateFieldGet(this, _OpenAI_instances, "m", _OpenAI_normalizeRetries).call(this, options.maxRetries);
+         this.fetch = options.fetch ?? Shims.getDefaultFetch();
+         __classPrivateFieldSet(this, _OpenAI_encoder, Opts.FallbackEncoder, "f");
+-        const customHeadersEnv = provider || credential ? undefined : readEnv('OPENAI_CUSTOM_HEADERS');
++        const customHeadersEnv = provider || credential || options.allowUnauthenticated === true || options.ignoreEnvironmentHeaders === true ? undefined : readEnv('OPENAI_CUSTOM_HEADERS');
+         if (customHeadersEnv) {
+             const parsed = {};
+             for (const line of customHeadersEnv.split('\n')) {
+@@ -369,7 +369,7 @@ export class OpenAI {
+         bearerAuth: true,
+         adminAPIKeyAuth: true,
+     }) {
+-        if (values.get('authorization') || values.get('api-key')) {
++        if (this._options.allowUnauthenticated === true || values.get('authorization') || values.get('api-key')) {
+             return;
+         }
+         if (nulls.has('authorization') || nulls.has('api-key')) {
+diff --git a/src/client.ts b/src/client.ts
+index 60cfeed023c44a397bdb70a602f26b0009681308..3906db639a5a7368e1d31e9733a81438efb377cc 100644
+--- a/src/client.ts
++++ b/src/client.ts
+@@ -344,6 +344,15 @@ export interface ClientOptions {
+    * - Mutually exclusive with `workloadIdentity`.
+    */
+   apiKey?: string | ApiKeySetter | null | undefined;
++  /**
++   * SourceWeft opt-in for deployment-owned OpenAI-compatible services without
++   * credentials. Defaults to false; no implicit OPENAI_CUSTOM_HEADERS are used.
++   * Callers must pass apiKey/adminAPIKey: null to suppress environment credentials;
++   * this mode also permits requests without authentication headers.
++   */
++  allowUnauthenticated?: boolean;
++  /** SourceWeft opt-in: use only explicitly supplied headers, ignoring OPENAI_CUSTOM_HEADERS. */
++  ignoreEnvironmentHeaders?: boolean;
+ 
+   /**
+    * Defaults to process.env['OPENAI_ADMIN_KEY'].
+@@ -627,7 +636,7 @@ export class OpenAI {
+       throw new Errors.OpenAIError('The `apiKey` and `workloadIdentity` options are mutually exclusive');
+     }
+ 
+-    if (!providerRuntime && !apiKey && !adminAPIKey && !workloadIdentity) {
++    if (options.allowUnauthenticated !== true && !providerRuntime && !apiKey && !adminAPIKey && !workloadIdentity) {
+       throw new Errors.OpenAIError(
+         'Missing credentials. Please pass an `apiKey`, `workloadIdentity`, `adminAPIKey`, or set the `OPENAI_API_KEY` or `OPENAI_ADMIN_KEY` environment variable.',
+       );
+@@ -655,7 +664,7 @@ export class OpenAI {
+     this.fetch = options.fetch ?? Shims.getDefaultFetch();
+     this.#encoder = Opts.FallbackEncoder;
+ 
+-    const customHeadersEnv = provider || credential ? undefined : readEnv('OPENAI_CUSTOM_HEADERS');
++    const customHeadersEnv = provider || credential || options.allowUnauthenticated === true || options.ignoreEnvironmentHeaders === true ? undefined : readEnv('OPENAI_CUSTOM_HEADERS');
+     if (customHeadersEnv) {
+       const parsed: Record<string, string> = {};
+       for (const line of customHeadersEnv.split('\n')) {
+@@ -812,7 +821,7 @@ export class OpenAI {
+       adminAPIKeyAuth: true,
+     },
+   ) {
+-    if (values.get('authorization') || values.get('api-key')) {
++    if (this._options.allowUnauthenticated === true || values.get('authorization') || values.get('api-key')) {
+       return;
+     }
+     if (nulls.has('authorization') || nulls.has('api-key')) {

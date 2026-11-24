@@ -7,6 +7,7 @@ import type { ModelUsageContext } from "./billing/context";
 
 const rawMocks = vi.hoisted(() => ({
   getRawModelGatewayClient: vi.fn(),
+  getRawStandaloneGatewayClient: vi.fn(),
   createRawAgentChatModel: vi.fn(),
 }));
 
@@ -123,6 +124,7 @@ function streamOf(events: unknown[]) {
 
 beforeEach(() => {
   rawMocks.getRawModelGatewayClient.mockReset();
+  rawMocks.getRawStandaloneGatewayClient.mockReset();
   rawMocks.createRawAgentChatModel.mockReset();
   thinkingMocks.resolveChatThinkingWithDefaults.mockReset();
   // Passthrough by default, mirroring the real resolver's no-op cases, so the
@@ -151,6 +153,61 @@ test("a non-streaming call settles exactly once with the returned usage", async 
   assert.equal(traces.length, 1);
   assert.equal(traces[0]?.billingStatus, "metered");
   assert.equal(meterUsage.mock.calls.length, 1);
+});
+
+test("a standalone provider snapshot runs on its own client and still settles once", async () => {
+  const gateway = fakeGateway();
+  rawMocks.getRawStandaloneGatewayClient.mockReturnValue(gateway);
+  const meterUsage = meterUsageStub();
+  const standaloneConfig = { versionId: "standalone:feature" } as never;
+
+  const traces = await withBilledModelGateway(
+    {
+      billing: createBilling(),
+      context,
+      standaloneConfig,
+      meterUsage: meterUsage as never,
+    },
+    async (gw, scope) => {
+      await gw.chat.complete({ model: "feature", messages: [] } as never, {
+        ...chatOptions,
+        profileAlias: "feature",
+        gatewayConfigId: null,
+      });
+      return scope.meteredCalls();
+    },
+  );
+
+  assert.equal(
+    rawMocks.getRawStandaloneGatewayClient.mock.calls[0]![0],
+    standaloneConfig,
+  );
+  assert.equal(rawMocks.getRawModelGatewayClient.mock.calls.length, 0);
+  assert.equal(traces.length, 1);
+  assert.equal(traces[0]?.billingStatus, "metered");
+  assert.equal(traces[0]?.gatewayConfigId, null);
+  assert.equal(meterUsage.mock.calls.length, 1);
+});
+
+test("a standalone snapshot cannot be combined with a gateway config", async () => {
+  for (const extra of [
+    { gatewayConfigId: "gw_1" },
+    { routedConfig: { versionId: "v1" } as never },
+  ]) {
+    await assert.rejects(
+      withBilledModelGateway(
+        {
+          billing: createBilling(),
+          context,
+          standaloneConfig: { versionId: "standalone:feature" } as never,
+          ...extra,
+        },
+        async () => undefined,
+      ),
+      /standalone provider snapshot cannot be combined/,
+    );
+  }
+  assert.equal(rawMocks.getRawStandaloneGatewayClient.mock.calls.length, 0);
 });
 
 test("the caller cannot override the billing identity in request metadata", async () => {

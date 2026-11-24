@@ -32,9 +32,12 @@ const connector: ConnectorItem = {
 
 async function card(input: {
   connector: ConnectorItem | null;
+  item?: typeof item;
   status: ConnectorCatalogStatus;
+  supportsIndexing?: boolean;
 }) {
   const handlers = {
+    onAddFeed: vi.fn(),
     onCancelConnector: vi.fn(),
     onConfigure: vi.fn(),
     onConnectConnector: vi.fn(),
@@ -43,11 +46,15 @@ async function card(input: {
     onReconnectConnector: vi.fn(),
   };
   const mounted = await mountWithIntl(
-    createElement(ConnectorCatalogCard, { item, ...input, ...handlers }),
+    createElement(ConnectorCatalogCard, {
+      item,
+      ...input,
+      ...handlers,
+    }),
   );
   const buttons = Array.from(mounted.container.querySelectorAll("button"));
   const action = buttons[buttons.length - 1]!;
-  return { action, handlers };
+  return { action, handlers, container: mounted.container };
 }
 
 test("a connector that needs attention offers Reconnect", async () => {
@@ -86,5 +93,100 @@ test("a provider without a connector still offers Connect", async () => {
   await act(async () => action.click());
 
   expect(handlers.onConnectConnector).toHaveBeenCalledWith(item);
+  expect(handlers.onReconnectConnector).not.toHaveBeenCalled();
+});
+
+test("a tools-only connector's card drops 'Optional indexing' but keeps the rest", async () => {
+  const gmail = connectorCatalog.find((entry) => entry.id === "gmail")!;
+  const { container } = await card({
+    connector: null,
+    item: gmail,
+    status: { kind: "available", label: "Available", detail: "Ready" },
+    supportsIndexing: false,
+  });
+
+  expect(container.textContent).not.toContain("Optional indexing");
+  expect(container.textContent).toContain("Search");
+});
+
+test("today's indexable Gmail card keeps 'Optional indexing'", async () => {
+  const gmail = connectorCatalog.find((entry) => entry.id === "gmail")!;
+  const { container } = await card({
+    connector: null,
+    item: gmail,
+    status: { kind: "available", label: "Available", detail: "Ready" },
+  });
+
+  expect(container.textContent).toContain("Optional indexing");
+});
+
+test("a tools-only Gmail card shows the Search API type badge, not Indexable", async () => {
+  const gmail = connectorCatalog.find((entry) => entry.id === "gmail")!;
+  const { container } = await card({
+    connector: null,
+    item: gmail,
+    status: { kind: "available", label: "Available", detail: "Ready" },
+    supportsIndexing: false,
+  });
+
+  expect(container.textContent).toContain("Search API");
+  expect(container.textContent).not.toContain("Indexable");
+});
+
+test("today's indexable Gmail card shows the Indexable type badge", async () => {
+  const gmail = connectorCatalog.find((entry) => entry.id === "gmail")!;
+  const { container } = await card({
+    connector: null,
+    item: gmail,
+    status: { kind: "available", label: "Available", detail: "Ready" },
+    supportsIndexing: true,
+  });
+
+  expect(container.textContent).toContain("Indexable");
+});
+
+test("a tools-only Gmail card description does not mention indexing", async () => {
+  const gmail = connectorCatalog.find((entry) => entry.id === "gmail")!;
+  const { container } = await card({
+    connector: null,
+    item: gmail,
+    status: { kind: "available", label: "Available", detail: "Ready" },
+    supportsIndexing: false,
+  });
+
+  expect(container.textContent).not.toContain("optionally index");
+  expect(container.textContent).toContain("send messages you approve");
+});
+
+test("an add-only RSS card offers Add feed and never starts OAuth", async () => {
+  const rss = connectorCatalog.find((entry) => entry.id === "rss")!;
+  const onAddFeed = vi.fn();
+  const handlers = {
+    onCancelConnector: vi.fn(),
+    onConfigure: vi.fn(),
+    onConnectConnector: vi.fn(),
+    onCreateConnector: vi.fn(),
+    onDisconnect: vi.fn(),
+    onReconnectConnector: vi.fn(),
+  };
+  const mounted = await mountWithIntl(
+    createElement(ConnectorCatalogCard, {
+      item: rss,
+      connector: null,
+      status: { kind: "available", label: "Available", detail: "Ready" },
+      onAddFeed,
+      ...handlers,
+    }),
+  );
+  const buttons = Array.from(mounted.container.querySelectorAll("button"));
+  const action = buttons[buttons.length - 1]!;
+
+  expect(action.textContent).toBe("Add feed");
+  expect(action.disabled).toBe(false);
+  await act(async () => action.click());
+
+  expect(onAddFeed).toHaveBeenCalledWith(rss);
+  expect(handlers.onConnectConnector).not.toHaveBeenCalled();
+  expect(handlers.onCreateConnector).not.toHaveBeenCalled();
   expect(handlers.onReconnectConnector).not.toHaveBeenCalled();
 });

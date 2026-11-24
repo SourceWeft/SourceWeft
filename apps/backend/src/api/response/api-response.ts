@@ -3,10 +3,11 @@ import type { Context } from "hono";
 import { ZodError } from "zod";
 import { isBillingError } from "@sourceweft/contracts/billing-runtime";
 import { isConnectorError } from "../../modules/connectors/errors";
+import { isAgentTaskError } from "../../modules/agent-tasks/errors";
+import { isAssistantError } from "../../modules/assistants/errors";
 import { isContentError } from "../../modules/content/errors";
 import { isMcpClaimError } from "../../modules/market/claims/errors";
 import { isMcpError } from "../../modules/mcp/errors";
-import { PreviewAccessError } from "../../modules/preview/errors";
 
 export type ApiErrorBody = {
   code: string;
@@ -95,12 +96,33 @@ export function toApiError(error: unknown): ApiError {
     return error;
   }
 
-  if (error instanceof PreviewAccessError) {
-    return new ApiError(error.statusCode, error.code, error.message);
+  if (isContentError(error)) {
+    const details =
+      error.exposeDetails === true &&
+      error.details &&
+      typeof error.details === "object" &&
+      !Array.isArray(error.details)
+        ? (error.details as Record<string, unknown>)
+        : undefined;
+    return new ApiError(error.statusCode, error.code, error.message, details);
   }
 
-  if (isContentError(error)) {
-    return new ApiError(error.statusCode, error.code, error.message);
+  if (isAgentTaskError(error)) {
+    return new ApiError(
+      error.statusCode,
+      error.code,
+      error.message,
+      error.details,
+    );
+  }
+
+  if (isAssistantError(error)) {
+    return new ApiError(
+      error.statusCode,
+      error.code,
+      error.message,
+      error.details,
+    );
   }
 
   if (isMcpClaimError(error)) {

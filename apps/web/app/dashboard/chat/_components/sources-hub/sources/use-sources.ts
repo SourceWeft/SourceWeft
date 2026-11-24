@@ -27,6 +27,7 @@ import { mapSourcesToUi } from "../source-mapping";
 import { resolveWorkspaceSourceHydration } from "../source-refresh-state";
 import { areStringArraysEqual } from "../lib/format";
 import { getErrorMessage } from "../lib/errors";
+import { youTubeErrorCodeOf } from "../youtube/errors";
 import type { useAddSourceDialogState } from "./use-add-source-dialog";
 
 const SOURCE_TREE_EXPANSION_STORAGE_PREFIX = "chat:sources-hub:source-tree:v1";
@@ -1156,7 +1157,12 @@ export function useSources(input: {
       addSourceDialog.close(false);
       await refreshSources();
     } catch (error) {
-      toast.error(getErrorMessage(error, t("toasts.sources.urlAddFailed")));
+      const youTubeCode = youTubeErrorCodeOf(error);
+      toast.error(
+        youTubeCode
+          ? t(`youtube.error.${youTubeCode}`)
+          : getErrorMessage(error, t("toasts.sources.urlAddFailed")),
+      );
     } finally {
       setIsSubmitting(false);
     }

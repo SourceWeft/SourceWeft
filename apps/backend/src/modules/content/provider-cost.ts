@@ -546,7 +546,8 @@ export function computeProviderCostFromPricing(input: {
 }
 
 export async function computeProviderCost(input: {
-  gatewayConfigId: string;
+  /** Null for a feature's own provider snapshot, which is never BYOK. */
+  gatewayConfigId: string | null;
   modelKind: ModelProfileKind;
   profileAlias: string;
   usage?: UsageInfo;
@@ -568,7 +569,10 @@ export async function computeProviderCost(input: {
 
   const lookups = input.lookups ?? directProviderCostLookups;
 
-  if (await lookups.isGatewayByok(input.gatewayConfigId)) {
+  if (
+    input.gatewayConfigId !== null &&
+    (await lookups.isGatewayByok(input.gatewayConfigId))
+  ) {
     return {
       providerCostUsd: 0,
       pricingSnapshot: null,

@@ -28,7 +28,7 @@
   "pnpm": {
     "overrides": {
       "@google/generative-ai": "0.24.1",
-      "openai": "6.49.0",
+      "openai": "7.55.0",
       "fast-uri": "^3.1.9",
       "body-parser@2": "^2.4.0",
       "qs": "6.16.1",
@@ -63,7 +63,7 @@
       "js-yaml@5": "^5.4.1",
       "hono": "4.13.16",
       "@anthropic-ai/sandbox-runtime>zod": "4.6.7",
-      "next": "16.4.2",
+      "next": "16.4.5",
       "creem": "1.6.0",
       "proxy-addr": "2.0.8",
       "source-map-js": "1.2.2",
@@ -106,12 +106,11 @@
     ],
     "patchedDependencies": {
       "@google/generative-ai@0.24.1": "patches/@google__generative-ai@0.24.1.patch",
-      "@langchain/google-genai@2.2.0": "patches/@langchain__google-genai@2.2.0.patch",
-      "openai@6.49.0": "patches/openai@6.49.0.patch",
+      "@langchain/google-genai@2.3.6": "patches/@langchain__google-genai@2.3.6.patch",
+      "openai@7.55.0": "patches/openai@7.55.0.patch",
       "streamdown@2.5.0": "patches/streamdown@2.5.0.patch",
-      "langchain@1.5.10": "patches/langchain@1.5.10.patch",
-      "deepagents@1.13.1": "patches/deepagents@1.13.1.patch",
-      "@anthropic-ai/sandbox-runtime@0.0.81": "patches/@anthropic-ai__sandbox-runtime@0.0.81.patch"
+      "@anthropic-ai/sandbox-runtime@0.0.81": "patches/@anthropic-ai__sandbox-runtime@0.0.81.patch",
+      "deepagents@1.16.5": "patches/deepagents@1.16.5.patch"
     }
   },
   "engines": {

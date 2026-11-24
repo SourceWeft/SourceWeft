@@ -38,7 +38,9 @@ import {
   connectorCatalogCategories,
   connectorCatalogForAvailableTypes,
 } from "./catalog";
-import type { GmailUsageMode } from "./gmail-mode";
+import { AddFeedDialog } from "./add-feed-dialog";
+import { GmailBrokerNoticeDialog } from "./gmail-broker-notice-dialog";
+import { needsGmailBrokerNotice, type GmailUsageMode } from "./gmail-mode";
 import {
   ActiveConnectorCard,
   ConnectorCatalogCard,
@@ -52,9 +54,11 @@ import type {
   ConnectorAccountItem,
   ConnectorCatalogItem,
   ConnectorItem,
+  ConnectorManifestInfo,
   ConnectorReadinessState,
   ConnectorWebhookConfig,
   ConnectorWebhookEventItem,
+  FeedCheckResult,
 } from "./types";
 
 export type ManageConnectorsTab = "all" | "active";
@@ -91,6 +95,7 @@ export function ManageConnectorsDialog({
   accounts,
   availableConnectorTypes,
   connectorBusyById,
+  connectorManifestInfoByType,
   connectorReadinessById,
   connectors,
   connectorWaitingByType,
@@ -100,10 +105,12 @@ export function ManageConnectorsDialog({
   onCancelConnector,
   onConnectConnector,
   onCopyWebhook,
+  onCheckFeed,
   onCreateConnector,
   onDisconnectConnector,
   onOpenChange,
   onOpenSettings,
+  onSubmitFeed,
   onSyncConnector,
   onToggleConnectorStatus,
   open,
@@ -113,6 +120,7 @@ export function ManageConnectorsDialog({
   accounts: ConnectorAccountItem[];
   availableConnectorTypes: string[];
   connectorBusyById: Record<string, boolean>;
+  connectorManifestInfoByType: Record<string, ConnectorManifestInfo>;
   connectorReadinessById: Record<string, ConnectorReadinessState>;
   connectors: ConnectorItem[];
   connectorWaitingByType: Record<string, boolean>;
@@ -124,11 +132,13 @@ export function ManageConnectorsDialog({
     item: ConnectorCatalogItem,
     gmailMode?: GmailUsageMode,
   ) => void;
+  onCheckFeed: (feedUrl: string) => Promise<FeedCheckResult>;
   onCopyWebhook: (value: string) => void;
   onCreateConnector: (item: ConnectorCatalogItem) => void;
   onDisconnectConnector: (connector: ConnectorItem) => void;
   onOpenChange: (open: boolean) => void;
   onOpenSettings: (connector: ConnectorItem) => void;
+  onSubmitFeed: (input: { name: string; feedUrl: string }) => Promise<void>;
   onSyncConnector: (connector: ConnectorItem) => void;
   onToggleConnectorStatus: (connector: ConnectorItem) => void;
   open: boolean;
@@ -143,6 +153,12 @@ export function ManageConnectorsDialog({
     null,
   );
   const [gmailMode, setGmailMode] = useState<GmailUsageMode>("tools");
+  const [pendingGmailBrokerNotice, setPendingGmailBrokerNotice] =
+    useState<ConnectorCatalogItem | null>(null);
+  // Add-only catalog item (`addMode`) whose add dialog is open.
+  const [pendingFeed, setPendingFeed] = useState<ConnectorCatalogItem | null>(
+    null,
+  );
   const activeConnectors = connectors.filter(
     (connector) => connector.status !== "disabled",
   );
@@ -169,6 +185,19 @@ export function ManageConnectorsDialog({
   function beginConnect(item: ConnectorCatalogItem) {
     if (item.id !== "gmail") {
       onConnectConnector(item);
+      return;
+    }
+    const gmailManifestInfo = connectorManifestInfoByType.gmail;
+    if (gmailManifestInfo?.supportsIndexing === false) {
+      // A tools-only Gmail has no mode to choose: there is nothing to index.
+      // A Composio-brokered authorization still needs the notice below before
+      // redirecting; any other tools-only broker (none exists today) connects
+      // directly, same as it would for any other non-indexable connector.
+      if (needsGmailBrokerNotice(item.id, gmailManifestInfo)) {
+        setPendingGmailBrokerNotice(item);
+        return;
+      }
+      onConnectConnector(item, "tools");
       return;
     }
     setGmailMode("tools");
@@ -320,6 +349,7 @@ export function ManageConnectorsDialog({
                                 connector={connector}
                                 item={item}
                                 key={item.id}
+                                onAddFeed={setPendingFeed}
                                 onCancelConnector={onCancelConnector}
                                 onConfigure={() => {
                                   if (connector) {
@@ -331,8 +361,12 @@ export function ManageConnectorsDialog({
                                 onConnectConnector={beginConnect}
                                 onCreateConnector={onCreateConnector}
                                 onDisconnect={onDisconnectConnector}
-                                onReconnectConnector={onConnectConnector}
+                                onReconnectConnector={beginConnect}
                                 status={status}
+                                supportsIndexing={
+                                  connectorManifestInfoByType[item.id]
+                                    ?.supportsIndexing
+                                }
                               />
                             );
                           })}
@@ -467,6 +501,24 @@ export function ManageConnectorsDialog({
           </div>
         </DialogContent>
       </Dialog>
+      <AddFeedDialog
+        onAdd={onSubmitFeed}
+        onCheck={onCheckFeed}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setPendingFeed(null);
+        }}
+        open={pendingFeed !== null}
+      />
+      <GmailBrokerNoticeDialog
+        item={pendingGmailBrokerNotice}
+        onContinue={(item) => {
+          onConnectConnector(item, "tools");
+          setPendingGmailBrokerNotice(null);
+        }}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setPendingGmailBrokerNotice(null);
+        }}
+      />
     </Dialog>
   );
 }

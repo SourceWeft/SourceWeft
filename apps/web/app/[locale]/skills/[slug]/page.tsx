@@ -15,6 +15,7 @@ import {
 import { cn } from "@sourceweft/ui-web/lib/utils";
 
 import { routing } from "../../../../i18n/routing";
+import { fitSeoTitle } from "../../../../lib/seo-title";
 import { buildTranslatedAlternates } from "../../../../lib/i18n/metadata";
 import { CatalogBadgeSnippet } from "../../../_components/market/catalog-badge-snippet";
 import { UntrustedMarkdown } from "../../../_components/market/untrusted-markdown";
@@ -158,14 +159,15 @@ export async function generateMetadata({
   }
   const t = await getTranslations({ locale, namespace: "publicSkills.detail" });
   try {
-    const { skill, source, canonicalSlug } = await loadSkill(
+    const { skill, canonicalSlug } = await loadSkill(
       decodeURIComponent(slug),
     );
-    const title = t("metaTitle", {
-      name: source.repoSubpath
-        ? `${skill.displayName} · ${source.repoSubpath}`
-        : skill.displayName,
-    });
+    // Name first; the repo path is dropped (#735) so the title stays short.
+    const title = fitSeoTitle(
+      (name) => t("metaTitle", { name }),
+      skill.displayName,
+      skill.slug,
+    );
     // The body is the author's English; a locale counts as its own page only
     // where the skill has an AI overview written in it (§20). Each read is
     // the same cached market read the page body makes for that locale.

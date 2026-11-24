@@ -52,7 +52,11 @@ test("only a manual testflight dispatch signs and uploads, from the gated enviro
   );
   assert(testflight.includes("environment: ios-testflight"));
   assert(testflight.includes("--export-method app-store-connect"));
-  for (const name of ["IOS_CERTIFICATE", "IOS_CERTIFICATE_PASSWORD", "IOS_MOBILE_PROVISION"]) {
+  for (const name of [
+    "IOS_CERTIFICATE",
+    "IOS_CERTIFICATE_PASSWORD",
+    "IOS_MOBILE_PROVISION",
+  ]) {
     assert(
       testflight.includes(`${name}: `),
       `TestFlight job does not set the Tauri signing variable ${name}`,
@@ -68,6 +72,25 @@ test("only a manual testflight dispatch signs and uploads, from the gated enviro
     testflight.indexOf("check-testflight-secrets") <
       testflight.indexOf("install-signing"),
     "secrets must be checked before signing",
+  );
+});
+
+test("both jobs build with Xcode 26, which App Store Connect requires", () => {
+  for (const name of ["verify", "testflight"]) {
+    assert.match(
+      jobBlock(name),
+      /xcode-select -s \/Applications\/Xcode_26\.\d+\.app/,
+      `${name} does not select Xcode 26`,
+    );
+  }
+});
+
+// App Store Connect rejects an upload whose build number it has seen, and the
+// project's CFBundleVersion is the fixed app version, so each run adds its own.
+test("every TestFlight archive carries a new build number", () => {
+  assert.match(
+    jobBlock("testflight"),
+    /tauri ios build [^\n]*--build-number \$\{\{ github\.run_number \}\}/,
   );
 });
 

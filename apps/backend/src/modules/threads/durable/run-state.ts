@@ -152,12 +152,24 @@ export function isStaleActiveRun(run: ChatThreadRunRecord, nowMs = Date.now()) {
   return silenceMs !== null && silenceMs > STALE_ACTIVE_RUN_TIMEOUT_MS;
 }
 
+/**
+ * Whether `error` is PostgreSQL's unique violation of `constraint`. drizzle
+ * (0.45) throws a `DrizzleQueryError` with the driver's error as its
+ * `cause`, so both the error and its cause are checked.
+ */
 export function isUniqueConstraintError(error: unknown, constraint: string) {
-  const record =
-    error && typeof error === "object" && !Array.isArray(error)
-      ? (error as Record<string, unknown>)
-      : null;
-  return record?.code === "23505" && record.constraint === constraint;
+  for (const candidate of [
+    error,
+    (error as { cause?: unknown } | null)?.cause,
+  ]) {
+    const record =
+      candidate && typeof candidate === "object" && !Array.isArray(candidate)
+        ? (candidate as Record<string, unknown>)
+        : null;
+    if (record?.code === "23505" && record.constraint === constraint)
+      return true;
+  }
+  return false;
 }
 
 export function parseSsePayload(

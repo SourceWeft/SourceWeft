@@ -1,0 +1,20 @@
+{
+  "tag": "v0.3.0-rc.10",
+  "releasedAt": "2026-11-19",
+  "category": "Release",
+  "commit": "39efa11b4368db9a2131cd3ee30c523a9def4add",
+  "title": "Centred macOS window buttons, voice dictation and more connectors",
+  "summary": "The macOS desktop app's window buttons now sit on the centre of the top row, and the sidebar's top row was rebuilt around them. Chat gains voice dictation in the message box, single sign-on for organizations, and a shared selection screen for connectors, with GitHub and Gmail connectors added. Update packages remain Tauri-signed on the Preview channel; the macOS app is signed and notarized, Windows installers are not publisher-signed, and stable/latest promotion is unchanged.",
+  "items": [
+    "In the macOS app the close, minimize and zoom buttons are centred on the top row, level with the conversation title. The sidebar's top row now holds the conversation list's actions (new agent chat, members, search, filter) next to the buttons, with the workspace switcher on the row below.",
+    "Voice dictation: a microphone button beside the image button in the message box turns speech into text. Speech is cut at pauses, each part is transcribed by the server's speech provider and inserted in the order spoken, nothing is sent automatically and audio is not stored. It appears only on servers that have set up a dictation speech profile, and it is not offered in the iOS and Android apps.",
+    "Organizations can offer single sign-on through OIDC or SAML 2.0.",
+    "Connectors share one selection screen for choosing what to sync, and Dropbox now uses it. A GitHub connector (a read-only GitHub App with up to 20 selected repositories, and tools to search and read issues, pull requests and discussions) and a Gmail option through Composio (live search and read tools; SourceWeft holds no Gmail token) were added, along with a Linear connector (choose teams and projects, with live tools). Each is available only on servers that set it up.",
+    "Concurrent changes to chat preferences no longer overwrite each other, and a narrated video presentation now ends its turn with a closing summary after it is published.",
+    "A new draft of a skill now retires the older drafts of the same skill.",
+    "The agent runtime was updated (deepagents 1.15.1), and skills invoked in a message are loaded before the model's first call.",
+    "Security: Next.js was updated to 16.4.5 for a published advisory."
+  ],
+  "githubPrerelease": false,
+  "desktopPublicationPolicy": "macos-signed"
+}

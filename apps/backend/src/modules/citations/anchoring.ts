@@ -400,7 +400,8 @@ function withSemanticRecord(
   };
 }
 
-const SEMANTIC_MAX_CLAIMS_PER_CITATION = 3;
+/** Claims of one citation that go to the by-meaning pass. */
+export const SEMANTIC_MAX_CLAIMS_PER_CITATION = 3;
 
 /**
  * Re-judges, by meaning, the citations the word matcher called weak when the

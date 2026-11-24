@@ -147,7 +147,7 @@
         },
         "create": {
           "title": "让成果成为下一步的起点",
-          "description": "将资料转化为报告、演示、学习指南等成果。检查输出、提出修改，再回到保存的对话与文件中继续完善。",
+          "description": "将资料转化为报告、演示、学习指南、对比表格等成果。检查输出、提出修改，再回到保存的对话与文件中继续完善。",
           "bullets": [
             "报告、演示与创作成果",
             "检查并持续完善生成结果",
@@ -237,7 +237,7 @@
         },
         "artifacts": {
           "title": "AI 应当帮助人们打造经得起时间的成果",
-          "body": "不止于对话，SourceWeft 旨在把来源材料转化为可反复回顾的学习指南、常见问答、时间线、简报与音频概览。"
+          "body": "不止于对话，SourceWeft 旨在把来源材料转化为可反复回顾的学习指南、常见问答、时间线、简报、对比表格与音频概览。"
         }
       }
     },
@@ -1006,7 +1006,9 @@
       "chat": "对话",
       "more": "更多",
       "me": "我",
-      "mainNavigation": "主导航"
+      "mainNavigation": "主导航",
+      "scheduled": "定时任务",
+      "assistant": "助理"
     },
     "sidebar": {
       "newChat": "新建对话",
@@ -1041,13 +1043,42 @@
       "all": "所有对话",
       "shared": "共享",
       "private": "私密",
+      "scheduled": "定时任务",
+      "assistant": "助理",
       "archived": "归档",
       "clearFilter": "清除{filter}筛选",
       "openActions": "打开对话操作",
       "makePrivate": "设为私密",
       "makeVisible": "设为工作区可见",
       "archive": "归档",
+      "unarchive": "取消归档",
+      "archiveError": "无法归档此对话。",
+      "unarchiveError": "无法取消归档此对话。",
+      "rename": "重命名",
+      "renameLabel": "对话标题",
+      "renameError": "无法重命名此对话。",
+      "pin": "置顶",
+      "unpin": "取消置顶",
+      "pinError": "无法更新置顶。",
+      "pinLimit": "最多可置顶 {count} 个对话，请先取消一个置顶。",
+      "pinned": "已置顶",
+      "archivedBadge": "已归档",
+      "searching": "正在搜索…",
+      "searchEmpty": "没有匹配的对话。",
+      "searchError": "搜索失败，请重试。",
+      "export": "导出为 Markdown",
+      "exporting": "正在准备导出…",
+      "exportError": "无法导出此对话。",
+      "share": "分享",
       "delete": "删除",
+      "deleteDialog": {
+        "title": "删除这个对话？",
+        "description": "“{title}”将被永久删除，包括其中的消息和它创建的子智能体对话。如果它有公开链接，链接将失效。此操作无法撤销。",
+        "cancel": "取消",
+        "confirm": "删除",
+        "deleting": "正在删除…",
+        "error": "无法删除此对话。"
+      },
       "nowPrivate": "对话已设为私密",
       "nowVisible": "对话现在对工作区可见",
       "visibilityError": "无法更改此对话的可见性。",
@@ -1065,6 +1096,8 @@
       "filterEmpty": {
         "shared": "没有共享对话。",
         "private": "没有私密对话。",
+        "scheduled": "没有定时任务的结果。",
+        "assistant": "没有助理工单。",
         "archived": "没有归档对话。"
       },
       "loading": "加载中…",
@@ -1080,7 +1113,23 @@
       "clearAllButton": "清除全部",
       "addSubagent": "添加子智能体",
       "openInNewWindow": "在新窗口中打开",
-      "openBesideParent": "在父会话旁打开"
+      "openBesideParent": "在父会话旁打开",
+      "shareDialog": {
+        "title": "分享对话",
+        "notSharedDescription": "拿到链接的人可以看到这个对话现在的样子。之后的新消息不会公开，除非你更新链接。",
+        "createLink": "创建链接",
+        "copy": "复制",
+        "copied": "已复制",
+        "updateLink": "更新链接",
+        "stopSharing": "停止分享",
+        "stopSharingConfirm": "停止分享这个对话？链接将失效。",
+        "snapshotFrom": "快照时间：{date}",
+        "allowSearchEngines": "允许搜索引擎收录",
+        "allowSearchEnginesOff": "关闭时，只有拿到链接的人能看到。",
+        "views": "{count} 次浏览",
+        "updateError": "无法更新分享设置。",
+        "forbidden": "只有对话的创建者或工作区管理员可以分享。"
+      }
     },
     "account": {
       "accountAndSettings": "账户与设置",
@@ -1105,36 +1154,27 @@
     "mobileMe": {
       "signOut": "退出登录",
       "signingOut": "正在退出登录…",
-      "endSession": "结束此会话",
-      "observeDescription": "LLM 追踪、指标和时间线",
       "panels": {
         "account": {
-          "label": "个人资料",
-          "description": "账户、头像、主题和偏好设置"
+          "label": "个人资料"
         },
         "team": {
-          "label": "团队",
-          "description": "团队切换、成员和邀请"
+          "label": "团队"
         },
         "workspace": {
-          "label": "工作区",
-          "description": "谁可以查看和使用此工作区"
+          "label": "工作区"
         },
         "usage": {
-          "label": "用量",
-          "description": "套餐用量和近期活动"
+          "label": "用量"
         },
         "billing": {
-          "label": "账单",
-          "description": "订阅、套餐和账单门户"
+          "label": "账单"
         },
         "approvals": {
-          "label": "批准",
-          "description": "你选择始终允许的操作"
+          "label": "批准"
         },
         "about": {
-          "label": "关于",
-          "description": "版本和构建详情"
+          "label": "关于"
         }
       }
     },
@@ -1683,6 +1723,124 @@
       "logo": "{name} 标志"
     }
   },
+  "dashboardAssistant": {
+    "page": {
+      "title": "工作区助理",
+      "subtitle": "在共享动态里提出工作请求。助理会为每个请求开一个工单，并在这里回报进度。",
+      "loading": "正在加载助理…",
+      "loadError": "无法加载助理。",
+      "feedHeading": "动态",
+      "ticketsHeading": "工单",
+      "steward": "负责人：{name}"
+    },
+    "status": {
+      "active": "运行中",
+      "paused": "已暂停"
+    },
+    "statusReason": {
+      "steward_left": "负责人已离开工作区，助理已暂停。管理员可以指定新的负责人，然后恢复运行。",
+      "by_admin": "已由工作区成员暂停。"
+    },
+    "enable": {
+      "title": "助理尚未启用",
+      "body": "启用后，成员在共享动态里提出工作请求，助理把每个请求作为单独的工单来处理，费用由提出请求的人支付。",
+      "button": "启用助理",
+      "askAdmin": "请联系工作区管理员启用助理。"
+    },
+    "feed": {
+      "empty": "还没有消息。在下方向助理提出请求吧。",
+      "loadError": "无法加载动态。",
+      "loadOlder": "加载更早的消息",
+      "showMore": "展开",
+      "showLess": "收起",
+      "you": "你",
+      "assistant": "助理",
+      "formerMember": "已离开的成员",
+      "ticket": "工单：{title}",
+      "openConversation": "打开对话",
+      "event": {
+        "created": "新工单",
+        "ready": "已完成",
+        "waiting": "等待答复",
+        "blocked": "受阻",
+        "failed": "失败",
+        "dropped": "已放弃"
+      }
+    },
+    "composer": {
+      "label": "给助理发送消息",
+      "placeholder": "请助理帮你做点什么…",
+      "send": "发送",
+      "sending": "正在发送…",
+      "hint": "按 {shortcut} 发送。",
+      "paused": "助理已暂停，暂不接收新消息。",
+      "readOnly": "你可以查看动态，但不能在这个工作区发送消息。",
+      "tooLong": "消息最多 {max} 个字符。",
+      "sendFailed": "消息没有发送成功，内容还在输入框里，请重试。"
+    },
+    "tickets": {
+      "groups": {
+        "needsPerson": "需要你处理",
+        "inProgress": "进行中",
+        "idle": "空闲"
+      },
+      "empty": "没有未结束的工单。",
+      "loadError": "无法加载工单。",
+      "requestedBy": "由 {name} 提出",
+      "retry": "重试",
+      "close": "关闭",
+      "openConversation": "打开对话",
+      "stage": {
+        "queued": "排队中",
+        "working": "处理中",
+        "waiting_person": "等待处理",
+        "idle": "空闲",
+        "ended": "已结束"
+      },
+      "blockedReason": {
+        "credit_cap": "已停止：达到额度上限。",
+        "insufficient_credits": "已停止：提出请求的人额度不足。",
+        "repeated_failure": "已停止：多次运行失败。"
+      }
+    },
+    "menu": {
+      "open": "助理操作",
+      "pause": "暂停",
+      "resume": "恢复",
+      "changeSteward": "更换负责人",
+      "viewWorkLog": "查看工作记录"
+    },
+    "steward": {
+      "title": "更换负责人",
+      "body": "助理无法处理消息时会通知负责人。请选择能访问这个工作区的成员。",
+      "label": "负责人",
+      "save": "保存",
+      "cancel": "取消"
+    },
+    "toasts": {
+      "enabled": "助理已启用。",
+      "paused": "助理已暂停。",
+      "resumed": "助理已恢复。",
+      "stewardChanged": "负责人已更换。",
+      "retried": "工单已重新开始处理。",
+      "closed": "工单已关闭。"
+    },
+    "errors": {
+      "ASSISTANT_ALREADY_ENABLED": "助理已经启用。",
+      "ASSISTANT_FORBIDDEN": "你没有权限执行这个操作。",
+      "ASSISTANT_NOT_FOUND": "这个工作区还没有启用助理。",
+      "ASSISTANT_TICKET_NOT_FOUND": "这个工单已不存在。",
+      "ASSISTANT_TICKET_NOT_PAYER": "只有为这个工单付费的成员才能重试。",
+      "ASSISTANT_PAUSED": "助理已暂停。",
+      "ASSISTANT_VERSION_CONFLICT": "助理刚被别人修改过，请重试。",
+      "generic": "出了点问题，请重试。"
+    },
+    "threadNotice": {
+      "router": "这是助理的工作记录。助理会自行运行，这里不接收消息。",
+      "ticket": "这个对话属于助理的一个工单，这里不接收消息。",
+      "open": "去和助理对话"
+    }
+  },
   "dashboardChat": {
     "common": {
       "files": "文件",
@@ -2012,6 +2170,19 @@
       "collapse": "收起",
       "show": "展开",
       "addImage": "添加图片",
+      "dictation": {
+        "start": "语音输入",
+        "stop": "停止语音输入",
+        "transcribing": "正在转写…",
+        "permissionDenied": "麦克风权限被拒绝。请在浏览器或系统设置中允许本站使用麦克风，然后重试。",
+        "noDevice": "未找到麦克风。",
+        "insufficientCredits": "积分不足，无法继续语音输入。",
+        "failed": "转写失败，已输入的文字会保留。",
+        "rateLimited": "语音输入过于频繁，请稍后再试。",
+        "silenceTimeout": "一分钟内没有检测到语音，语音输入已停止。",
+        "maxDuration": "语音输入已达到 10 分钟上限，已停止。",
+        "deviceLost": "麦克风已断开。"
+      },
       "draftSaveFailedNoRefresh": "保存草稿失败。请暂时不要刷新。",
       "draftRestoreFailed": "无法恢复你的草稿。",
       "retry": "重试",
@@ -3055,9 +3226,25 @@
       "completed": "完成于 {date}",
       "public": "公开",
       "awaitingApproval": "等待审批",
+      "status": {
+        "pending": "排队中",
+        "running": "生成中",
+        "ready": "已完成",
+        "failed": "失败",
+        "archived": "已归档"
+      },
       "couldNotLoad": "无法加载该制品。",
       "loadFailed": "加载制品失败。",
-      "loadMoreFailed": "加载更多制品失败。"
+      "loadMoreFailed": "加载更多制品失败。",
+      "types": {
+        "audio_overview": "音频",
+        "video_overview": "视频",
+        "video_presentation": "视频演示",
+        "table": "数据表",
+        "flashcards": "闪卡",
+        "quiz": "测验",
+        "mindmap": "思维导图"
+      }
     },
     "skills": {
       "gallery": "技能库",
@@ -3177,12 +3364,22 @@
       "readinessNoPages": "已连接 · 未共享任何页面",
       "readinessSetupRequired": "已连接 · 需要设置",
       "readinessNotReady": "连接器尚未就绪，无法同步。",
+      "readiness": {
+        "feed_blocked_address": "该订阅源指向 SourceWeft 无法访问的网络地址。请使用公开的 https 订阅源网址。",
+        "feed_timeout": "订阅源服务器响应超时。",
+        "feed_too_large": "订阅源过大，无法建立索引。",
+        "feed_not_a_feed": "该网址提供的不是 RSS 或 Atom 订阅源。",
+        "feed_http_error": "订阅源服务器返回了错误。",
+        "feed_unreachable": "无法连接到订阅源服务器。",
+        "feed_https_required": "订阅源网址必须以 https:// 开头。"
+      },
       "cta": {
         "connecting": "连接中…",
         "connected": "已连接",
         "configure": "配置",
         "connect": "连接",
-        "reconnect": "重新连接"
+        "reconnect": "重新连接",
+        "addFeed": "添加订阅源"
       },
       "detail": {
         "syncing": "连接器操作正在运行。",
@@ -3194,7 +3391,8 @@
         "lastSync": "上次同步 {date}",
         "connectedAutoCreate": "已存在授权但没有活跃的连接器。重新连接以创建连接器。",
         "connectedConfigure": "OAuth 已连接。配置此连接器以启用同步。",
-        "available": "可通过 {name} OAuth 进行连接。"
+        "available": "可通过 {name} OAuth 进行连接。",
+        "availableAddFeed": "添加公开 RSS 或 Atom 订阅源的网址。"
       },
       "syncBlock": {
         "pagesLimit": "页数额度已用完。上次同步索引了 {count} 条内容后暂停，额度恢复后会自动继续同步。",
@@ -3223,6 +3421,21 @@
         "Communication": "沟通协作"
       },
       "settingsDescription": "连接器设置、执行历史和提供方事件。",
+      "rss": {
+        "feedUrl": "订阅源网址",
+        "dialog": {
+          "description": "输入公开 RSS 或 Atom 订阅源的网址。SourceWeft 会先检查订阅源，再为其中的文章建立索引并保持同步。",
+          "nameLabel": "名称（可选）",
+          "check": "检查订阅源",
+          "checking": "检查中…",
+          "found": "已找到订阅源",
+          "itemCount": "{count, plural, other {# 篇文章}}",
+          "invalidUrl": "请输入以 https:// 开头的订阅源网址，且不要包含用户名或密码。",
+          "checkFailed": "无法检查此订阅源，请重试。",
+          "nameConflict": "此工作区中已存在同名连接器，或已添加过相同的订阅源。请更改名称，或使用已有的连接器。",
+          "addFailed": "添加订阅源失败。"
+        }
+      },
       "gmail": {
         "modeTitle": "选择 Gmail 用途",
         "modeDescription": "连接前选择初始模式，之后仍可在连接器设置中修改。",
@@ -3243,6 +3456,10 @@
         "modeScopeNote": "所有模式都会向 Google 申请读取和发送权限；每封邮件发送前都必须审核。",
         "modeCancel": "取消",
         "modeContinue": "继续前往 Google",
+        "brokerNoticeTitle": "通过 Composio 连接 Gmail",
+        "brokerNoticeBody": "SourceWeft 通过 Composio 连接 Gmail。Google 的授权页会显示 Composio 的名称，并请求访问你的整个邮箱。SourceWeft 只会搜索你的邮件、读取你询问的邮件，并且只在你确认后发送邮件。经过的邮件内容会由 Composio 保留最长一年。",
+        "brokerNoticeContinue": "继续前往 Google",
+        "toolsOnlyCardDescription": "搜索并阅读邮件，经确认后发送邮件。",
         "liveSearch": "实时搜索 Gmail",
         "indexMail": "将选定邮件索引到此工作区",
         "indexNotice": "索引会将选定邮件内容存入工作区资料源。关闭索引会使保留的邮件不再参与代理检索；删除连接器可移除存储副本。定期同步需另行选择。",
@@ -3283,6 +3500,150 @@
           "empty_content": "没有可读内容",
           "unreadable": "无法读取文件",
           "unknown": "因未知原因被跳过"
+        }
+      },
+      "selection": {
+        "count": "{count} / {limit}",
+        "missing": "已不存在",
+        "remove": "移除 {name}",
+        "lastSynced": "{date} 已同步",
+        "limitReached": "最多可选择 {limit} 项。请先移除部分内容再添加。",
+        "containerIndexedCount": "{count, plural, other {已索引 # 个文件}}",
+        "untitled": "未命名",
+        "nameUnavailable": "名称不可用",
+        "browser": {
+          "title": "从 {provider} 选择",
+          "breadcrumbLabel": "路径",
+          "searchLabel": "按名称搜索 {provider}",
+          "searchPlaceholder": "搜索 {provider}",
+          "emptyContainer": "这里没有内容。",
+          "noResults": "没有与搜索匹配的内容。",
+          "loadMore": "加载更多",
+          "refresh": "刷新",
+          "select": "选择 {name}",
+          "alreadyAdded": "已添加",
+          "selectedCount": "已选择 {count} 项",
+          "cancel": "取消",
+          "add": "添加"
+        },
+        "error": {
+          "reconnect": "你的 {provider} 账号需要重新连接。重新连接后再试。",
+          "notFound": "此连接器不可用。请刷新后重试。",
+          "notFoundItem": "此项在 {provider} 中已不存在。",
+          "tryLater": "{provider} 暂时繁忙。请稍后再试。",
+          "reopen": "列表已变化，请重新打开后继续。",
+          "generic": "无法连接到 {provider}。请重试。"
+        },
+        "state": {
+          "skipped": "已跳过",
+          "indexed": "已索引",
+          "processing": "同步中",
+          "failed": "失败",
+          "waiting": "等待同步",
+          "unavailable": "已在 {provider} 中删除或失去访问权限"
+        },
+        "skipReason": {
+          "unsupported_type": "不支持的文件类型",
+          "too_large": "文件过大，无法索引",
+          "needs_ocr": "扫描版 PDF 暂不支持",
+          "export_too_large": "导出内容过大，无法索引",
+          "empty_content": "没有可读内容",
+          "unreadable": "无法读取文件",
+          "unknown": "因未知原因被跳过"
+        },
+        "disabledReason": {
+          "unknown": "无法选择此项"
+        },
+        "default": {
+          "itemsTitle": "已选内容",
+          "itemsDescription": "选择此连接器可以访问的内容。",
+          "choose": "选择",
+          "empty": "尚未选择任何内容。",
+          "browser": {
+            "description": "打开某一项查看其中内容，然后勾选要包含的内容。"
+          }
+        },
+        "byType": {
+          "dropbox": {
+            "itemsTitle": "文件和文件夹",
+            "itemsDescription": "选择要索引的 Dropbox 文件和文件夹。所选内容都会按连接器的同步计划保持同步。",
+            "choose": "选择文件",
+            "empty": "尚未选择任何内容。选择文件或文件夹以进行索引。",
+            "kinds": {
+              "folder": "文件夹",
+              "file": "文件"
+            },
+            "disabledReason": {
+              "unsupported": "此文件类型无法索引"
+            },
+            "browser": {
+              "description": "打开文件夹查看其中内容，然后勾选要索引的文件和文件夹。",
+              "root": "Dropbox",
+              "note": "文件夹合计最多同步 1,000 个文件",
+              "emptyContainer": "此文件夹为空。"
+            }
+          },
+          "github": {
+            "itemsTitle": "仓库",
+            "itemsDescription": "这个工作区所有成员的智能体都能搜索和读取这些仓库里的 issue、拉取请求和讨论，且仅限这些仓库。",
+            "choose": "选择仓库",
+            "empty": "还没有选择。选择仓库之前，智能体读不到 GitHub 里的任何内容。",
+            "kinds": {
+              "account": "账号",
+              "repository": "仓库"
+            },
+            "helpLink": {
+              "add_repositories": "在 GitHub 上添加仓库"
+            },
+            "browser": {
+              "description": "打开一个账号查看已安装应用的仓库，然后勾选允许智能体搜索和读取的仓库。",
+              "root": "GitHub",
+              "emptyRoot": "应用还没有安装到任何账号。请先在 GitHub 上添加仓库，然后点击刷新。"
+            }
+          },
+          "linear": {
+            "itemsTitle": "团队和项目",
+            "itemsDescription": "这个工作区所有成员的智能体都能搜索和读取你选中的团队和项目里的 issue，且仅限这些。选中团队即包含它的全部 issue 和项目。",
+            "choose": "选择团队和项目",
+            "empty": "还没有选择。选择团队或项目之前，智能体读不到 Linear 里的任何内容。",
+            "kinds": {
+              "team": "团队",
+              "project": "项目"
+            },
+            "browser": {
+              "description": "点开团队可以看到它的项目，然后勾选要包含的团队和项目。",
+              "root": "Linear"
+            }
+          },
+          "jira": {
+            "itemsTitle": "项目",
+            "itemsDescription": "这个工作区所有成员的智能体都能搜索和读取你所选项目中的 issue，且仅限这些项目。",
+            "choose": "选择项目",
+            "empty": "还没有选择。至少选择一个项目后，智能体才能搜索。",
+            "kinds": {
+              "site": "站点",
+              "project": "项目"
+            },
+            "browser": {
+              "description": "点开站点可以看到它的项目，然后勾选要包含的项目。",
+              "root": "Jira 站点"
+            }
+          },
+          "confluence": {
+            "itemsTitle": "空间和页面",
+            "itemsDescription": "这个工作区所有成员的智能体都能搜索和读取你所选的空间和页面，且仅限这些。选中页面会包含它的子页面。",
+            "choose": "选择空间和页面",
+            "empty": "还没有选择。至少选择一个空间或页面后，智能体才能搜索。",
+            "kinds": {
+              "site": "站点",
+              "space": "空间",
+              "page": "页面"
+            },
+            "browser": {
+              "description": "依次点开站点和空间可以看到页面，然后勾选要包含的空间和页面。",
+              "root": "Confluence 站点"
+            }
+          }
         }
       },
       "settingsTab": {
@@ -3366,6 +3727,7 @@
       "deleteOption": "删除连接器及其所有已索引内容",
       "deleteOptionDesc": "永久删除此连接器、其本地授权，以及它导入的所有内容。此操作无法撤销。",
       "disconnectNote": "SourceWeft 不会撤销第三方提供方中的访问权限。",
+      "disconnectNoteComposio": "删除会同时移除 Composio 上的连接，从而结束对此账号的访问。停用会保留该连接。",
       "deleting": "删除中…",
       "disabling": "停用中…",
       "deleteConfirm": "删除连接器及内容",
@@ -3404,12 +3766,15 @@
         "reason": "原因",
         "requestPreview": "请求",
         "riskLevel": "风险",
+        "skippedCount": "已跳过",
         "source": "来源",
         "targetExternalIds": "目标",
         "targetExternalIdCount": "目标数量",
         "targeted": "已定向",
         "syncRunId": "关联同步",
-        "triggerType": "触发方式"
+        "triggerType": "触发方式",
+        "unchangedCount": "未变化",
+        "updatedCount": "已更新"
       }
     },
     "sourceGuide": {
@@ -3468,6 +3833,38 @@
         "team": "你的团队已达到每小时查找来源的上限，将在 {time} 恢复（还需 {wait}）。"
       },
       "add": "发现"
+    },
+    "youtube": {
+      "dialogTitle": "添加 YouTube 视频",
+      "playlist": "播放列表",
+      "channel": "频道",
+      "byChannel": "来自 {channel}",
+      "videoCount": "{count} 个视频",
+      "loading": "正在加载视频…",
+      "empty": "这个链接中没有可添加的视频。",
+      "transcriptNote": "视频由 AI 根据音频转写，转写文本可能有误。",
+      "costNote": "转写视频会消耗积分。",
+      "import": "导入 {count} 个视频",
+      "imported": "已添加 {count} 个视频",
+      "retry": "重试",
+      "errorBusy": "暂时无法列出视频，请稍后再试。",
+      "rateLimited": "已达到列出视频的上限（与查找来源共用），将在 {time} 恢复（还需 {wait}）。",
+      "chooseVideos": "选择视频",
+      "collectionHint": "这是 YouTube {kind, select, playlist {播放列表} other {频道}}链接，下一步选择要添加的视频。",
+      "videoHint": "SourceWeft 将用 AI 转写这个视频，并为转写文本建立搜索索引。转写视频会消耗积分。",
+      "aiTranscription": "AI 转写",
+      "aiTranscriptionHint": "由 AI 根据视频音频转写，可能有误。",
+      "error": {
+        "YOUTUBE_URL_UNSUPPORTED": "不支持这个 YouTube 链接，请使用视频、播放列表或频道链接。",
+        "YOUTUBE_COLLECTION_URL": "这是播放列表或频道链接，请从中选择要添加的视频。",
+        "YOUTUBE_TRANSCRIPTION_NOT_CONFIGURED": "此服务器未启用 YouTube 转写。",
+        "YOUTUBE_VIDEO_UNAVAILABLE": "这个视频无法观看，可能是私密视频或已被删除。",
+        "YOUTUBE_NO_SPEECH": "这个视频中没有检测到语音，因此没有转写文本。",
+        "YOUTUBE_TRANSCRIPT_FAILED": "无法转写这个视频，请稍后再试。",
+        "YOUTUBE_LISTING_FAILED": "无法列出视频，请稍后再试。",
+        "YOUTUBE_CHANNEL_NOT_FOUND": "找不到这个频道。",
+        "YOUTUBE_PLAYLIST_NOT_FOUND": "找不到这个播放列表。"
+      }
     },
     "noteOrigin": {
       "title": "已保存的笔记",
@@ -3610,6 +4007,7 @@
         "disabledConflict": "已存在同名的已停用连接器。请先启用或删除后再重新连接。",
         "enableFailed": "启用 {name} 连接器失败。",
         "authFailed": "{name} 授权失败。",
+        "setupIncomplete": "{name} 已授权，但设置未能完成。请重新连接。",
         "connectionCanceled": "{name} 连接已取消。",
         "webhookCopied": "Webhook URL 已复制。",
         "webhookCopyFailed": "无法复制 webhook URL。",
@@ -3627,6 +4025,54 @@
         "disabledCanReenable": "连接器已停用。稍后可再次启用。",
         "oauthAccountInUse": "此授权已关联到其他连接器，无法安全删除。",
         "removeFailed": "移除连接器失败。"
+      }
+    },
+    "generate": {
+      "button": "生成",
+      "menu": "用所选来源生成",
+      "needsSelection": "先选择要使用的来源",
+      "needsThread": "开始对话后才能用来源生成",
+      "openFailed": "已开始生成，但无法打开结果。请在制品中查看。",
+      "table": "数据表",
+      "flashcards": "闪卡",
+      "quiz": "测验",
+      "mindmap": "思维导图"
+    },
+    "research": {
+      "add": "深度研究",
+      "title": "深度研究",
+      "description": "描述一个主题，SourceWeft 会在后台搜索网页、阅读内容并撰写带引用的报告。",
+      "topicPlaceholder": "例如：固态电池商业化",
+      "costNote": "深度研究会消耗积分，可能需要几分钟。运行期间可以关闭此窗口。",
+      "start": "开始研究",
+      "starting": "正在启动…",
+      "startFailed": "无法启动研究，请稍后重试。",
+      "cancel": "取消",
+      "cancelled": "此研究已取消。",
+      "progress": "已搜索 {searches} 次 · 已读 {pages} 个网页",
+      "phase": {
+        "planning": "规划中",
+        "searching": "搜索中",
+        "reading": "阅读网页中",
+        "reporting": "撰写报告中"
+      },
+      "saveNote": "将报告保存为笔记",
+      "saved": "报告已保存为笔记",
+      "saveFailed": "无法保存报告，请重试。",
+      "sources": "报告引用的网页",
+      "importSources": "{count, plural, =0 {导入所选来源} other {导入 # 个所选来源}}",
+      "savedLabel": "已保存",
+      "image": "图片",
+      "newResearch": "新的研究",
+      "error": {
+        "WEB_PROVIDER_UNAVAILABLE": "网页搜索暂时不可用。",
+        "NO_RESULTS": "搜索没有找到与该主题相关的可用网页，请换个方式描述。",
+        "RESEARCH_QUALITY_TOO_LOW": "找到的资料不够可靠，无法撰写报告，请尝试更具体的主题。",
+        "INSUFFICIENT_CREDITS": "积分不足，无法进行此研究。",
+        "MODEL_UNAVAILABLE": "研究所用的模型暂时不可用，请稍后重试。",
+        "TIME_LIMIT": "研究在完成前已达到时间上限。",
+        "ACCESS_LOST": "你已不再拥有该工作区的访问权限，研究已停止。",
+        "UNKNOWN": "研究失败。"
       }
     }
   },
@@ -3706,6 +4152,7 @@
         "system": "系统"
       },
       "items": {
+        "overview": "概览",
         "mcpReview": "MCP 审核",
         "skillReview": "技能审核",
         "reports": "举报",
@@ -3714,7 +4161,8 @@
         "blog": "博客",
         "marketSettings": "市场设置"
       },
-      "backToApp": "返回应用"
+      "backToApp": "返回应用",
+      "pending": "{count} 项待处理"
     },
     "checkingAccess": "正在检查管理权限…",
     "accessCheckFailed": "无法检查管理权限，请重试。",
@@ -3746,7 +4194,25 @@
       "chmodExec": "chmod +x",
       "internalAddress": "内部/元数据地址"
     },
-    "footer": "只有列入 <code>MARKET_ADMIN_USER_IDS</code> 的用户才能访问此页面。批准与拒绝操作使用同一份允许名单。"
+    "footer": "只有列入 <code>MARKET_ADMIN_USER_IDS</code> 的用户才能访问此页面。批准与拒绝操作使用同一份允许名单。",
+    "overview": {
+      "title": "概览",
+      "description": "各分区里等待处理的事项。",
+      "refresh": "重新加载数量",
+      "retry": "重试",
+      "loading": "正在加载数量…",
+      "loadFailed": "无法加载数量，各分区仍可正常使用。",
+      "summary": "{count, plural, =0 {没有等待处理的事项。} other {有 # 项等待处理。}}",
+      "queues": "待办队列",
+      "content": "内容",
+      "hints": {
+        "mcpReview": "被标记的 MCP 提交",
+        "skillReview": "{review} 个新提交 · {listing} 个上架决定",
+        "reports": "未处理的举报"
+      },
+      "blogDrafts": "{count} 个草稿版本",
+      "blogPublished": "{count} 个已发布版本"
+    }
   },
   "dashboardObservability": {
     "notices": {
@@ -3883,7 +4349,9 @@
       "sessionPrefix": "会话：{value}",
       "emptyNoTraces": "未找到追踪。",
       "emptyNoMatch": "没有符合当前搜索条件的追踪。",
-      "loadOlder": "加载更早的追踪",
+      "previousPage": "上一页",
+      "nextPage": "下一页",
+      "pageNumber": "第 {page} 页",
       "columns": {
         "timestamp": "时间戳",
         "name": "名称",
@@ -4341,7 +4809,9 @@
       "secrets:env-access": "读取环境变量",
       "scope:other-skill-file": "读取其他技能的文件",
       "tool:sensitive": "请求代码执行类工具",
-      "binary:executable": "附带可执行二进制文件"
+      "binary:executable": "附带可执行二进制文件",
+      "capability:undeclared-scripts": "附带说明里没有提到的脚本",
+      "script:out-of-bundle-path": "脚本访问技能目录之外的文件"
     },
     "community": {
       "overview": {
@@ -4736,7 +5206,10 @@
       "publish": "批准并发布",
       "reject": "拒绝",
       "footnote": "技能审核与 MCP 市场使用相同的管理员白名单。",
-      "flagCount": "{count, plural, =0 {无标记} other {# 个标记}}"
+      "flagCount": "{count, plural, =0 {无标记} other {# 个标记}}",
+      "loadMore": "加载更多",
+      "loadMoreFailed": "无法加载队列的更多内容。",
+      "shownOf": "已显示 {shown} / {total}"
     },
     "ownerListing": {
       "label": "允许在公开市场上架",
@@ -4813,6 +5286,8 @@
       "scope:other-skill-file": "读取其他技能的文件",
       "tool:sensitive": "请求代码执行工具",
       "binary:executable": "附带可执行二进制文件",
+      "capability:undeclared-scripts": "附带说明里没有提到的脚本",
+      "script:out-of-bundle-path": "脚本访问技能目录之外的文件",
       "sticky-review": "暂缓审核：较早的版本尚未处理"
     },
     "escalation": {
@@ -4947,7 +5422,9 @@
         "gateway_config_unavailable": "全局模型网关配置尚未同步。",
         "provider_not_found": "全局模型网关配置中没有提供方“{provider}”。",
         "provider_capability_missing": "提供方“{provider}”未声明支持 chat 和 json_schema。",
-        "provider_credential_headers": "提供方“{provider}”的定义自带凭据请求头，系统模型不会沿用。"
+        "provider_credential_headers": "提供方“{provider}”的定义自带凭据请求头，系统模型不会沿用。",
+        "provider_routing_invalid": "SYSTEM_MODEL_PROVIDER_ONLY 里有空的条目。",
+        "provider_routing_unsupported": "已设置 SYSTEM_MODEL_PROVIDER_ONLY，但提供方“{provider}”不是 OpenRouter 提供方。"
       },
       "failed": "无法保存。",
       "loadFailed": "无法加载概览设置。",
@@ -5368,7 +5845,6 @@
       "or": "或",
       "namePlaceholder": "姓名",
       "emailPlaceholder": "个人或工作邮箱",
-      "appleComingSoon": "Apple 登录即将推出。",
       "termsNotice": "继续即表示你同意 SourceWeft 的<terms>服务条款</terms>，并知悉我们的<privacy>隐私政策</privacy>。",
       "signUpSuccessNoSession": "账号已创建，但无法启动你的会话。请登录。",
       "signInErrorNoSession": "已登录，但会话不可用。请重试。",
@@ -5460,7 +5936,14 @@
         "invalid_token": "你的登录链接无效或已过期。",
         "account_not_linked": "此账号尚未关联，请尝试其他登录方式。",
         "email_not_verified": "登录前请先验证你的邮箱。",
-        "user_not_found": "未找到与此次登录匹配的账号。"
+        "user_not_found": "未找到与此次登录匹配的账号。",
+        "SSO_ACCOUNT_LINK_DENIED": "无法将此登录关联到已有账号，请联系管理员。",
+        "SSO_SEAT_LIMIT": "团队席位已满，请联系管理员增加席位。",
+        "SSO_PROVISIONING_FAILED": "无法将你加入团队，请重试或联系管理员。",
+        "SSO_DOMAIN_NOT_VERIFIED": "该域名尚未完成验证，请联系管理员完成配置。",
+        "SSO_PROVIDER_NOT_FOUND": "该邮箱未配置企业单点登录。",
+        "SSO_SAML_ALGORITHM_NOT_ALLOWED": "身份源返回的 SAML 响应使用了不支持的签名设置。请联系管理员改用 SHA-256 签名，并发送未加密的断言。",
+        "SSO_ORGANIZATION_REQUIRED": "此团队暂时无法使用单点登录，请联系管理员。"
       }
     },
     "guestInvite": {
@@ -5712,8 +6195,359 @@
       "approvalAsk": "此版本请求读取并修改<strong>共享数据</strong>，所有能打开它的人都会看到这些数据。审批通过前，它无法使用共享数据。"
     }
   },
+  "table": {
+    "summary": "{sources} 个来源 · {columns} 列",
+    "source": "来源",
+    "region": "对比表",
+    "empty": "这张表里还没有内容。",
+    "cell": {
+      "notFound": "来源未提及",
+      "unverified": "无法核实",
+      "unverifiedHint": "模型给出过答案，但原文无法证实，因此不显示该值。",
+      "missing": "无值"
+    },
+    "row": {
+      "failed": "这个来源处理失败。重新生成这张表即可重试。",
+      "notIndexed": "这个来源尚未建立索引，已跳过。",
+      "stale": "来源已更新",
+      "sourceDeleted": "来源已删除"
+    },
+    "sort": {
+      "label": "按 {column} 排序"
+    },
+    "columns": {
+      "button": "列设置",
+      "label": "要显示的列",
+      "showAll": "全部显示"
+    },
+    "toolbar": {
+      "regenerate": "重新生成"
+    },
+    "evidence": {
+      "show": "查看原文片段",
+      "hide": "隐藏原文片段",
+      "sourceChanged": "来源原文在生成这张表之后发生了变化，下方显示的是当时的片段。",
+      "openSource": "在来源中打开"
+    },
+    "stale": {
+      "message": "有来源在生成这张表之后发生了变化，重新生成即可更新。",
+      "sourceDeleted": "有来源已被删除，这张表仍可使用。",
+      "regenerate": "重新生成"
+    },
+    "status": {
+      "queued": "等待开始…",
+      "generating": "已完成 {completed} / {total} 个来源"
+    },
+    "error": {
+      "generateAgain": "如需重试，请在资料中心选择这些资料，重新生成一个表格。",
+      "cannotDisplay": "无法显示这张表。",
+      "code": {
+        "INSUFFICIENT_CREDITS": "积分不足，无法生成这张表。",
+        "INPUT_TOO_LARGE": "所选来源太大，一张表容纳不下。请减少来源，或选择较短的来源。",
+        "NO_INDEXED_SOURCES": "所选来源都还没有建立索引。",
+        "MODEL_UNAVAILABLE": "模型暂时不可用，请稍后再试。",
+        "GENERATION_QUALITY_TOO_LOW": "太多答案无法在原文中核实，所以没有生成这张表。",
+        "SOURCE_NOT_READABLE": "有来源无法读取。",
+        "UNKNOWN": "无法生成这张表。"
+      }
+    },
+    "export": {
+      "menu": "导出",
+      "csv": "下载 CSV",
+      "csvWithEvidence": "下载 CSV（含原文片段）",
+      "markdown": "复制为 Markdown",
+      "copied": "已复制",
+      "source": "来源",
+      "evidenceSuffix": "原文片段"
+    },
+    "editor": {
+      "label": "列定义",
+      "name": "第 {position} 列的列名",
+      "namePlaceholder": "列名，例如：价格",
+      "description": "第 {position} 列的说明",
+      "descriptionPlaceholder": "在每个来源中要找什么（可选）",
+      "type": "第 {position} 列的值类型",
+      "types": {
+        "text": "文本",
+        "number": "数字",
+        "date": "日期",
+        "boolean": "是 / 否"
+      },
+      "add": "添加列",
+      "remove": "删除第 {position} 列",
+      "max": "一张表最多 {max} 列。"
+    },
+    "generate": {
+      "title": "生成数据表",
+      "regenerateTitle": "调整并重新生成",
+      "description": "每个来源一行，每个问题一列，每个值都附有来源原文片段。",
+      "sources": "{count} 个来源",
+      "addSource": "添加来源",
+      "searchSources": "搜索来源",
+      "noSources": "没有匹配的来源。",
+      "moreResults": "显示更多",
+      "sourcesLimit": "一张表最多比较 {max} 个来源。",
+      "untitledSource": "未命名来源",
+      "unavailableSource": "来源已不可用",
+      "instruction": "想比较什么？（可选）",
+      "instructionPlaceholder": "例如：比较价格和保修条款",
+      "columns": "列定义",
+      "suggest": "建议列",
+      "suggesting": "正在建议…",
+      "problems": {
+        "noSources": "至少添加一个来源。",
+        "none": "至少添加一列。",
+        "nameMissing": "每一列都需要列名。",
+        "tooMany": "一张表最多 {max} 列。",
+        "tooManySources": "一张表最多比较 {max} 个来源，请减少所选来源。",
+        "tooManyCells": "{sources} 个来源 × {columns} 列共 {cells} 个单元格，一张表最多 {max} 个。请减少来源或列。"
+      },
+      "estimate": {
+        "loading": "正在估算规模…",
+        "summary": "{sources} 个来源 · 需填写 {cells} 个单元格",
+        "regenerateSummary": "{sources} 个来源 · {columns} 列；未改动的单元格会沿用",
+        "skipped": "{count} 个来源尚未建立索引，将被跳过。",
+        "exceedsLimit": "所选来源太大，一张表容纳不下。请减少来源，或选择较短的来源。",
+        "failed": "无法估算这张表的规模。"
+      },
+      "submit": "生成数据表",
+      "regenerateSubmit": "重新生成",
+      "cancel": "取消",
+      "started": "正在生成数据表，也会出现在制品中。",
+      "reused": "这张表已经在生成中。",
+      "regenerating": "正在重新生成。新版本完成前仍显示当前版本。",
+      "errors": {
+        "TABLE_TOO_MANY_RUNNING": "同时生成的数据表和学习制品太多，请等其中一个完成。",
+        "TABLE_NOT_READY": "只有已完成的数据表才能重新生成。",
+        "TABLE_CONTENT_UNREADABLE": "无法读取这张表，因此不能重新生成。",
+        "TABLE_REGENERATION_IN_PROGRESS": "这张表已经在重新生成中。",
+        "VALIDATION_ERROR": "请检查列定义和来源后重试。",
+        "THREAD_NOT_FOUND": "这个对话已不可用。",
+        "ARTIFACT_NOT_FOUND": "这张表已不存在。",
+        "recipeUnavailable": "这张表无法调整。请从来源中心生成一张新表。",
+        "loadFailed": "无法打开这张表以重新生成。",
+        "suggestFailed": "无法建议列，请重试。",
+        "generic": "无法生成数据表，请重试。"
+      }
+    },
+    "regenerationFailed": {
+      "message": "上次重新生成失败，当前显示的仍是上一版表格。"
+    }
+  },
+  "study": {
+    "status": {
+      "queued": "等待开始…",
+      "generating": "正在生成… 已完成 {completed} / {total} 步"
+    },
+    "error": {
+      "generateAgain": "如需重试，请在来源中心选择来源后重新生成。",
+      "cannotDisplay": "无法显示这份学习内容。",
+      "code": {
+        "INSUFFICIENT_CREDITS": "积分不足，无法生成。",
+        "INPUT_TOO_LARGE": "所选来源太大，一次生成容纳不下。请减少来源，或选择较短的来源。",
+        "NO_INDEXED_SOURCES": "所选来源都还没有建立索引。",
+        "MODEL_UNAVAILABLE": "模型暂时不可用，请稍后再试。",
+        "GENERATION_QUALITY_TOO_LOW": "能在原文中核实的项目太少，所以没有生成。",
+        "SOURCE_NOT_READABLE": "有来源无法读取。",
+        "UNKNOWN": "无法生成。"
+      }
+    },
+    "evidence": {
+      "show": "查看原文片段",
+      "hide": "隐藏原文片段",
+      "sourceChanged": "来源原文在生成之后发生了变化，下方显示的是当时的片段。",
+      "openSource": "在来源中打开"
+    },
+    "stale": {
+      "message": "有来源在生成之后发生了变化，重新生成即可更新。",
+      "sourceDeleted": "有来源已被删除，这份内容仍可使用。",
+      "regenerate": "重新生成"
+    },
+    "flashcards": {
+      "label": "闪卡",
+      "mode": {
+        "browse": "浏览",
+        "review": "复习"
+      },
+      "progress": "{current} / {total}",
+      "exportAnki": "导出到 Anki（CSV）",
+      "showFront": "显示正面",
+      "showBack": "显示答案",
+      "showingFront": "正在显示正面",
+      "showingBack": "正在显示答案",
+      "gradeFailed": "评分没有保存成功，请重试。",
+      "nothingDue": "现在没有需要复习的卡片。",
+      "done": "本轮完成：共 {total} 张，已复习 {graded} 张。",
+      "restart": "重新开始",
+      "previous": "上一张",
+      "next": "下一张",
+      "hintFlip": "按 Space 或 Enter 键翻面",
+      "hintGrade": "按 1–4 评价掌握程度",
+      "gradeLabel": "掌握得怎么样？",
+      "grade": {
+        "again": "重来",
+        "hard": "困难",
+        "good": "良好",
+        "easy": "简单"
+      },
+      "hintBrowse": "切换到「复习」才能评分",
+      "summary": "新卡 {new} 张 · 学习中 {learning} 张 · 已学会 {learned} 张",
+      "status": {
+        "new": "新卡",
+        "learning": "学习中",
+        "learned": "已学会"
+      },
+      "due": {
+        "now": "已到期",
+        "minutes": "{count} 分钟后复习",
+        "hours": "{count} 小时后复习",
+        "days": "{count} 天后复习"
+      },
+      "nextDue": "下一张：{when}。"
+    },
+    "quiz": {
+      "loading": "正在加载测验…",
+      "intro": "共 {total} 题，提交后批改。",
+      "start": "开始",
+      "saveFailed": "答案没有保存成功，已保留在本页。",
+      "questionOf": "第 {current} 题，共 {total} 题",
+      "previous": "上一题",
+      "submit": "提交",
+      "next": "下一题",
+      "true": "对",
+      "false": "错",
+      "chooseOne": "选择一个答案",
+      "chooseAll": "选择所有正确答案",
+      "yourAnswer": "你的答案",
+      "referenceAnswer": "参考答案",
+      "showReference": "显示参考答案",
+      "selfGrade": {
+        "knew": "我答对了",
+        "missed": "我没答对"
+      },
+      "result": {
+        "score": "答对 {correct} / {total} 题",
+        "selfGraded": "问答题：自评答对 {knew} / {total} 题"
+      },
+      "practiceMistakes": "重练错题",
+      "mistakesToCards": "把错题做成闪卡",
+      "mistakesToCardsDone": "已用错题做成 {count} 张闪卡。",
+      "mistakesToCardsOpen": "打开闪卡",
+      "mistakesToCardsFailed": "没能做成闪卡，请重试。",
+      "restart": "重新开始",
+      "verdict": {
+        "correct": "正确",
+        "wrong": "错误",
+        "self": {
+          "knew": "自评：答对了",
+          "missed": "自评：没答对",
+          "none": "未自评"
+        }
+      },
+      "correctAnswer": "答案："
+    },
+    "mindmap": {
+      "view": {
+        "map": "图",
+        "outline": "大纲"
+      },
+      "exportMarkdown": "导出 Markdown",
+      "exportJson": "导出 JSON",
+      "detailLabel": "所选要点",
+      "askPrompt": "根据我的来源，进一步说明“{label}”。",
+      "askInChat": "在聊天中追问",
+      "expand": "展开",
+      "collapse": "收起",
+      "outlineLabel": "思维导图大纲"
+    },
+    "generate": {
+      "title": {
+        "flashcards": "生成闪卡",
+        "quiz": "生成测验",
+        "mindmap": "生成思维导图"
+      },
+      "description": {
+        "flashcards": "用于间隔复习的卡片，每张卡片都注明出自哪段原文。",
+        "quiz": "附解析的题目，每题都注明出自哪段原文。",
+        "mindmap": "主要观点及其关系，每个要点都注明出自哪段原文。"
+      },
+      "regenerateTitle": "调整并重新生成",
+      "regenerateSources": "使用与当前版本相同的 {count} 个来源。",
+      "sources": "{count} 个来源",
+      "addSource": "添加来源",
+      "searchSources": "搜索来源",
+      "noSources": "没有匹配的来源。",
+      "moreResults": "显示更多",
+      "sourcesLimit": "最多使用 {max} 个来源。",
+      "untitledSource": "未命名来源",
+      "unavailableSource": "来源已不可用",
+      "size": {
+        "label": "数量",
+        "fewer": "较少",
+        "standard": "标准",
+        "more": "较多",
+        "flashcards": "{size} · {count} 张",
+        "quiz": "{size} · {count} 题",
+        "mindmap": "{size} · 最多 {count} 个要点"
+      },
+      "difficulty": {
+        "label": "难度",
+        "easy": "简单",
+        "mixed": "混合",
+        "hard": "困难"
+      },
+      "focus": {
+        "label": "侧重点（可选）",
+        "placeholder": "例如：定义和关键日期",
+        "counter": "{used} / {max}",
+        "tooLong": "侧重点最多 {max} 个字符。"
+      },
+      "language": {
+        "label": "语言",
+        "follow": "与来源相同"
+      },
+      "problems": {
+        "noSources": "至少添加一个来源。",
+        "tooManySources": "最多使用 {max} 个来源，请减少所选来源。"
+      },
+      "estimate": {
+        "loading": "正在估算规模…",
+        "summary": {
+          "flashcards": "最多 {count} 张闪卡，来自 {sources} 个来源",
+          "quiz": "最多 {count} 题，来自 {sources} 个来源",
+          "mindmap": "最多 {count} 个要点，来自 {sources} 个来源"
+        },
+        "parts": "来源较长，会分 {groups} 部分阅读，所需时间稍长。",
+        "exceedsLimit": "所选来源太大，一次生成容纳不下。请减少来源，或选择较短的来源。",
+        "failed": "无法估算规模。"
+      },
+      "submit": "生成",
+      "regenerateSubmit": "重新生成",
+      "cancel": "取消",
+      "started": "正在生成，也会出现在制品中。",
+      "reused": "已经在生成中。",
+      "regenerating": "正在重新生成。新版本完成前仍显示当前版本。",
+      "manageBilling": "管理计费",
+      "errors": {
+        "STUDY_TOO_MANY_RUNNING": "同时生成的数据表和学习制品太多，请等其中一个完成。",
+        "STUDY_NOT_READY": "只有已完成的学习内容才能重新生成。",
+        "STUDY_CONTENT_UNREADABLE": "无法读取这份学习内容，因此不能重新生成。",
+        "STUDY_REGENERATION_IN_PROGRESS": "这份学习内容已经在重新生成中。",
+        "VALIDATION_ERROR": "请检查选项和来源后重试。",
+        "THREAD_NOT_FOUND": "这个对话已不可用。",
+        "ARTIFACT_NOT_FOUND": "这份学习内容已不存在。",
+        "recipeUnavailable": "这份学习内容无法调整。请从来源中心重新生成。",
+        "loadFailed": "无法打开这份学习内容以重新生成。",
+        "generic": "无法生成，请重试。"
+      }
+    },
+    "regenerationFailed": {
+      "message": "上次重新生成失败，当前显示的仍是上一个版本。"
+    }
+  },
   "mobileRouteSheet": {
-    "supplementaryPage": "SourceWeft 补充页面"
+    "supplementaryPage": "SourceWeft 补充页面",
+    "loading": "正在加载…"
   },
   "authLocale": {
     "core": {
@@ -5872,6 +6706,122 @@
       }
     },
     "plugins": {
+      "sso": {
+        "signInWithSso": "使用企业 SSO 登录",
+        "ssoTitle": "企业单点登录",
+        "ssoDescription": "输入工作邮箱，通过公司的登录方式继续。",
+        "workEmail": "工作邮箱",
+        "continue": "继续",
+        "backToSignIn": "返回登录",
+        "ssoEmailRequired": "请输入你的工作邮箱。",
+        "ssoRateLimited": "操作过于频繁，请稍等一分钟后重试。",
+        "ssoNoSetup": "该邮箱未配置企业单点登录。",
+        "orgTabLabel": "单点登录",
+        "orgTitle": "单点登录",
+        "orgDescription": "让已验证邮箱域名的成员使用你的身份源登录。",
+        "orgTeamsOnly": "单点登录仅对团队开放。",
+        "orgNoPermission": "只有团队所有者和管理员可以管理单点登录。",
+        "orgAddProvider": "添加身份源",
+        "orgProviderLimitReached": "每个团队最多可以添加 5 个身份源。",
+        "orgEmptyTitle": "尚未配置身份源",
+        "orgEmptyDescription": "接入一个身份源（OIDC 或 SAML），并验证你掌控的邮箱域名，成员即可使用单点登录。",
+        "orgColumnProvider": "身份源",
+        "orgColumnDomain": "域名",
+        "orgColumnType": "类型",
+        "orgColumnStatus": "状态",
+        "orgColumnActions": "操作",
+        "orgStatusVerified": "已验证",
+        "orgStatusPending": "待验证",
+        "orgProtocolOidc": "OIDC",
+        "orgProtocolSaml": "SAML",
+        "orgDetails": "详情",
+        "orgEdit": "编辑",
+        "orgDelete": "删除",
+        "orgCreateTitle": "添加身份源",
+        "orgEditTitle": "编辑身份源",
+        "orgCreateDescription": "为你的团队掌控的域名注册一个 OIDC 或 SAML 身份源。",
+        "orgEditDescription": "更新此身份源。密钥留空表示保持不变。",
+        "orgProtocol": "登录协议",
+        "orgProviderId": "身份源 ID",
+        "orgProviderIdHint": "由小写字母、数字和连字符组成，3–47 个字符。",
+        "orgProviderIdImmutableHint": "身份源 ID 创建后无法更改。",
+        "orgDomain": "邮箱域名",
+        "orgDomainChangeWarning": "更改域名需要重新验证，验证完成前将无法使用单点登录。",
+        "orgIssuer": "Issuer 地址",
+        "orgIssuerHint": "我们会根据 issuer 自动发现 OIDC 端点。内网／私有 issuer 会被拒绝。",
+        "orgClientId": "Client ID",
+        "orgClientIdKeepHint": "留空表示保持当前 Client ID 不变。",
+        "orgClientSecret": "Client Secret",
+        "orgClientSecretKeepHint": "留空表示保持当前密钥不变。",
+        "orgScopes": "Scopes",
+        "orgScopesHint": "以空格分隔。默认为 openid email profile。",
+        "orgSamlConfigHint": "在下方填写 IdP 登录地址、签名证书和实体 ID，或粘贴 IdP metadata XML 自动填充。",
+        "orgEntryPoint": "IdP 登录地址",
+        "orgIdpEntityId": "IdP 实体 ID / issuer",
+        "orgCertificate": "IdP 签名证书",
+        "orgCertificateHint": "粘贴 IdP 签名证书（PEM 格式），或从下方 metadata 自动填充。",
+        "orgSamlMetadata": "从 IdP metadata XML 自动填充",
+        "orgSamlMetadataHint": "粘贴 IdP metadata XML 以填充上面的字段。metadata 本身不会被保存。",
+        "orgSamlKeepHint": "留空表示保持当前值不变。",
+        "orgRoleAttribute": "角色属性（可选）",
+        "orgRoleAttributeHint": "携带成员角色的 claim（OIDC）或属性（SAML）。",
+        "orgAdminRoleValue": "管理员角色值（可选）",
+        "orgAdminRoleValueHint": "角色属性等于该值的成员会成为管理员；不匹配的成员在每次登录时都会被设为普通成员。所有者永不会被更改。",
+        "orgSamlSecurityNote": "身份源必须使用 RSA-SHA256 或 RSA-SHA512 签名、SHA-256 或 SHA-512 摘要对 SAML 断言签名，并以未加密方式发送。",
+        "orgSave": "保存",
+        "orgCancel": "取消",
+        "orgCreateSuccess": "身份源已添加。",
+        "orgUpdateSuccess": "身份源已更新。",
+        "orgFieldRequired": "此项为必填。",
+        "orgProviderIdInvalid": "请使用 3–47 个小写字母、数字或连字符。",
+        "orgEntryPointInvalid": "请输入有效的登录地址。",
+        "orgCertificateInvalid": "请输入 IdP 签名证书（PEM）或 base64 值。",
+        "orgMetadataTooLarge": "metadata XML 过大（上限 100 KB）。",
+        "orgMetadataParseError": "无法读取 metadata XML。请检查后重新粘贴，或手动填写各字段。",
+        "orgMetadataNoEntryPoint": "无法从 metadata 读取登录地址，请手动填写。",
+        "orgMetadataNoEntityId": "无法从 metadata 读取实体 ID，请手动填写。",
+        "orgMetadataNoCert": "无法从 metadata 读取 IdP 签名证书，请手动粘贴。",
+        "orgMetadataMultipleCerts": "检测到多张 IdP 签名证书，默认使用第一张，请确认它是否为当前生效的那张。",
+        "orgSamlNeedsConfig": "请填写登录地址、签名证书和实体 ID，或粘贴 metadata XML。",
+        "orgRateLimited": "操作过于频繁，请稍等一分钟后重试。",
+        "orgProviderIdTaken": "已存在使用该 ID 的身份源，请改用其他 ID。",
+        "orgProviderIdReserved": "该身份源 ID 为保留字，请改用其他 ID。",
+        "orgIssuerInvalid": "请输入以 http:// 或 https:// 开头的有效 issuer 地址。",
+        "orgIssuerUnreachable": "SourceWeft 无法访问该 issuer。OIDC 身份源必须能从 SourceWeft 服务器经公网访问，并提供有效的发现文档。若身份源仅在内部网络可用，请改用 SAML。",
+        "orgIdentityLocked": "已有成员使用该身份源登录后，这些设置不能再修改。如需修改，请删除该身份源后重新添加。",
+        "orgIdentityLockedHint": "已有成员使用该身份源登录后，Issuer、Client ID 以及 SAML 登录地址、签名证书和实体 ID 都无法再修改。如需修改，请删除该身份源后重新添加。",
+        "orgRoleMappingIncomplete": "请同时填写角色属性和管理员角色值，或两者都留空。",
+        "orgErrDomainVerificationFailed": "暂时还查不到该 TXT 记录。DNS 更改可能需要几分钟，请稍后再验证。",
+        "orgErrNoPendingVerification": "该验证请求已过期。请重新获取 TXT 记录后再验证。",
+        "orgErrInvalidDomain": "无法验证该域名。请检查身份源上设置的邮箱域名。",
+        "orgErrIdentifierTooLong": "身份源 ID 过长，无法为其创建 DNS 记录。",
+        "orgErrProviderChanged": "该身份源在操作过程中发生了变更。请刷新页面后重试。",
+        "orgServiceProviderPending": "设置身份源 ID 后，这里会显示服务提供者信息。",
+        "orgDirectSignInDescription": "分享此链接，可让成员直接进入本团队的单点登录。",
+        "orgDirectSignInNone": "待身份源的域名验证通过后，成员即可使用单点登录。",
+        "orgDirectSignInMany": "存在多个已验证身份源时，成员请选择“使用企业 SSO 登录”并输入工作邮箱。",
+        "orgDomainVerification": "验证域名归属",
+        "orgDomainVerificationDescription": "将此 TXT 记录添加到 {domain} 的 DNS，以证明你拥有该域名：",
+        "orgTxtRecordHost": "TXT 记录名称",
+        "orgTxtRecordValue": "TXT 记录值",
+        "orgDnsPropagationNote": "DNS 更改可能需要几分钟才会生效。",
+        "orgVerify": "验证",
+        "orgVerifying": "验证中…",
+        "orgVerifySuccess": "域名已验证。",
+        "orgCopy": "复制",
+        "orgCopied": "已复制",
+        "orgServiceProviderInfo": "服务提供者信息",
+        "orgServiceProviderDescription": "请将这些信息提供给你的身份源管理员。",
+        "orgOidcRedirectUri": "OIDC 回调地址",
+        "orgSamlAcsUrl": "SAML ACS 地址",
+        "orgSamlMetadataUrl": "SAML SP metadata 地址",
+        "orgSamlEntityId": "SAML SP 实体 ID",
+        "orgDirectSignInLink": "直达登录链接",
+        "orgDeleteTitle": "删除身份源",
+        "orgDeleteDescription": "使用该域名登录的成员将无法再使用单点登录。此操作无法撤销。",
+        "orgDeleteConfirm": "删除身份源",
+        "orgDeleteSuccess": "身份源已删除。"
+      },
       "magicLink": {
         "magicLink": "免密登录链接",
         "sendMagicLink": "发送免密登录链接",
@@ -6045,7 +6995,7 @@
         "lastPage": "末页",
         "pageOf": "第 {{page}} 页，共 {{pages}} 页",
         "rowsPerPage": "每页行数",
-        "columns": "列",
+        "columns": "栏",
         "selectedCount": "已选择 {{count}} 项",
         "selectRow": "选择此行",
         "selectAllRows": "选择本页所有行",
@@ -6169,5 +7119,243 @@
     "privacyPolicy": "隐私政策",
     "agree": "同意并继续",
     "decline": "不同意并退出登录"
+  },
+  "dashboardScheduled": {
+    "rule": {
+      "manual": "仅在你手动启动时执行",
+      "daily": "每天 {time}",
+      "weekdays": "工作日 {time}",
+      "weekly": "每{days} {time}",
+      "cron": "Cron {expr}",
+      "once": "仅一次，{at}"
+    },
+    "status": {
+      "draft": "草稿",
+      "active": "运行中",
+      "paused": "已暂停",
+      "blocked": "已阻塞",
+      "completed": "已完成",
+      "archived": "已删除"
+    },
+    "statusReason": {
+      "user_paused": "已由你暂停。",
+      "owner_left": "负责人已离开该工作区，任务已暂停。",
+      "repeated_failure": "连续失败后已暂停。请查看运行历史，处理后再恢复。",
+      "insufficient_credits": "已阻塞：额度不足，无法运行。",
+      "tools_unavailable": "已阻塞：任务使用的资料或 MCP 服务已不可用。",
+      "auth_expired": "已阻塞：已连接的账号需要重新登录。"
+    },
+    "runStatus": {
+      "pending": "等待中",
+      "dispatching": "启动中",
+      "queued": "运行中",
+      "succeeded": "成功",
+      "failed": "失败",
+      "skipped": "已跳过",
+      "blocked": "已阻塞",
+      "cancelled": "已取消"
+    },
+    "skipReason": {
+      "missed_platform_down": "平台停机期间错过。",
+      "previous_run_active": "上一次运行尚未结束。",
+      "user_concurrency_limit": "你同时运行的任务过多。",
+      "user_daily_cap": "已达到每日定时运行上限。",
+      "insufficient_credits": "额度不足。",
+      "owner_left": "负责人已离开该工作区。",
+      "tools_unavailable": "资料或 MCP 服务不可用。",
+      "auth_expired": "已连接的账号需要重新登录。",
+      "rate_limited": "短时间内运行次数过多。"
+    },
+    "trigger": {
+      "schedule": "定时",
+      "manual": "立即运行",
+      "api": "API",
+      "event": "事件"
+    },
+    "errors": {
+      "generic": "出错了，请重试。",
+      "AGENT_TASK_LIMIT_REACHED": "已达到当前套餐的启用任务数上限。请先暂停或删除一个任务。",
+      "AGENT_TASK_RUN_RATE_LIMITED": "本小时手动运行次数过多，请稍后再试。",
+      "AGENT_TASK_RUN_CONFLICT": "该任务正在运行。",
+      "AGENT_TASK_INVALID_STATE": "该任务当前不能执行此操作。",
+      "AGENT_TASK_VERSION_CONFLICT": "该任务已在别处被修改。请重新打开后再试。",
+      "AGENT_TASK_NOT_FOUND": "该任务已不存在。",
+      "AGENT_TASK_SCHEDULE_INVALID": "该时间安排无效。运行间隔至少 1 小时，且必须在未来。"
+    },
+    "toasts": {
+      "runStarted": "已开始运行",
+      "paused": "任务已暂停",
+      "resumed": "任务已恢复",
+      "enabled": "任务已启用",
+      "deleted": "任务已删除",
+      "saved": "任务已保存",
+      "created": "任务已创建"
+    },
+    "frequency": {
+      "daily": "每天",
+      "weekdays": "工作日",
+      "weekly": "每周的某几天",
+      "once": "仅一次",
+      "cron": "Cron 规则",
+      "manual": "仅手动运行"
+    },
+    "form": {
+      "title": "新建定时任务",
+      "editTitle": "编辑定时任务",
+      "description": "保存一段提示词，按时间安排以你的身份运行，并把结果放进一个新对话。",
+      "name": "名称",
+      "namePlaceholder": "每日早报",
+      "prompt": "提示词",
+      "promptPlaceholder": "每次执行，助手应该做什么？",
+      "promptHint": "执行期间无人看守，只能读取和总结，不能修改任何内容。",
+      "frequency": "重复",
+      "time": "时间",
+      "runAt": "日期和时间",
+      "cron": "Cron 规则（5 段）",
+      "days": "星期",
+      "timezone": "时区",
+      "manualHint": "该任务没有时间安排。保存后，可随时点“立即运行”。",
+      "nextRuns": "接下来的几次运行",
+      "previewLoading": "正在检查时间安排…",
+      "previewEmpty": "填好时间安排后可预览接下来的几次运行。",
+      "offsetHint": "实际运行可能比所示时间晚最多 {minutes} 分钟。",
+      "webAccess": "允许联网搜索",
+      "webAccessHint": "允许任务搜索并阅读公开网页。",
+      "notifyOnSuccess": "运行成功时通知我",
+      "notifyEmail": "出问题时也发邮件给我",
+      "notifyEmailHint": "包括失败、暂停和被阻塞的运行。",
+      "mcp": "MCP 服务",
+      "mcpHint": "只会使用这些服务的只读工具。",
+      "readOnlyNote": "定时运行是只读的：不能写文件、发布产物，也不能向你提问。",
+      "cancel": "取消",
+      "save": "保存",
+      "saveDraft": "存为草稿",
+      "createAndEnable": "创建并启用",
+      "sources": "资料来源",
+      "sourcesHint": "运行会读取下面选中的资料来源。留空则不使用工作区资料来源。",
+      "addSource": "添加资料来源",
+      "searchSources": "搜索资料来源",
+      "noSources": "没有找到资料来源。",
+      "sourcesLimit": "最多 {count} 个资料来源。",
+      "untitledSource": "未命名资料来源",
+      "unavailableSource": "资料来源已不可用",
+      "skills": "技能",
+      "skillsHint": "运行只能使用这些技能。",
+      "addSkill": "添加技能",
+      "searchSkills": "搜索技能",
+      "noSkills": "没有可用的技能。",
+      "skillsLimit": "最多 {count} 个技能。",
+      "unavailableSkill": "技能已不可用",
+      "showMore": "显示更多"
+    },
+    "actions": {
+      "open": "{name} 的操作",
+      "runNow": "立即运行",
+      "pause": "暂停",
+      "resume": "恢复",
+      "enable": "启用",
+      "edit": "编辑",
+      "delete": "删除"
+    },
+    "delete": {
+      "title": "删除“{name}”？",
+      "body": "任务将停止运行，已有的运行记录和对话会保留。"
+    },
+    "list": {
+      "nextRun": "下次运行 {at}"
+    },
+    "page": {
+      "title": "定时任务",
+      "subtitle": "按时间安排运行的提示词，结果会放进对话里。",
+      "new": "新建任务",
+      "tabTasks": "任务",
+      "tabInbox": "通知",
+      "loading": "加载中…",
+      "loadError": "无法加载定时任务。",
+      "emptyTitle": "还没有定时任务",
+      "emptyBody": "保存一次提示词，让它每天早上、每周一或你指定的时间自动运行。"
+    },
+    "detail": {
+      "back": "全部任务",
+      "notFound": "未找到该任务。",
+      "prompt": "提示词",
+      "history": "运行历史",
+      "noRuns": "还没有运行记录。",
+      "catchUp": "补跑",
+      "openResult": "打开结果"
+    },
+    "inbox": {
+      "loading": "加载中…",
+      "loadError": "无法加载通知。",
+      "empty": "暂无通知。",
+      "repeated": "{count} 次",
+      "loadMore": "加载更多",
+      "markAllRead": "全部标为已读"
+    },
+    "bell": {
+      "label": "通知",
+      "labelUnread": "通知，{count} 条未读",
+      "title": "通知",
+      "viewAll": "查看全部"
+    },
+    "notification": {
+      "task_run_succeeded": "“{taskName}”已完成。",
+      "task_run_failed": "“{taskName}”运行失败。",
+      "task_run_catch_up": "“{taskName}”已补跑之前错过的一次。",
+      "task_blocked_quota": "“{taskName}”未能运行：额度不足。",
+      "task_needs_approval": "“{taskName}”需要你的批准。",
+      "task_paused_owner_left": "“{taskName}”因负责人离开而暂停。",
+      "task_tools_unavailable": "“{taskName}”无法运行：它使用的资料或 MCP 服务不可用。",
+      "task_blocked_auth": "“{taskName}”无法运行：需要重新登录它使用的已连接账号。",
+      "task_paused_repeated_failure": "“{taskName}”连续失败后已暂停。",
+      "research_ready": "你关于“{topic}”的研究已完成。",
+      "research_failed": "你关于“{topic}”的研究未能完成。",
+      "artifact_generation_failed": "“{title}”生成失败。在资料中心的“制品”中打开它，可查看原因。",
+      "artifact_regeneration_failed": "“{title}”重新生成失败，上一个版本仍保留。打开它可查看原因。",
+      "assistant_reply": "助理回复了你的消息。",
+      "assistant_question": "“{taskName}”有问题要问你。",
+      "assistant_ticket_blocked": "“{taskName}”已停止：{reason, select, credit_cap {达到额度上限} insufficient_credits {你的额度不足} other {多次运行失败}}。",
+      "assistant_messages_blocked": "你传给助理的消息正在等待：你的额度不足。",
+      "assistant_unavailable": "助理有 {count} 条消息无法处理。",
+      "unknown": "关于“{taskName}”的更新。"
+    },
+    "composer": {
+      "schedule": "按时间安排运行"
+    },
+    "threadNotice": {
+      "from": "来自定时任务“{name}”。",
+      "open": "打开任务",
+      "problem": {
+        "failed": "这次定时任务没有完成。",
+        "timedOut": "这次定时任务用时过长，已被停止。",
+        "cancelled": "这次定时任务已被停止。",
+        "needsApproval": "这次定时任务需要你的批准，而定时任务无法请求批准。"
+      }
+    }
+  },
+  "sharedChat": {
+    "sharedOnAsOf": "在 SourceWeft 上分享 · 内容截至 {date}",
+    "user": "用户",
+    "assistant": "助手",
+    "stopped": "已停止",
+    "madeWith": "由 SourceWeft 制作",
+    "unavailable": "这个分享不可用",
+    "sources": "来源",
+    "artifactKinds": {
+      "file": "文件",
+      "html": "网页",
+      "report": "报告",
+      "slides": "幻灯片",
+      "mindmap": "思维导图",
+      "podcast": "播客",
+      "audio_overview": "音频概览",
+      "video_overview": "视频概览",
+      "video_presentation": "视频演示",
+      "flashcards": "闪卡",
+      "quiz": "测验",
+      "table": "表格",
+      "infographic": "信息图",
+      "image": "图片"
+    }
   }
 }

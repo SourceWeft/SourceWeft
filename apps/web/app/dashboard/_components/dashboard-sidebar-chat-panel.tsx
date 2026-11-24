@@ -4,13 +4,18 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import {
   Archive,
+  ArchiveRestore,
   Bot,
+  CalendarClock,
+  ConciergeBell,
+  Download,
   ExternalLink,
   Link2,
   PanelRightOpen,
@@ -23,12 +28,16 @@ import {
   MoreHorizontal,
   PanelsTopLeft,
   PenSquare,
+  Pencil,
+  Pin,
+  PinOff,
+  Share,
   Share2,
   Trash2,
   Users,
 } from "lucide-react";
 import { toast } from "sonner";
-import type { Persona } from "@sourceweft/contracts";
+import { MAX_PINNED_THREADS, type Persona } from "@sourceweft/contracts";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
   Dialog,
@@ -67,8 +76,12 @@ import {
 } from "@sourceweft/ui-web/components/ui/tooltip";
 import {
   getSidebarChatItems,
+  splitPinnedChats,
   type SidebarChatFilter,
 } from "./dashboard-sidebar-chat-list";
+import { mapThreadToChatItem } from "./dashboard-chat-items";
+import { useChatExport } from "./use-chat-export";
+import { useChatSearch, type ChatSearchState } from "./use-chat-search";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { formatShortRelativeTime } from "../../../lib/relative-time";
 import {
@@ -79,7 +92,10 @@ import {
 } from "./dashboard-shortcuts";
 import { contentClient } from "../../../lib/sdk";
 import { isSharedChat, type ChatItem } from "./dashboard-chat-types";
+import { isHostOwnedChat } from "./host-owned-chat";
 import { DashboardPersonaManager } from "./dashboard-persona-manager";
+import { ShareChatDialog } from "./share-chat-dialog";
+import { DeleteChatDialog } from "./delete-chat-dialog";
 
 function WorkspaceSwitcher({
   workspaceId,
@@ -460,20 +476,42 @@ function ChatListRow({
   nested = false,
   onAddSubagent,
   onArchive,
+  onUnarchive,
   onDelete,
+  onExport,
+  onShare,
   onOpenInNewWindow,
   onOpenInPanel,
+  onRename,
   onSetVisibility,
+  onTogglePin,
   onOpen,
   onPrefetch,
+  pinned = false,
+  searchMatch,
 }: {
   active: boolean;
   canArchive?: boolean;
   item: ChatItem;
+  /** Set on a pinned chat: the menu offers Unpin instead of Pin. */
+  pinned?: boolean;
+  /**
+   * A search result: the matching message line (null for a title match) and
+   * whether the chat is archived. Replaces the status line when either is set.
+   */
+  searchMatch?: { snippet: string | null; archived: boolean };
+  onRename?: (id: string, title: string) => Promise<void>;
+  onTogglePin?: (id: string, pinned: boolean) => Promise<void>;
+  /** Downloads the chat as Markdown (a zip when it has images). */
+  onExport?: (id: string) => Promise<void>;
+  /** Opens the public-share dialog for this chat (not offered on nested rows). */
+  onShare?: (id: string, title: string) => void;
   /** A sub-agent conversation rendered under its parent row. */
   nested?: boolean;
   onAddSubagent?: (id: string, title: string) => void;
-  onArchive: (id: string) => void;
+  onArchive: (id: string) => Promise<void>;
+  /** Set on an archived chat: brings it back to the main list. */
+  onUnarchive?: (id: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onOpenInNewWindow?: (id: string) => void;
   /** Opens a nested conversation beside its parent (parent id, child id). */
@@ -488,10 +526,23 @@ function ChatListRow({
   const locale = useLocale();
   const t = useTranslations("dashboardNav");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [draftTitle, setDraftTitle] = useState(item.title);
+  const renameRequestedRef = useRef(false);
+  const renameInputRef = useRef<HTMLInputElement>(null);
+
+  // Select the whole title once the field is shown, so typing replaces it.
+  useEffect(() => {
+    if (renaming) renameInputRef.current?.select();
+  }, [renaming]);
   const status = item.status || "ready";
   const relativeUpdatedAt = formatShortRelativeTime(item.updatedAt, locale);
   const shared = isSharedChat(item);
   const parentThreadId = item.parentThreadId;
+  // The assistant depends on its own conversations: the server refuses
+  // deleting, archiving or re-scoping them, so they are not offered.
+  const hostOwned = isHostOwnedChat(item);
 
   const handleToggleVisibility = async () => {
     if (!onSetVisibility) return;
@@ -502,6 +553,81 @@ function ChatListRow({
       toast.error(t("chats.visibilityError"));
     }
   };
+
+  const handleArchive = async () => {
+    try {
+      await onArchive(item.id);
+    } catch {
+      toast.error(t("chats.archiveError"));
+    }
+  };
+
+  const handleUnarchive = async () => {
+    if (!onUnarchive) return;
+    try {
+      await onUnarchive(item.id);
+    } catch {
+      toast.error(t("chats.unarchiveError"));
+    }
+  };
+
+  const handleTogglePin = async () => {
+    if (!onTogglePin) return;
+    try {
+      await onTogglePin(item.id, !pinned);
+    } catch (error) {
+      toast.error(
+        (error as { code?: unknown }).code === "PIN_LIMIT_REACHED"
+          ? t("chats.pinLimit", { count: MAX_PINNED_THREADS })
+          : t("chats.pinError"),
+      );
+    }
+  };
+
+  const startRename = () => {
+    renameRequestedRef.current = true;
+    setDraftTitle(item.title);
+    setRenaming(true);
+  };
+
+  // Enter or leaving the field saves a changed title; Esc cancels.
+  const commitRename = async () => {
+    if (!renaming) return;
+    setRenaming(false);
+    const title = draftTitle.trim();
+    if (!onRename || !title || title === item.title) return;
+    try {
+      await onRename(item.id, title);
+    } catch {
+      toast.error(t("chats.renameError"));
+    }
+  };
+
+  if (renaming) {
+    return (
+      <SidebarMenuItem className={cn("relative px-2", nested && "pl-6")}>
+        <SidebarInput
+          ref={renameInputRef}
+          autoFocus
+          aria-label={t("chats.renameLabel")}
+          className="h-8 text-[13px]"
+          maxLength={200}
+          value={draftTitle}
+          onBlur={() => void commitRename()}
+          onChange={(event) => setDraftTitle(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              void commitRename();
+            } else if (event.key === "Escape") {
+              event.preventDefault();
+              setRenaming(false);
+            }
+          }}
+        />
+      </SidebarMenuItem>
+    );
+  }
 
   return (
     <SidebarMenuItem className={cn("relative px-2", nested && "pl-6")}>
@@ -565,15 +691,30 @@ function ChatListRow({
                   </Tooltip>
                 ) : null}
               </div>
-              <div className="mt-1 flex items-center gap-1.5 text-[10px] leading-4 text-muted-foreground/80">
-                <span>
-                  {t("chats.sourceCount", { count: item.sourceCount })}
-                </span>
-                <span aria-hidden="true">|</span>
-                <span>{t(`chats.status.${status}`)}</span>
-                <span aria-hidden="true">|</span>
-                <span>{relativeUpdatedAt}</span>
-              </div>
+              {searchMatch && (searchMatch.snippet || searchMatch.archived) ? (
+                <div className="mt-1 flex items-start gap-1.5 text-[11px] leading-4 text-muted-foreground">
+                  {searchMatch.archived ? (
+                    <span className="shrink-0 rounded-sm border border-sidebar-border px-1 text-[10px]">
+                      {t("chats.archivedBadge")}
+                    </span>
+                  ) : null}
+                  {searchMatch.snippet ? (
+                    <span className="line-clamp-2 min-w-0">
+                      {searchMatch.snippet}
+                    </span>
+                  ) : null}
+                </div>
+              ) : (
+                <div className="mt-1 flex items-center gap-1.5 text-[10px] leading-4 text-muted-foreground/80">
+                  <span>
+                    {t("chats.sourceCount", { count: item.sourceCount })}
+                  </span>
+                  <span aria-hidden="true">|</span>
+                  <span>{t(`chats.status.${status}`)}</span>
+                  <span aria-hidden="true">|</span>
+                  <span>{relativeUpdatedAt}</span>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -600,8 +741,46 @@ function ChatListRow({
               <span className="sr-only">{t("chats.openActions")}</span>
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-52">
-            {onSetVisibility ? (
+          <DropdownMenuContent
+            align="end"
+            className="w-52"
+            onCloseAutoFocus={(event) => {
+              // Keep focus in the rename field instead of the menu button.
+              if (renameRequestedRef.current) {
+                renameRequestedRef.current = false;
+                event.preventDefault();
+              }
+            }}
+          >
+            {!nested && onRename ? (
+              <DropdownMenuItem onSelect={startRename}>
+                <Pencil className="size-4" />
+                <span>{t("chats.rename")}</span>
+              </DropdownMenuItem>
+            ) : null}
+            {!nested && onTogglePin ? (
+              <DropdownMenuItem onSelect={() => void handleTogglePin()}>
+                {pinned ? (
+                  <PinOff className="size-4" />
+                ) : (
+                  <Pin className="size-4" />
+                )}
+                <span>{pinned ? t("chats.unpin") : t("chats.pin")}</span>
+              </DropdownMenuItem>
+            ) : null}
+            {onExport ? (
+              <DropdownMenuItem onSelect={() => void onExport(item.id)}>
+                <Download className="size-4" />
+                <span>{t("chats.export")}</span>
+              </DropdownMenuItem>
+            ) : null}
+            {!nested && onShare && !hostOwned ? (
+              <DropdownMenuItem onSelect={() => onShare(item.id, item.title)}>
+                <Share className="size-4" />
+                <span>{t("chats.share")}</span>
+              </DropdownMenuItem>
+            ) : null}
+            {onSetVisibility && !hostOwned ? (
               <DropdownMenuItem onSelect={() => void handleToggleVisibility()}>
                 {shared ? (
                   <>
@@ -638,22 +817,36 @@ function ChatListRow({
                 <span>{t("chats.openInNewWindow")}</span>
               </DropdownMenuItem>
             ) : null}
-            {canArchive ? (
-              <DropdownMenuItem onSelect={() => onArchive(item.id)}>
+            {canArchive && !hostOwned ? (
+              <DropdownMenuItem onSelect={() => void handleArchive()}>
                 <Archive className="size-4" />
                 <span>{t("chats.archive")}</span>
               </DropdownMenuItem>
             ) : null}
-            <DropdownMenuItem
-              onSelect={() => void onDelete(item.id)}
-              variant="destructive"
-            >
-              <Trash2 className="size-4" />
-              <span>{t("chats.delete")}</span>
-            </DropdownMenuItem>
+            {onUnarchive && !hostOwned ? (
+              <DropdownMenuItem onSelect={() => void handleUnarchive()}>
+                <ArchiveRestore className="size-4" />
+                <span>{t("chats.unarchive")}</span>
+              </DropdownMenuItem>
+            ) : null}
+            {hostOwned ? null : (
+              <DropdownMenuItem
+                onSelect={() => setConfirmingDelete(true)}
+                variant="destructive"
+              >
+                <Trash2 className="size-4" />
+                <span>{t("chats.delete")}</span>
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      <DeleteChatDialog
+        open={confirmingDelete}
+        title={item.title}
+        onOpenChange={setConfirmingDelete}
+        onConfirm={() => onDelete(item.id)}
+      />
     </SidebarMenuItem>
   );
 }
@@ -664,38 +857,74 @@ function ChatList({
   onToggleSearch,
   onSearchChange,
   headerActions,
+  titlebar = false,
+  belowHeader = null,
   activeId,
   hasMore = false,
   isLoadingMore = false,
   privateChats,
   sharedChats,
   archivedChats,
+  hasMoreArchived = false,
+  isLoadingArchived = false,
   onLoadMore,
+  onLoadArchived,
+  onLoadMoreArchived,
   onAddSubagent,
   onArchive,
+  onUnarchive,
   onClearPrivate,
   onClearArchived,
   onDelete,
+  onExport,
+  onShare,
   onOpenInNewWindow,
   onOpenInPanel,
+  onRename,
   onSetVisibility,
+  onTogglePin,
   onOpen,
   onPrefetch,
+  pinnedIds = [],
+  searchState,
 }: {
+  /** The viewer's pinned chats, newest pin first. */
+  pinnedIds?: readonly string[];
+  /** Server search results; while active they replace the list. */
+  searchState?: ChatSearchState;
+  onRename?: (id: string, title: string) => Promise<void>;
+  onTogglePin?: (id: string, pinned: boolean) => Promise<void>;
+  onExport?: (id: string) => Promise<void>;
+  /** Opens the public-share dialog for this chat (not offered on nested rows). */
+  onShare?: (id: string, title: string) => void;
   search: string;
   searchOpen: boolean;
   onToggleSearch: () => void;
   onSearchChange: (value: string) => void;
   headerActions: ReactNode;
+  /**
+   * The macOS client: this row is the window's titlebar row beside the
+   * traffic lights, so it holds only the icon actions, at the chat header's
+   * height, and drags the window by its blank space.
+   */
+  titlebar?: boolean;
+  /** Rendered between the header row and the search field. */
+  belowHeader?: ReactNode;
   activeId?: string;
   hasMore?: boolean;
   isLoadingMore?: boolean;
   privateChats: ChatItem[];
   sharedChats: ChatItem[];
   archivedChats: ChatItem[];
+  hasMoreArchived?: boolean;
+  isLoadingArchived?: boolean;
   onLoadMore?: () => void;
+  /** Called while the archived list is shown; loads it once per workspace. */
+  onLoadArchived?: () => Promise<void>;
+  onLoadMoreArchived?: () => Promise<void>;
   onAddSubagent?: (id: string, title: string) => void;
-  onArchive: (id: string) => void;
+  onArchive: (id: string) => Promise<void>;
+  onUnarchive?: (id: string) => Promise<void>;
   onOpenInNewWindow?: (id: string) => void;
   /** Opens a nested conversation beside its parent (parent id, child id). */
   onOpenInPanel?: (parentId: string, childId: string) => void;
@@ -713,19 +942,48 @@ function ChatList({
   const [isClearing, setIsClearing] = useState(false);
   const [filter, setFilter] = useState<SidebarChatFilter>("all");
   const isArchived = filter === "archived";
-  const items = useMemo(
+  const searching = Boolean(searchState?.active);
+  const { pinned: pinnedItems, rest: items } = useMemo(
     () =>
-      getSidebarChatItems({
-        privateChats,
-        sharedChats,
-        archivedChats,
+      splitPinnedChats(
+        getSidebarChatItems({
+          privateChats,
+          sharedChats,
+          archivedChats,
+          filter,
+        }).filter(
+          (item) =>
+            // Without server search, fall back to filtering loaded titles.
+            searchState ||
+            item.title.toLowerCase().includes(search.trim().toLowerCase()),
+        ),
+        pinnedIds,
         filter,
-      }).filter((item) =>
-        item.title.toLowerCase().includes(search.trim().toLowerCase()),
       ),
-    [privateChats, sharedChats, archivedChats, filter, search],
+    [
+      privateChats,
+      sharedChats,
+      archivedChats,
+      filter,
+      search,
+      searchState,
+      pinnedIds,
+    ],
   );
-  const canLoadMore = !isArchived && hasMore;
+  const pinnedSet = useMemo(() => new Set(pinnedIds), [pinnedIds]);
+  const canLoadMore = isArchived ? hasMoreArchived : hasMore;
+  const loadingMore = isArchived ? isLoadingArchived : isLoadingMore;
+  const loadMore = isArchived
+    ? onLoadMoreArchived
+      ? () => void onLoadMoreArchived()
+      : undefined
+    : onLoadMore;
+
+  // Archived chats are fetched the first time the list is shown, and again
+  // in another workspace (the loader changes with the workspace).
+  useEffect(() => {
+    if (isArchived && onLoadArchived) void onLoadArchived();
+  }, [isArchived, onLoadArchived]);
   // Clear actions keep their original scope, regardless of the visible subset.
   const onClear = search.trim()
     ? undefined
@@ -743,7 +1001,53 @@ function ChatList({
       ? t("chats.shared")
       : filter === "archived"
         ? t("chats.archived")
-        : t("chats.private");
+        : filter === "scheduled"
+          ? t("chats.scheduled")
+          : filter === "assistant"
+            ? t("chats.assistant")
+            : t("chats.private");
+
+  const renderChat = (item: ChatItem) => (
+    <Fragment key={item.id}>
+      <ChatListRow
+        active={item.id === activeId}
+        canArchive={!isArchived}
+        item={item}
+        pinned={pinnedSet.has(item.id)}
+        onAddSubagent={isArchived ? undefined : onAddSubagent}
+        onArchive={onArchive}
+        onUnarchive={isArchived ? onUnarchive : undefined}
+        onDelete={onDelete}
+        onExport={onExport}
+        onShare={onShare}
+        onOpenInNewWindow={onOpenInNewWindow}
+        onRename={isArchived ? undefined : onRename}
+        onSetVisibility={isArchived ? undefined : onSetVisibility}
+        onTogglePin={isArchived ? undefined : onTogglePin}
+        onOpen={onOpen}
+        onPrefetch={onPrefetch}
+      />
+      {/* One visible level: a chat's sub-agent conversations follow it. */}
+      {item.children?.map((child) => (
+        <ChatListRow
+          key={child.id}
+          active={child.id === activeId}
+          // A sub-agent chat is archived with its parent.
+          canArchive={false}
+          item={child}
+          nested
+          onArchive={onArchive}
+          onDelete={onDelete}
+          onExport={onExport}
+          onOpenInNewWindow={onOpenInNewWindow}
+          onOpenInPanel={onOpenInPanel}
+          onSetVisibility={isArchived ? undefined : onSetVisibility}
+          onOpen={onOpen}
+          onPrefetch={onPrefetch}
+        />
+      ))}
+    </Fragment>
+  );
 
   const handleClear = async () => {
     if (!onClear || isClearing) return;
@@ -758,10 +1062,26 @@ function ChatList({
 
   return (
     <>
-      <div className="group/section-label flex shrink-0 items-center gap-1 px-3 py-2">
-        <span className="flex-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+      <div
+        data-desktop-drag-region={titlebar ? "" : undefined}
+        className={cn(
+          "group/section-label flex shrink-0 items-center gap-1",
+          titlebar
+            ? "h-14 select-none border-b border-sidebar-border pl-7 pr-3"
+            : "px-3 py-2",
+        )}
+      >
+        <span
+          className={cn(
+            "flex-1",
+            titlebar
+              ? "sr-only"
+              : "text-[10px] uppercase tracking-[0.16em] text-muted-foreground",
+          )}
+        >
           {t("chats.heading")}
         </span>
+        {titlebar ? <span aria-hidden="true" className="flex-1" /> : null}
         {headerActions}
         {onClear && clearItems.length > 0 ? (
           <Dialog>
@@ -829,14 +1149,14 @@ function ChatList({
         <Button
           className="text-muted-foreground"
           variant="ghost"
-          size="icon-xs"
+          size={titlebar ? "icon-sm" : "icon-xs"}
           type="button"
           title={t("chats.searchAll")}
           aria-label={t("chats.searchAll")}
           aria-expanded={searchOpen}
           onClick={onToggleSearch}
         >
-          <Search className="size-3.5" />
+          <Search className={titlebar ? "size-4" : "size-3.5"} />
         </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -846,13 +1166,13 @@ function ChatList({
                 filter !== "all" &&
                   "bg-sidebar-accent text-sidebar-accent-foreground",
               )}
-              size="icon-xs"
+              size={titlebar ? "icon-sm" : "icon-xs"}
               type="button"
               variant="ghost"
               title={t("chats.filter")}
               aria-label={t("chats.filter")}
             >
-              <ListFilter className="size-3.5" />
+              <ListFilter className={titlebar ? "size-4" : "size-3.5"} />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
@@ -866,6 +1186,8 @@ function ChatList({
                   value === "all" ||
                   value === "shared" ||
                   value === "private" ||
+                  value === "scheduled" ||
+                  value === "assistant" ||
                   value === "archived"
                 ) {
                   setFilter(value);
@@ -884,6 +1206,14 @@ function ChatList({
                 <Lock className="size-4" />
                 {t("chats.private")}
               </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="scheduled">
+                <CalendarClock className="size-4" />
+                {t("chats.scheduled")}
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="assistant">
+                <ConciergeBell className="size-4" />
+                {t("chats.assistant")}
+              </DropdownMenuRadioItem>
               <DropdownMenuRadioItem value="archived">
                 <Archive className="size-4" />
                 {t("chats.archived")}
@@ -892,6 +1222,7 @@ function ChatList({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      {belowHeader}
       {searchOpen && (
         <div className="shrink-0 px-3 pb-2">
           <SidebarInput
@@ -905,73 +1236,101 @@ function ChatList({
         </div>
       )}
       <SidebarContent key={filter} className="min-h-0 overflow-y-auto">
-        <SidebarGroup className="px-0 pt-0">
-          <SidebarGroupContent>
-            <SidebarMenu className="gap-1 py-0.5">
-              {items.map((item) => (
-                <Fragment key={item.id}>
+        {searching && searchState ? (
+          <SidebarGroup className="px-0 pt-0">
+            <SidebarGroupContent>
+              <SidebarMenu className="gap-1 py-0.5">
+                {searchState.results.map((result) => (
                   <ChatListRow
-                    active={item.id === activeId}
-                    canArchive={!isArchived}
-                    item={item}
-                    onAddSubagent={isArchived ? undefined : onAddSubagent}
+                    key={result.thread.id}
+                    active={result.thread.id === activeId}
+                    canArchive={false}
+                    item={mapThreadToChatItem(result.thread)}
+                    searchMatch={{
+                      snippet:
+                        result.match.kind === "message"
+                          ? result.match.snippet
+                          : null,
+                      archived: result.archived,
+                    }}
                     onArchive={onArchive}
-                    onDelete={onDelete}
+                    onDelete={async (id) => {
+                      await onDelete(id);
+                      searchState.removeResult(id);
+                    }}
+                    onExport={onExport}
+                    onShare={onShare}
                     onOpenInNewWindow={onOpenInNewWindow}
-                    onSetVisibility={isArchived ? undefined : onSetVisibility}
                     onOpen={onOpen}
                     onPrefetch={onPrefetch}
                   />
-                  {/* One visible level: a chat's sub-agent conversations follow it. */}
-                  {item.children?.map((child) => (
-                    <ChatListRow
-                      key={child.id}
-                      active={child.id === activeId}
-                      canArchive={!isArchived}
-                      item={child}
-                      nested
-                      onArchive={onArchive}
-                      onDelete={onDelete}
-                      onOpenInNewWindow={onOpenInNewWindow}
-                      onOpenInPanel={onOpenInPanel}
-                      onSetVisibility={isArchived ? undefined : onSetVisibility}
-                      onOpen={onOpen}
-                      onPrefetch={onPrefetch}
-                    />
-                  ))}
-                </Fragment>
-              ))}
-            </SidebarMenu>
-            {items.length === 0 ? (
-              <p
-                className="px-3 py-4 text-xs text-muted-foreground"
-                role="status"
-              >
-                {isLoadingMore && !isArchived
-                  ? t("chats.loadingChats")
-                  : canLoadMore
-                    ? t("chats.noMatching")
-                    : filter !== "all"
-                      ? t(`chats.filterEmpty.${filter}`)
-                      : t("chats.noneYet")}
-              </p>
-            ) : null}
-            {canLoadMore && onLoadMore ? (
-              <div className="px-3 py-1.5">
-                <Button
-                  className="h-auto w-full justify-center px-0 py-1 text-[11px] font-medium text-muted-foreground hover:bg-transparent hover:text-foreground"
-                  disabled={isLoadingMore}
-                  onClick={onLoadMore}
-                  size="xs"
-                  type="button"
-                  variant="ghost"
+                ))}
+              </SidebarMenu>
+              {searchState.results.length === 0 ? (
+                <p
+                  className="px-3 py-4 text-xs text-muted-foreground"
+                  role="status"
                 >
-                  {isLoadingMore ? t("chats.loading") : t("chats.loadMore")}
-                </Button>
-              </div>
+                  {searchState.loading
+                    ? t("chats.searching")
+                    : searchState.failed
+                      ? t("chats.searchError")
+                      : t("chats.searchEmpty")}
+                </p>
+              ) : null}
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ) : (
+          <>
+            {pinnedItems.length > 0 ? (
+              <SidebarGroup className="px-0 pt-0">
+                <p className="px-5 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  {t("chats.pinned")}
+                </p>
+                <SidebarGroupContent>
+                  <SidebarMenu className="gap-1 py-0.5">
+                    {pinnedItems.map(renderChat)}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
             ) : null}
-          </SidebarGroupContent>
-        </SidebarGroup>
+            <SidebarGroup className="px-0 pt-0">
+              <SidebarGroupContent>
+                <SidebarMenu className="gap-1 py-0.5">
+                  {items.map(renderChat)}
+                </SidebarMenu>
+                {items.length === 0 && pinnedItems.length === 0 ? (
+                  <p
+                    className="px-3 py-4 text-xs text-muted-foreground"
+                    role="status"
+                  >
+                    {loadingMore
+                      ? t("chats.loadingChats")
+                      : canLoadMore
+                        ? t("chats.noMatching")
+                        : filter !== "all"
+                          ? t(`chats.filterEmpty.${filter}`)
+                          : t("chats.noneYet")}
+                  </p>
+                ) : null}
+                {canLoadMore && loadMore ? (
+                  <div className="px-3 py-1.5">
+                    <Button
+                      className="h-auto w-full justify-center px-0 py-1 text-[11px] font-medium text-muted-foreground hover:bg-transparent hover:text-foreground"
+                      disabled={loadingMore}
+                      onClick={loadMore}
+                      size="xs"
+                      type="button"
+                      variant="ghost"
+                    >
+                      {loadingMore ? t("chats.loading") : t("chats.loadMore")}
+                    </Button>
+                  </div>
+                ) : null}
+              </SidebarGroupContent>
+            </SidebarGroup>
+          </>
+        )}
       </SidebarContent>
     </>
   );
@@ -987,8 +1346,16 @@ export function DashboardSidebarChatPanel({
   search,
   onSearchChange,
   archivedChats,
+  hasMoreArchivedChats,
+  isLoadingArchivedChats,
   activeChatId,
   onArchiveChat,
+  onUnarchiveChat,
+  onRenameChat,
+  onTogglePinChat,
+  pinnedChatIds,
+  onLoadArchivedChats,
+  onLoadMoreArchivedChats,
   onClearArchivedChats,
   onClearPrivateChats,
   onCreateAgentChat,
@@ -1022,8 +1389,17 @@ export function DashboardSidebarChatPanel({
   search: string;
   onSearchChange: (value: string) => void;
   archivedChats: ChatItem[];
+  hasMoreArchivedChats: boolean;
+  isLoadingArchivedChats: boolean;
   activeChatId: string;
-  onArchiveChat: (id: string) => void;
+  onArchiveChat: (id: string) => Promise<void>;
+  onUnarchiveChat: (id: string) => Promise<void>;
+  onRenameChat: (id: string, title: string) => Promise<void>;
+  onTogglePinChat: (id: string, pinned: boolean) => Promise<void>;
+  /** The viewer's pinned chats, newest pin first. */
+  pinnedChatIds: readonly string[];
+  onLoadArchivedChats: () => Promise<void>;
+  onLoadMoreArchivedChats: () => Promise<void>;
   onClearArchivedChats: () => Promise<void>;
   onClearPrivateChats: () => Promise<void>;
   /** Starts a persona-owned thread, nested under `parentThreadId` when set. */
@@ -1059,6 +1435,19 @@ export function DashboardSidebarChatPanel({
   const [chatListResetKey, setChatListResetKey] = useState(0);
 
   const [searchOpen, setSearchOpen] = useState(false);
+  const searchChats = useCallback(
+    (q: string) =>
+      workspaceId
+        ? contentClient.searchThreads(workspaceId, { q })
+        : Promise.resolve({ items: [] }),
+    [workspaceId],
+  );
+  const searchState = useChatSearch(search, searchChats);
+  const exportChat = useChatExport(workspaceId);
+  const [shareChat, setShareChat] = useState<{
+    id: string;
+    title: string;
+  } | null>(null);
   const [personaPicker, setPersonaPicker] = useState<{
     parentThreadId: string | null;
     parentTitle: string | null;
@@ -1070,33 +1459,41 @@ export function DashboardSidebarChatPanel({
   const [personaManagerOpen, setPersonaManagerOpen] = useState(false);
   const [personaRefreshToken, setPersonaRefreshToken] = useState(0);
 
+  const workspaceRow = (
+    <>
+      <div className="min-w-0 flex-1">
+        <WorkspaceSwitcher
+          activeWorkspace={workspaceName}
+          workspaceId={workspaceId}
+          workspaces={workspaces}
+          onCreateWorkspace={onCreateWorkspace}
+          onRenameWorkspace={onRenameWorkspace}
+          onWorkspaceChange={onWorkspaceChange}
+        />
+      </div>
+      {heading}
+    </>
+  );
+  // In the macOS client's titlebar row the list actions match the chat
+  // header's controls instead of the small section-label ones.
+  const actionSize = desktopTitlebar ? "icon-sm" : "icon-xs";
+  const actionIcon = desktopTitlebar ? "size-4" : "size-3";
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <SidebarHeader className="shrink-0 gap-0 px-3 pb-0 pt-0">
         {brand}
-        {/* The PC client hides the brand, so the strip above the workspace
-            switcher reserves only what the traffic lights occupy, and drags
-            the window instead of sitting there empty. */}
-        {desktopTitlebar ? (
+        {/* The PC client hides the brand and its traffic lights reach into
+            this column's first row. Text beside them reads badly, so there
+            the first row holds the list's icon actions and the workspace
+            switcher follows it (see ChatList's titlebar row). */}
+        {desktopTitlebar ? null : (
           <div
-            aria-hidden="true"
-            data-desktop-drag-region=""
-            className="h-10 shrink-0 select-none"
-          />
-        ) : null}
-        <div className={cn("flex min-w-0 items-center gap-1", "h-12 sm:h-14")}>
-          <div className="min-w-0 flex-1">
-            <WorkspaceSwitcher
-              activeWorkspace={workspaceName}
-              workspaceId={workspaceId}
-              workspaces={workspaces}
-              onCreateWorkspace={onCreateWorkspace}
-              onRenameWorkspace={onRenameWorkspace}
-              onWorkspaceChange={onWorkspaceChange}
-            />
+            className={cn("flex min-w-0 items-center gap-1", "h-12 sm:h-14")}
+          >
+            {workspaceRow}
           </div>
-          {heading}
-        </div>
+        )}
         {showCreateChat ? (
           <div className="flex items-center gap-1">
             <Button
@@ -1125,28 +1522,38 @@ export function DashboardSidebarChatPanel({
           onSearchChange("");
         }}
         onSearchChange={onSearchChange}
+        titlebar={desktopTitlebar}
+        belowHeader={
+          desktopTitlebar ? (
+            <div className="flex h-12 min-w-0 shrink-0 items-center gap-1 px-3">
+              {workspaceRow}
+            </div>
+          ) : null
+        }
         headerActions={
           <>
             <Button
+              className={cn(desktopTitlebar && "text-muted-foreground")}
               onClick={() =>
                 setPersonaPicker({ parentThreadId: null, parentTitle: null })
               }
-              size="icon-xs"
+              size={actionSize}
               title={t("sidebar.newAgentChat")}
               type="button"
               variant="ghost"
             >
-              <Bot className="size-3" />
+              <Bot className={actionIcon} />
               <span className="sr-only">{t("sidebar.newAgentChat")}</span>
             </Button>
             <Button
+              className={cn(desktopTitlebar && "text-muted-foreground")}
               onClick={onOpenMembers}
-              size="icon-xs"
+              size={actionSize}
               title={t("sidebar.inviteManageMembers")}
               type="button"
               variant="ghost"
             >
-              <Share2 className="size-3" />
+              <Share2 className={actionIcon} />
               <span className="sr-only">
                 {t("sidebar.inviteManageMembers")}
               </span>
@@ -1159,9 +1566,20 @@ export function DashboardSidebarChatPanel({
         privateChats={privateChats}
         sharedChats={sharedChats}
         archivedChats={archivedChats}
+        hasMoreArchived={hasMoreArchivedChats}
+        isLoadingArchived={isLoadingArchivedChats}
         onLoadMore={onLoadMoreChats}
+        onLoadArchived={onLoadArchivedChats}
+        onLoadMoreArchived={onLoadMoreArchivedChats}
         onAddSubagent={openSubagentPicker}
         onArchive={onArchiveChat}
+        onUnarchive={onUnarchiveChat}
+        onRename={onRenameChat}
+        onTogglePin={onTogglePinChat}
+        onExport={exportChat}
+        onShare={(id, title) => setShareChat({ id, title })}
+        pinnedIds={pinnedChatIds}
+        searchState={searchState}
         onOpenInNewWindow={onOpenChatInNewWindow}
         onOpenInPanel={onOpenChatInPanel}
         onClearPrivate={onClearPrivateChats}
@@ -1188,6 +1606,17 @@ export function DashboardSidebarChatPanel({
         refreshToken={personaRefreshToken}
         workspaceId={workspaceId}
       />
+      {workspaceId ? (
+        <ShareChatDialog
+          chatId={shareChat?.id ?? ""}
+          chatTitle={shareChat?.title ?? ""}
+          onOpenChange={(open) => {
+            if (!open) setShareChat(null);
+          }}
+          open={shareChat !== null}
+          workspaceId={workspaceId}
+        />
+      ) : null}
       <DashboardPersonaManager
         onChanged={() => setPersonaRefreshToken((value) => value + 1)}
         onOpenChange={setPersonaManagerOpen}

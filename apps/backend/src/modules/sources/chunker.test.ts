@@ -162,3 +162,22 @@ test("chunkSourceContent does not start HTML chunks inside tag attributes", asyn
     );
   }
 });
+
+test("chunkSourceContent keeps the markdown section path of each chunk", async () => {
+  const body = (word: string) => `${word} `.repeat(120).trim();
+  const content = ["# CLI", body("intro"), "## Exit codes", body("codes")].join("\n\n");
+  const chunks = await chunkSourceContent(content, { chunkSize: 700 });
+
+  assert.equal(chunks[0]?.headingPath, "CLI");
+  assert.equal(chunks.at(-1)?.headingPath, "CLI > Exit codes");
+});
+
+test("chunkSourceContent keeps the language of each chunk", async () => {
+  const sentence =
+    "我们认为这个国家的经济发展还会继续，学者们说现在的问题是开放与改革之间的关系。";
+  const content = ["# 概述", sentence.repeat(12), "## 附录", sentence.repeat(12)].join("\n\n");
+  const chunks = await chunkSourceContent(content, { chunkSize: 300 });
+
+  assert.ok(chunks.length > 1);
+  for (const chunk of chunks) assert.equal(chunk.language, "zh-CN");
+});

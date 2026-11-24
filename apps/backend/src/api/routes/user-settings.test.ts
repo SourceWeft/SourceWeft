@@ -1,7 +1,6 @@
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiResponse, toApiError } from "../response/api-response";
-import { PreviewAccessError } from "../../modules/preview/errors";
 
 const mocks = vi.hoisted(() => ({
   session: vi.fn(),
@@ -22,7 +21,6 @@ import { registerUserSettingsRoutes } from "./user-settings";
 
 const settings = {
   appearance: { theme: "system", language: "system" },
-  preview: { gmail: true },
 };
 function app() {
   const result = new Hono();
@@ -46,7 +44,7 @@ describe("user settings API security boundary", () => {
     mocks.update.mockResolvedValue({ settings });
   });
 
-  it("returns current user's flags without accepting a target user from the client", async () => {
+  it("returns current user's settings without accepting a target user from the client", async () => {
     const response = await app().request(
       "/v1/user/settings?userId=another-user",
     );
@@ -55,6 +53,7 @@ describe("user settings API security boundary", () => {
     expect(mocks.get).toHaveBeenCalledWith({ userId: "current-user" });
   });
 
+  // `preview` was a retired settings key; the patch schema stays strict.
   it.each([
     { preview: { gmail: true } },
     { appearance: { theme: "dark" }, preview: { gmail: true } },
@@ -83,7 +82,7 @@ describe("user settings API security boundary", () => {
     expect(mocks.update).not.toHaveBeenCalled();
   });
 
-  it("surfaces storage failure without returning default flags", async () => {
+  it("surfaces storage failure without returning default settings", async () => {
     mocks.get.mockRejectedValue(new Error("database unavailable"));
     const response = await app().request("/v1/user/settings");
     expect(response.status).toBe(500);
@@ -91,11 +90,5 @@ describe("user settings API security boundary", () => {
       code: "INTERNAL_SERVER_ERROR",
       message: "Internal server error",
     });
-  });
-
-  it("maps preview denials to safe forbidden responses", () => {
-    const error = toApiError(new PreviewAccessError());
-    expect(error.statusCode).toBe(403);
-    expect(error.code).toBe("PREVIEW_ACCESS_DENIED");
   });
 });

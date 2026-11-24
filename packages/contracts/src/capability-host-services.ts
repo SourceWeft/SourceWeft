@@ -31,6 +31,16 @@ export type CapabilityHostEnvironment = {
 };
 
 /**
+ * A public-internet-only fetch handed to a connector that reads a user-supplied
+ * URL. The host owns the policy (address checks on, no internal origins,
+ * bounded cross-origin redirects); the holder must `close()` the scope.
+ */
+export type ConnectorPublicFetchScope = {
+  readonly fetch: typeof fetch;
+  close(): Promise<void>;
+};
+
+/**
  * What a connector capability hands the host: the adapter(s) the connector
  * registry drives, and the agent tool definitions that expose the connector's
  * actions to a turn. Returned together because they are two halves of one
@@ -52,6 +62,8 @@ export type CapabilityConnectorContribution = {
  */
 export type CreateConnectorAdapters = (input: {
   readonly env: CapabilityHostEnvironment;
+  /** Absent on hosts that do not provide a public-internet-only fetch. */
+  readonly publicFetch?: () => ConnectorPublicFetchScope;
   readonly logger?: {
     warn?(message: string, meta?: Record<string, unknown>): void;
   };

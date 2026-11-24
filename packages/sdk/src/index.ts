@@ -1,4 +1,7 @@
 export * from "./client-factory";
+export * from "./agent-tasks-client";
+export * from "./assistant-client";
+export * from "./notifications-client";
 export * from "./billing-client";
 export * from "./connectors-client";
 export * from "./content-client";
@@ -34,6 +37,13 @@ export type {
   CapabilityToolOption,
   ListCapabilityCatalogResponse,
   ConnectorActivityItem,
+  ConnectorSelectionBrowseResult,
+  ConnectorSelectionDescribeItem,
+  ConnectorSelectionDescribeResult,
+  ConnectorSelectionEntry,
+  ConnectorSelectionItem,
+  ConnectorSelectionSearchResult,
+  ConnectorSelectionSpec,
   ConnectorSyncBlock,
   ConnectorWebhookConfigResponse,
   ConnectorWebhookEvent,

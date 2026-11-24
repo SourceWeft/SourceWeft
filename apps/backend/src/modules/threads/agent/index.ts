@@ -36,6 +36,7 @@ import {
 import { getChatCheckpointer } from "../../../shared/chat-checkpointer";
 import { config } from "../../../shared/config";
 import type { TraceContext } from "../../llm-observability";
+import type { BillingScope } from "../../../shared/model-gateway/billing/scope";
 
 type DeepAgentBackend = NonNullable<
   Parameters<typeof createDeepAgent>[0]
@@ -73,6 +74,19 @@ export interface CreateThreadAgentParams {
   /** Run start origin (epoch ms) for the step-budget wall clock. */
   turnStartedAtMs?: number | null;
   interruptOn?: Record<string, boolean | InterruptOnConfig>;
+  /** Nobody is present: no `askUser` tool. See `unattended-policy.ts`. */
+  unattended?: boolean;
+  /** False binds no `write_todos` tool (a Router). Default true. */
+  todoList?: boolean;
+  /** False leaves the chat base prompt out; see `buildRuntimeSystemPrompt`. */
+  chatBasePrompt?: boolean;
+  /**
+   * Host-set credit ceiling for this run; undefined leaves the run uncapped.
+   * See `StreamThreadEventInput.creditCap`.
+   */
+  creditCap?: number;
+  /** Reads the turn's billing scope so the credit-cap middleware can check it. */
+  getBillingScope?: () => BillingScope | undefined;
   /**
    * The chat model to drive the agent with.
    *
@@ -114,12 +128,16 @@ export async function createThreadAgent(
     contextCompressionReportKey: params.contextCompressionReportKey,
     commandExecutionPolicy: params.commandExecutionPolicy,
     interruptOn: params.interruptOn,
+    askUser: !params.unattended,
+    todoList: params.todoList,
     extraMiddleware: params.extraMiddleware,
     filesystemMounts,
     toolObservabilityContext: params.toolObservabilityContext,
     traceContext: params.traceContext,
     runId: params.runId,
     turnStartedAtMs: params.turnStartedAtMs,
+    creditCap: params.creditCap,
+    getBillingScope: params.getBillingScope,
   });
 
   const agent = createDeepAgent({
@@ -128,6 +146,7 @@ export async function createThreadAgent(
     systemPrompt: buildRuntimeSystemPrompt(params.runtimePrompt, {
       mounts: filesystemMounts,
       personaPrompt: params.personaPrompt,
+      chatBasePrompt: params.chatBasePrompt,
     }),
     middleware,
     checkpointer,
@@ -215,5 +234,9 @@ export {
   updateWorkspacePersona,
 } from "./personas";
 export type { PersonaOverrides, PersonaSpec } from "./personas";
+
+// The policy of a turn nobody attends (a scheduled run): the turn preparer
+// narrows permissions with it, the stream service reads nothing else.
+export { applyUnattendedToolPolicy } from "./unattended-policy";
 
 export { agentCheckpointFromStepStopError } from "./turn/step-stop-outcome";

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-log-sign-in-failure"
+description = "Enables the log_sign_in_failure command without any pre-configured scope."
+commands.allow = ["log_sign_in_failure"]
+
+[[permission]]
+identifier = "deny-log-sign-in-failure"
+description = "Denies the log_sign_in_failure command without any pre-configured scope."
+commands.deny = ["log_sign_in_failure"]

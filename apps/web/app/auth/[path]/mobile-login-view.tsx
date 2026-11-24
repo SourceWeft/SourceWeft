@@ -3,12 +3,9 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlertCircle, ArrowLeft, CheckCircle2, Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import {
-  Alert,
-  AlertDescription,
-} from "@sourceweft/ui-web/components/ui/alert";
+import { toast } from "sonner";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { Input } from "@sourceweft/ui-web/components/ui/input";
 import { AppleIcon, GoogleIcon } from "../../_components/brand-icons";
@@ -34,6 +31,7 @@ import {
   type MobileSignInMethods,
 } from "../../../lib/mobile-sign-in-methods";
 import { nativeBridge } from "../../../lib/native-bridge";
+import { setMobileSessionHint } from "../../../lib/mobile-app-shell";
 import { publicRuntimeConfig } from "../../../lib/public-runtime-config";
 
 type MobileAuthMode = "sign-in" | "sign-up";
@@ -51,11 +49,6 @@ type SessionResult = {
   } | null;
   session?: unknown;
   user?: unknown;
-};
-
-type MobileAuthNotice = {
-  message: string;
-  variant: "error" | "success";
 };
 
 function resolveInitialMode(path: string): MobileAuthMode {
@@ -95,15 +88,22 @@ function hasActiveSession(result: unknown) {
 
 export function MobileLoginView({ path }: { path: string }) {
   const router = useRouter();
+
+  // Someone on this page has no session, so the next launch starts here. Fetch
+  // the dashboard's code meanwhile, so the step after signing in is quick.
+  useEffect(() => {
+    setMobileSessionHint(false);
+    router.prefetch("/dashboard/chat");
+  }, [router]);
   const t = useTranslations("authPages.mobileLogin");
   const tAuthUi = useTranslations("authUi");
+  const tSso = useTranslations("authLocale.plugins.sso");
   const [mode, setMode] = useState<MobileAuthMode>(() =>
     resolveInitialMode(path),
   );
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [notice, setNotice] = useState<MobileAuthNotice | null>(null);
   const [isGoogleSubmitting, setIsGoogleSubmitting] = useState(false);
   const [isAppleSubmitting, setIsAppleSubmitting] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -196,7 +196,7 @@ export function MobileLoginView({ path }: { path: string }) {
 
   function switchMode(nextMode: MobileAuthMode) {
     setMode(nextMode);
-    setNotice(null);
+    toast.dismiss();
   }
 
   async function completeAuthSuccess(
@@ -213,17 +213,11 @@ export function MobileLoginView({ path }: { path: string }) {
     if (source === "sign-up") {
       setMode("sign-in");
       setPassword("");
-      setNotice({
-        message: t("signUpSuccessNoSession"),
-        variant: "success",
-      });
+      toast.success(t("signUpSuccessNoSession"));
       return;
     }
 
-    setNotice({
-      message: t("signInErrorNoSession"),
-      variant: "error",
-    });
+    toast.error(t("signInErrorNoSession"));
   }
 
   async function submitForm(event: FormEvent<HTMLFormElement>) {
@@ -232,7 +226,7 @@ export function MobileLoginView({ path }: { path: string }) {
       return;
     }
 
-    setNotice(null);
+    toast.dismiss();
     setIsSubmitting(true);
 
     try {
@@ -258,7 +252,7 @@ export function MobileLoginView({ path }: { path: string }) {
           method: "email",
           surface: "mobile",
         });
-        setNotice({ message: resultError, variant: "error" });
+        toast.error(resultError);
         return;
       }
 
@@ -274,15 +268,14 @@ export function MobileLoginView({ path }: { path: string }) {
         method: "email",
         surface: "mobile",
       });
-      setNotice({
-        message: getErrorMessage(
+      toast.error(
+        getErrorMessage(
           caughtError,
           mode === "sign-up"
             ? t("signUpErrorFallback")
             : t("signInErrorFallback"),
         ),
-        variant: "error",
-      });
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -294,7 +287,7 @@ export function MobileLoginView({ path }: { path: string }) {
       return;
     }
 
-    setNotice(null);
+    toast.dismiss();
     setIsGoogleSubmitting(true);
 
     try {
@@ -309,7 +302,7 @@ export function MobileLoginView({ path }: { path: string }) {
       });
       const message = getMobileGoogleSignInError(caughtError);
       if (message) {
-        setNotice({ message, variant: "error" });
+        toast.error(message);
       }
     } finally {
       setIsGoogleSubmitting(false);
@@ -321,7 +314,7 @@ export function MobileLoginView({ path }: { path: string }) {
       return;
     }
 
-    setNotice(null);
+    toast.dismiss();
     setIsAppleSubmitting(true);
 
     try {
@@ -336,7 +329,7 @@ export function MobileLoginView({ path }: { path: string }) {
       });
       const message = getMobileAppleSignInError(caughtError);
       if (message) {
-        setNotice({ message, variant: "error" });
+        toast.error(message);
       }
     } finally {
       setIsAppleSubmitting(false);
@@ -353,12 +346,9 @@ export function MobileLoginView({ path }: { path: string }) {
       <div className="flex min-h-full flex-col py-[max(1.5rem,env(safe-area-inset-top),env(safe-area-inset-bottom))] [@media(max-height:760px)]:py-4">
         <div className="my-auto w-full">
           <div className="mb-7 flex flex-col items-center text-center [@media(max-height:760px)]:mb-4">
-            <div className="mb-4 flex items-center gap-2.5 [@media(max-height:760px)]:mb-3">
-              <Logo className="h-8 w-8 rounded-lg [@media(max-height:760px)]:h-7 [@media(max-height:760px)]:w-7" />
-              <span className="text-[1.7rem] font-semibold tracking-normal text-foreground [@media(max-height:760px)]:text-2xl">
-                SourceWeft
-              </span>
-            </div>
+            {/* The mark alone: the heading below already names SourceWeft. */}
+            <Logo className="mb-5 h-12 w-12 rounded-xl [@media(max-height:760px)]:mb-3 [@media(max-height:760px)]:h-10 [@media(max-height:760px)]:w-10" />
+
             <h1 className="max-w-72 text-balance text-[1.7rem] font-medium leading-tight tracking-normal text-foreground [@media(max-height:760px)]:text-2xl">
               {copy.description}
             </h1>
@@ -455,20 +445,6 @@ export function MobileLoginView({ path }: { path: string }) {
               value={password}
             />
 
-            {notice && (
-              <Alert
-                className="rounded-2xl"
-                variant={notice.variant === "error" ? "destructive" : "default"}
-              >
-                {notice.variant === "error" ? (
-                  <AlertCircle />
-                ) : (
-                  <CheckCircle2 />
-                )}
-                <AlertDescription>{notice.message}</AlertDescription>
-              </Alert>
-            )}
-
             <Button
               className="h-12 w-full rounded-full text-sm font-semibold [@media(max-height:760px)]:h-11"
               disabled={formDisabled}
@@ -479,6 +455,17 @@ export function MobileLoginView({ path }: { path: string }) {
               {copy.submit}
             </Button>
           </form>
+
+          {!isSignUp && (
+            <div className="mt-3 flex justify-center [@media(max-height:760px)]:mt-2">
+              <Link
+                className="text-sm font-medium text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground"
+                href="/auth/sso"
+              >
+                {tSso("signInWithSso")}
+              </Link>
+            </div>
+          )}
 
           <div className="mt-4 flex items-center justify-center gap-1.5 text-sm text-muted-foreground [@media(max-height:760px)]:mt-2">
             {isSignUp ? (
@@ -509,10 +496,6 @@ export function MobileLoginView({ path }: { path: string }) {
               </>
             )}
           </div>
-
-          <p className="mt-3 text-center text-xs text-muted-foreground [@media(max-height:760px)]:mt-2 [@media(max-height:680px)]:hidden">
-            {t("appleComingSoon")}
-          </p>
 
           <p className="mt-6 px-5 text-center text-xs leading-5 text-muted-foreground [@media(max-height:760px)]:mt-3 [@media(max-height:680px)]:px-2 [@media(max-height:680px)]:leading-4">
             {t.rich("termsNotice", {

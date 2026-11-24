@@ -62,10 +62,12 @@ import { resolveArtifactPreviewRenderer } from "./preview-registry";
 import { ReportEvidencePanel } from "./report-evidence-panel";
 import type { ArtifactPreviewLayout } from "./types";
 import { isArtifactPending, payloadRecord } from "./utils";
+import { useLiveArtifact } from "./artifact-live-refresh";
 import { withArtifactVersionMediaProxyUrls } from "../chat-canvas/use-artifact-version-media";
+import { swipeBackProps } from "@/lib/left-edge-swipe";
 
 export function ArtifactPreviewPanel({
-  artifact,
+  artifact: openedArtifact,
   className,
   layout = "panel",
   onClose,
@@ -80,8 +82,11 @@ export function ArtifactPreviewPanel({
   onDeleted?: () => void;
   workspaceId?: string | null;
 }) {
+  // A background generation (a table) refreshes itself while it runs.
+  const artifact = useLiveArtifact(openedArtifact, workspaceId);
   const displayLocale = useDisplayLocale();
   const t = useTranslations("dashboardChatFiles");
+  const tHub = useTranslations("dashboardSourcesHub");
   const pageUrl = resolveArtifactPageUrl({ artifact, workspaceId });
   const proxyFileUrl = resolveArtifactProxyFileUrl({ artifact, workspaceId });
   const downloadUrl = resolveArtifactDownloadUrl({ artifact, workspaceId });
@@ -245,6 +250,7 @@ export function ArtifactPreviewPanel({
         <div className="flex items-center justify-between gap-2">
           {onClose ? (
             <Button
+              {...(isPageLayout ? {} : swipeBackProps)}
               className="gap-1.5"
               onClick={onClose}
               size="xs"
@@ -336,7 +342,11 @@ export function ArtifactPreviewPanel({
             ) : null}
           </div>
           <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
-            <TypeBadge label={artifactTypeLabel(artifact.artifactType)} />
+            <TypeBadge
+              label={artifactTypeLabel(artifact.artifactType, (key) =>
+                tHub(key),
+              )}
+            />
             <TypeBadge label={artifact.status} />
             <span>
               {formatDisplayDate(new Date(artifact.createdAt), displayLocale)}

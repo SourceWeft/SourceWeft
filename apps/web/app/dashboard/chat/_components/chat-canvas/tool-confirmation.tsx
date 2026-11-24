@@ -439,7 +439,7 @@ function ToolConfirmationPanel({
           </ConfirmationTitle>
         </div>
       ) : null}
-      <ConfirmationActions className="shrink-0 flex-wrap border-t border-border/50 bg-background pt-2">
+      <ConfirmationActions className="shrink-0 flex-wrap self-stretch border-t border-border/50 pt-3">
         {offersAlwaysAllow ? (
           <label className="mr-auto flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
             {t("toolConfirmation.rememberFor")}

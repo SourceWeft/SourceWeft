@@ -206,3 +206,51 @@ test("the wrapped response keeps status, headers and url", async () => {
   assert.equal(response.url, "https://provider.example/v1/chat/completions");
   await readAll(response);
 });
+
+test("notes the upstream that served a stream from its first provider field", async () => {
+  const chunk = (text: string, provider: string) => ({
+    ...contentChunk(text),
+    provider,
+  });
+  const text =
+    sseLine(chunk("a", "Sail Research")) +
+    sseLine(chunk("b", "Other Host")) +
+    sseLine(usageOnlyChunk) +
+    "data: [DONE]\n\n";
+
+  const capture = createProviderResponseCapture();
+  const wrapped = captureProviderResponseFetch(async () =>
+    sseResponse([encoder.encode(text)]),
+  );
+  const received = await runWithProviderResponseCapture(capture, async () =>
+    readAll(await wrapped("https://provider.example/v1/chat/completions")),
+  );
+
+  assert.equal(received, text);
+  assert.equal(capture.upstreamProvider, "Sail Research");
+  assert.deepEqual(capture.usage, usage);
+});
+
+test("a later request in the same capture forgets the earlier upstream", async () => {
+  const capture = createProviderResponseCapture();
+  let call = 0;
+  const wrapped = captureProviderResponseFetch(async () =>
+    sseResponse([
+      encoder.encode(
+        call++ === 0
+          ? sseLine({ ...contentChunk("a"), provider: "First Host" })
+          : sseLine(contentChunk("b")),
+      ),
+    ]),
+  );
+  await runWithProviderResponseCapture(capture, async () => {
+    await readAll(
+      await wrapped("https://provider.example/v1/chat/completions"),
+    );
+    await readAll(
+      await wrapped("https://provider.example/v1/chat/completions"),
+    );
+  });
+
+  assert.equal(capture.upstreamProvider, undefined);
+});

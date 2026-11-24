@@ -7,6 +7,7 @@ import { twoFactorPlugin } from "@better-auth-ui/core/plugins/two-factor";
 import { multiSessionPlugin } from "@better-auth-ui/core/plugins/multi-session";
 import { apiKeyPlugin } from "@better-auth-ui/core/plugins/api-key";
 import { organizationPlugin } from "@better-auth-ui/core/plugins/organization";
+import { ssoPlugin } from "@/lib/auth/sso-plugin";
 import { buildAuthLocale } from "./auth-locale";
 import en from "../../messages/en.json";
 import cn from "../../messages/zh-CN.json";
@@ -29,6 +30,7 @@ const plugins = [
   multiSessionPlugin(),
   apiKeyPlugin({ organization: true }),
   organizationPlugin({}),
+  ssoPlugin(),
 ];
 const expected = leaves({
   core: defaultAuthLocale.localization,

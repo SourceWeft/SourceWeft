@@ -1,20 +1,30 @@
 import { billingRuntime as billingService } from "../../billing-host/bindings";
 import { ConnectorActionRunner } from "./action-runner";
 import { ConnectorOAuthService } from "./oauth-service";
+import { ConnectorPersonalDataService } from "./personal-data-service";
 import {
   connectorAdaptersReady,
   registerBuiltinConnectorAdapters,
 } from "./register-builtin-adapters";
 import { ConnectorService } from "./service";
 import { ConnectorSyncOrchestrator } from "./sync-orchestrator";
+import { ConnectorTeamDataRemoval } from "./team-data-removal";
 import { ConnectorWebhookService } from "./webhook-service";
 
 export { ConnectorActionRunner } from "./action-runner";
 export { ConnectorError, isConnectorError } from "./errors";
 export { ConnectorOAuthService } from "./oauth-service";
+export {
+  ConnectorPersonalDataService,
+  PERSONAL_DATA_DEFAULT_CYCLE_DAYS,
+  PERSONAL_DATA_BATCH_SIZE,
+  PERSONAL_DATA_BEARER_ATTEMPTS,
+} from "./personal-data-service";
+export type { PersonalDataPassSummary } from "./personal-data-service";
 export { ConnectorRegistry, connectorRegistry } from "./registry";
 export { ConnectorService } from "./service";
 export { ConnectorSyncOrchestrator } from "./sync-orchestrator";
+export { ConnectorTeamDataRemoval } from "./team-data-removal";
 export { ConnectorWebhookService } from "./webhook-service";
 export type {
   ConnectorAdapter,
@@ -39,6 +49,14 @@ export { connectorAdaptersReady };
 
 export const connectorService = new ConnectorService();
 export const connectorOAuthService = new ConnectorOAuthService();
+// Account and organization deletion: revoke at the providers, then delete.
+export const connectorTeamDataRemoval = new ConnectorTeamDataRemoval(
+  connectorOAuthService,
+);
+// The scheduler (its own timer, like the OAuth keep-alive sweep) drives this.
+export const connectorPersonalDataService = new ConnectorPersonalDataService(
+  connectorOAuthService,
+);
 export const connectorSyncOrchestrator = new ConnectorSyncOrchestrator(
   billingService,
 );

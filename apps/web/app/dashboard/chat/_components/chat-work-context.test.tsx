@@ -1,11 +1,6 @@
 // @vitest-environment jsdom
 import assert from "node:assert/strict";
-import {
-  act,
-  createElement,
-  type ReactElement,
-  type ReactNode,
-} from "react";
+import { act, createElement, type ReactElement, type ReactNode } from "react";
 import { beforeEach, afterEach, test, vi } from "vitest";
 vi.mock("../../_components/dashboard-chat-state", () => ({
   useDashboardChatState: () => ({
@@ -124,7 +119,6 @@ import {
   unmountAll,
   withIntl,
 } from "@/test/react";
-
 
 let view: Mounted | null = null;
 let container: HTMLDivElement, context: ChatCreationContext;
@@ -636,7 +630,10 @@ const selectedThread = {
   target: { deviceId: "a", name: "Mac A", online: true },
 };
 /** An existing conversation's header, as the chat page mounts it. */
-async function openConversationDetails(threadId: string, nativeId: string | null) {
+async function openConversationDetails(
+  threadId: string,
+  nativeId: string | null,
+) {
   await render(
     createElement(ChatWorkContext, {
       workspaceId: "w",
@@ -671,7 +668,9 @@ test("the file manager is named generically off macOS and a refusal is shown", a
   mocks.request.mockResolvedValue(selectedThread);
   mocks.desktopInfo.mockResolvedValue({ platform: "windows" });
   mocks.reveal.mockRejectedValue(
-    new Error("WORKSPACE_MISSING: The directory does not exist yet or was replaced."),
+    new Error(
+      "WORKSPACE_MISSING: The directory does not exist yet or was replaced.",
+    ),
   );
   await openConversationDetails("details-windows", "a");
   assert.equal(buttons("Show in Finder").length, 0);
@@ -697,9 +696,7 @@ test("a conversation on another computer offers copying the path but no reveal a
     assert.equal(mocks.desktopInfo.mock.calls.length, 0);
     await click(button("Copy path"));
     await flush(2);
-    assert.deepEqual(writeText.mock.calls, [
-      [selectedThread.workingDirectory],
-    ]);
+    assert.deepEqual(writeText.mock.calls, [[selectedThread.workingDirectory]]);
     assert.ok(button("Copied"));
     assert.equal(buttons("Copy path").length, 0);
   } finally {
@@ -775,19 +772,19 @@ test("a computer that needs its sandbox runtime is listed with the reason and op
       row.textContent ?? "",
       /The sandbox runtime needs to be installed\. Open Settings to install it\./,
     );
-    // The trigger keeps saying where the conversation will run.
+    // The trigger says where the conversation will run, and what that needs; not Cloud.
     assert.equal(
       container
         .querySelector('[aria-label="Choose cloud or computer"]')
         ?.textContent?.trim(),
-      "Cloud",
+      "This computer · Needs setup",
     );
     mocks.push.mockClear();
     await click(row);
     assert.deepEqual(requests, ["local"]);
     // Choosing the row is not a run-location choice, and the menu closes behind it.
     assert.equal(mocks.push.mock.calls.length, 0);
-    assert.deepEqual(context.target, { kind: "cloud" });
+    assert.equal(context.target, null);
     assert.equal(setupRow(), null);
   } finally {
     unsubscribe();
@@ -890,8 +887,12 @@ test("a computer that needs setup appears once even when it is also a connected 
   desktopReports(needsSetup("downloadRuntime"), "a");
   await openRunLocationMenu();
   assert.ok(setupRow());
+  const trigger =
+    container.querySelector('[aria-label="Choose cloud or computer"]')
+      ?.textContent ?? "";
   assert.equal(
-    (container.textContent ?? "").split("This computer").length - 1,
+    (container.textContent ?? "").replace(trigger, "").split("This computer")
+      .length - 1,
     1,
   );
   // The listed entry for the same computer gives way to the row that explains it.
@@ -976,4 +977,175 @@ test("a failed install is not blamed on a setup step that is not the download", 
   assert.match(text, /Needs setup/);
   assert.equal(text.includes("SANDBOX_DOWNLOAD_FAILED"), false);
   assert.equal(button("Try again", container), undefined);
+});
+
+/** The trigger of a new chat's run-location control. */
+const runLocationTrigger = () =>
+  container
+    .querySelector('[aria-label="Choose cloud or computer"]')
+    ?.textContent?.trim();
+
+test("the desktop app defaults a new chat to this computer, not Cloud", async () => {
+  mocks.isDesktop.mockReturnValue(true);
+  mocks.native.mockResolvedValue({ deviceId: "a" });
+  mocks.hostStatus.mockResolvedValue({
+    deviceId: "a",
+    connected: true,
+    readiness: { state: "ready" },
+  });
+  await render(createElement(RunLocation));
+  assert.equal(context.ready, true);
+  assert.deepEqual(context.target, { kind: "local", deviceId: "a" });
+  assert.equal(runLocationTrigger(), "Mac A");
+});
+
+test.each([
+  [
+    "needs the runtime",
+    needsSetup("downloadRuntime"),
+    "This computer · Needs setup",
+  ],
+  [
+    "is installing the runtime",
+    needsSetup("none", "installing"),
+    "This computer · Preparing…",
+  ],
+  [
+    "needs an app update",
+    needsSetup("updateApp", "bundleNewer"),
+    "This computer · Needs setup",
+  ],
+])(
+  "a desktop new chat waits for this computer when it %s, and never moves to Cloud",
+  async (_case, readiness, label) => {
+    desktopReports(readiness);
+    await render(createElement(RunLocation));
+    assert.equal(context.target, null);
+    assert.equal(context.ready, false);
+    assert.equal(context.localPending, true);
+    assert.equal(context.error, null);
+    assert.equal(runLocationTrigger(), label);
+    // The refresh that follows keeps waiting; nothing flips to Cloud on its own.
+    await act(async () => {
+      await context.refresh();
+    });
+    assert.equal(context.target, null);
+    assert.equal(mocks.push.mock.calls.length, 0);
+    assert.equal(
+      mocks.replace.mock.calls.some(([url]) => /computer=/.test(url)),
+      false,
+    );
+  },
+);
+
+test("a desktop new chat shows a plain waiting state while the host is still being read", async () => {
+  mocks.isDesktop.mockReturnValue(true);
+  mocks.native.mockResolvedValue(null);
+  mocks.hostStatus.mockReturnValue(new Promise(() => {}));
+  await render(createElement(RunLocation));
+  assert.equal(context.target, null);
+  assert.equal(context.ready, false);
+  assert.equal(runLocationTrigger(), "Connecting…");
+});
+
+test("the pending desktop chat becomes a chat on this computer once it is ready, without a reload", async () => {
+  desktopReports(needsSetup("downloadRuntime"));
+  await render(createElement(RunLocation));
+  assert.equal(context.target, null);
+  mocks.native.mockResolvedValue({ deviceId: "a" });
+  mocks.hostStatus.mockResolvedValue({
+    deviceId: "a",
+    connected: true,
+    readiness: { state: "ready" },
+  });
+  await act(async () => {
+    await context.refresh();
+  });
+  await flush(8);
+  assert.deepEqual(context.target, { kind: "local", deviceId: "a" });
+  assert.equal(context.ready, true);
+  assert.equal(runLocationTrigger(), "Mac A");
+});
+
+test("choosing Cloud while this computer is not ready is kept, and the chat can start", async () => {
+  desktopReports(needsSetup("downloadRuntime"));
+  await openRunLocationMenu();
+  await click(button("Cloud", container));
+  const next = new URL(mocks.push.mock.lastCall?.[0], "http://localhost");
+  assert.equal(next.searchParams.get("computer"), "cloud");
+  mocks.query = new URLSearchParams(next.searchParams);
+  await reset();
+  await render(createElement(RunLocation));
+  assert.deepEqual(context.target, { kind: "cloud" });
+  assert.equal(context.ready, true);
+  assert.equal(context.localPending, false);
+  assert.equal(runLocationTrigger(), "Cloud");
+});
+
+test("a Cloud choice stays Cloud even after this computer becomes ready", async () => {
+  mocks.query = new URLSearchParams("computer=cloud&draft=d");
+  mocks.isDesktop.mockReturnValue(true);
+  mocks.native.mockResolvedValue({ deviceId: "a" });
+  mocks.hostStatus.mockResolvedValue({
+    deviceId: "a",
+    connected: true,
+    readiness: { state: "ready" },
+  });
+  await render(createElement(RunLocation));
+  await act(async () => {
+    await context.refresh();
+  });
+  assert.deepEqual(context.target, { kind: "cloud" });
+  assert.equal(runLocationTrigger(), "Cloud");
+});
+
+test.each([
+  [
+    "a host that reports local execution as unsupported",
+    { state: "unsupported" },
+    true,
+  ],
+  ["a platform the desktop app cannot run local on", undefined, false],
+])(
+  "%s leaves Cloud as the run location",
+  async (_case, readiness, platformSupported) => {
+    mocks.isDesktop.mockReturnValue(true);
+    mocks.native.mockResolvedValue(null);
+    mocks.hostStatus.mockResolvedValue({
+      deviceId: null,
+      connected: false,
+      platformSupported,
+      ...(readiness ? { readiness } : {}),
+    });
+    await render(createElement(RunLocation));
+    assert.deepEqual(context.target, { kind: "cloud" });
+    assert.equal(context.ready, true);
+    assert.equal(runLocationTrigger(), "Cloud");
+  },
+);
+
+test("the browser keeps defaulting a new chat to Cloud without reading a host", async () => {
+  await render(createElement(RunLocation));
+  assert.deepEqual(context.target, { kind: "cloud" });
+  assert.equal(context.ready, true);
+  assert.equal(context.localPending, false);
+  assert.equal(mocks.hostStatus.mock.calls.length, 0);
+  assert.equal(runLocationTrigger(), "Cloud");
+});
+
+test("an existing conversation keeps its own run location in the desktop app", async () => {
+  desktopReports(needsSetup("downloadRuntime"));
+  mocks.request.mockResolvedValue({
+    executionTarget: { kind: "cloud" },
+    target: null,
+  });
+  await render(
+    createElement(ChatWorkContext, { workspaceId: "w", threadId: "thread-c" }),
+  );
+  await flush(8);
+  assert.match(
+    container.querySelector('[data-testid="thread-work-context"]')
+      ?.textContent ?? "",
+    /Cloud/,
+  );
 });

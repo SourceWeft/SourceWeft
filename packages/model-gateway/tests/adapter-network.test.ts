@@ -19,6 +19,9 @@ function isolateAmbientCredentials(t: TestContext) {
   const values = {
     OPENAI_API_KEY: "ambient-openai-key-must-not-be-sent",
     OPENAI_ADMIN_KEY: "ambient-admin-key-must-not-be-sent",
+    OPENAI_ORGANIZATION: "ambient-organization-must-not-be-sent",
+    OPENAI_ORG_ID: "ambient-org-id-must-not-be-sent",
+    OPENAI_PROJECT_ID: "ambient-project-must-not-be-sent",
     ANTHROPIC_API_KEY: "ambient-anthropic-key-must-not-be-sent",
     ANTHROPIC_AUTH_TOKEN: "ambient-anthropic-token-must-not-be-sent",
     AZURE_OPENAI_API_KEY: "ambient-azure-key-must-not-be-sent",
@@ -154,6 +157,49 @@ for (const kind of compatibleChatKinds) {
   }
 }
 
+// CRITICAL check (Task 4 brief step 3): proves the *installed*
+// @langchain/openai Completions converter (`convertMessagesToCompletionsMessageParams`)
+// passes an unknown `{ type: "video_url", video_url: { url } }` content part
+// through unchanged onto the wire. This exercises the real SDK conversion —
+// not a mock of it — via the same openrouter/cloudflare-aig chat adapters that
+// YouTube transcription and other compat routes use.
+const videoContentMessages = [
+  {
+    role: "user" as const,
+    content: [
+      { type: "text" as const, text: "Summarize this video" },
+      {
+        type: "video_url" as const,
+        video_url: { url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" },
+      },
+    ],
+  },
+];
+
+for (const kind of ["openrouter", "cloudflare-aig"] satisfies ProviderKind[]) {
+  test(`${kind} chat forwards a video_url content part unchanged to the wire`, async (t) => {
+    isolateAmbientCredentials(t);
+    const requests: Request[] = [];
+    const fetch: typeof globalThis.fetch = async (input, init) => {
+      const request = new Request(input, init);
+      requests.push(request);
+      return openAiChatResponse(false);
+    };
+    const gateway = createModelGateway(providerConfig(kind, fetch));
+    const result = await gateway.chat.complete(
+      { model: "network-test", messages: videoContentMessages },
+      { maxRetries: 0 },
+    );
+    assert.equal(result.raw.content, "hello");
+    assert.equal(requests.length, 1);
+    const body = (await requests[0]!.json()) as {
+      messages: Array<{ role: string; content: unknown }>;
+    };
+    const userMessage = body.messages.find((m) => m.role === "user");
+    assert.deepEqual(userMessage?.content, videoContentMessages[0]!.content);
+  });
+}
+
 for (const kind of [
   "openai",
   "openai-compatible",
@@ -276,8 +322,14 @@ test("Anthropic uses injected fetch and does not add the ambient auth token", as
   assert.equal(result.raw.content, "hello");
   assert.equal(requests.length, 1);
   assert.equal(requests[0]!.url, "http://models.internal:8080/v1/messages");
-  assert.equal(requests[0]!.headers.get("x-api-key"), "workspace-key");
-  assert.equal(requests[0]!.headers.get("authorization"), null);
+  // Anthropic SDK 1.x sends the key as a bearer token under the dated API
+  // version; the older `x-api-key` header is gone from the request.
+  assert.equal(
+    requests[0]!.headers.get("authorization"),
+    "Bearer workspace-key",
+  );
+  assert.equal(requests[0]!.headers.get("x-api-key"), null);
+  assert.equal(requests[0]!.headers.get("anthropic-version"), "2026-10-21");
   assert.doesNotMatch(JSON.stringify([...requests[0]!.headers]), /ambient-/);
 });
 
@@ -338,8 +390,11 @@ test("Anthropic streaming uses the same injected fetch and explicit credential",
   assert.equal(content, "hello");
   assert.equal(requests.length, 1);
   assert.equal(requests[0]!.url, "http://models.internal:8080/v1/messages");
-  assert.equal(requests[0]!.headers.get("x-api-key"), "workspace-key");
-  assert.equal(requests[0]!.headers.get("authorization"), null);
+  assert.equal(
+    requests[0]!.headers.get("authorization"),
+    "Bearer workspace-key",
+  );
+  assert.equal(requests[0]!.headers.get("x-api-key"), null);
   assert.doesNotMatch(JSON.stringify([...requests[0]!.headers]), /ambient-/);
 });
 

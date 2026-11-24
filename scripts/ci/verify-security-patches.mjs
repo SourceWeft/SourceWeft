@@ -39,7 +39,7 @@ function verifyVersion(parent, name, version, entry = name) {
   throw new Error(`Cannot identify installed package ${name}`);
 }
 
-for (const app of [web, docs]) verifyVersion(app, "next", "16.4.2");
+for (const app of [web, docs]) verifyVersion(app, "next", "16.4.5");
 for (const app of [backend, web]) {
   verifyVersion(app, "sharp", "0.35.5");
   verifyVersion(app, "vitest", "4.1.12");

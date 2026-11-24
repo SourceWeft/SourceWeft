@@ -19,6 +19,11 @@ import {
  * chunk payloads (content, `additional_kwargs.reasoning_content`,
  * tool_call_chunks), the final message (content, tool_calls, usage_metadata,
  * response_metadata.finish_reason) and the generation observation.
+ *
+ * One entry was re-recorded since: `tool-call-deltas/invoke/v3`, when
+ * @langchain/core 1.3 changed the v3 events for tool-call arguments from
+ * `block-delta` snapshots to `tool-call-delta` slices. Only its `callbacks`
+ * changed; the final message, observation and request body did not.
  */
 const golden = JSON.parse(
   readFileSync(

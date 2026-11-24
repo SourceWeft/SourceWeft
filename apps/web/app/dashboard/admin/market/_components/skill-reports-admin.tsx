@@ -7,6 +7,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { Textarea } from "@sourceweft/ui-web/components/ui/textarea";
+import { useAdminOverview } from "../../_components/admin-overview-context";
 import {
   AdminEmpty,
   AdminError,
@@ -273,6 +274,7 @@ function ReportCard({
 /** Reports about community skills and their reviews (§17.2). */
 export function SkillReportsAdmin() {
   const t = useTranslations("dashboardSkillReports");
+  const { refresh: refreshOverview } = useAdminOverview();
   const [status, setStatus] = React.useState<SkillReportStatus>("open");
   const [items, setItems] = React.useState<SkillReportItem[]>([]);
   const [nextCursor, setNextCursor] = React.useState<string | null>(null);
@@ -389,6 +391,7 @@ export function SkillReportsAdmin() {
               report={report}
               onResolved={(count) => {
                 setNotice(t("admin.resolved", { count }));
+                refreshOverview();
                 void load(status);
               }}
             />

@@ -12,9 +12,9 @@
     "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
-    "@langchain/daytona": "0.2.2",
+    "@langchain/daytona": "0.2.3",
     "@sourceweft/builtin-tool-sandbox": "workspace:*",
-    "deepagents": "1.13.1"
+    "deepagents": "1.16.5"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",

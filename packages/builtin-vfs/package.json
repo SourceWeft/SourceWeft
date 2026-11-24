@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@sourceweft/contracts": "workspace:*",
-    "deepagents": "1.13.1"
+    "deepagents": "1.16.5"
   },
   "devDependencies": {
     "@sourceweft/capability-contracts": "workspace:*",

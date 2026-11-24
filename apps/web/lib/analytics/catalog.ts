@@ -29,6 +29,12 @@ export const ANALYTICS_PARAMS = {
   skill_count: { kind: "metric" },
   source_count: { kind: "metric" },
   tool_count: { kind: "metric" },
+  launch_ms: { kind: "metric" },
+  ttfb_ms: { kind: "metric" },
+  start_ms: { kind: "metric" },
+  page_ms: { kind: "metric" },
+  scripts_ms: { kind: "metric" },
+  run_ms: { kind: "metric" },
   // GA4 recommended ecommerce parameters: no registration needed.
   value: { kind: "ga4_standard" },
   currency: { kind: "ga4_standard" },
@@ -110,6 +116,25 @@ export const ANALYTICS_EVENTS = {
   },
   workspace_created: { params: [], keyEvent: false },
   team_created: { params: ["edition"], keyEvent: false },
+  // The iOS app finished starting: `launch_ms` from process start until the
+  // page hydrated, `ttfb_ms` the page's own wait for its first byte, `source`
+  // network | cache (served by the app's service worker), `surface` the page.
+  // `launch_ms` splits into consecutive phases: `start_ms` native start until
+  // the page's navigation, `page_ms` until its HTML arrived, `scripts_ms` until
+  // the last build script loaded, `run_ms` until hydrated.
+  mobile_launch: {
+    params: [
+      "source",
+      "surface",
+      "launch_ms",
+      "ttfb_ms",
+      "start_ms",
+      "page_ms",
+      "scripts_ms",
+      "run_ms",
+    ],
+    keyEvent: false,
+  },
 } as const satisfies Record<string, EventDefinition>;
 
 export type AnalyticsEventName = keyof typeof ANALYTICS_EVENTS;
@@ -119,8 +144,7 @@ export const CONTEXT_PARAMS = ["platform", "app_version"] as const;
 
 export type AnalyticsPrimitive = string | number | boolean | null | undefined;
 export type AnalyticsValue =
-  | AnalyticsPrimitive
-  | Record<string, AnalyticsPrimitive>[];
+  AnalyticsPrimitive | Record<string, AnalyticsPrimitive>[];
 
 export type EventParams<N extends AnalyticsEventName> = Partial<
   Record<(typeof ANALYTICS_EVENTS)[N]["params"][number], AnalyticsValue>

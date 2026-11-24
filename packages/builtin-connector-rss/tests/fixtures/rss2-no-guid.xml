@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<rss version="2.0">
+  <channel>
+    <title>No guid</title>
+    <item>
+      <title>Has link</title>
+      <link>https://example.com/a?utm_medium=x&amp;k=v#frag</link>
+      <pubDate>Mon, 03 Nov 2025 10:00:00 GMT</pubDate>
+      <description>one</description>
+    </item>
+    <item>
+      <title>No link either</title>
+      <pubDate>Mon, 03 Nov 2025 11:00:00 GMT</pubDate>
+      <description>two</description>
+    </item>
+  </channel>
+</rss>

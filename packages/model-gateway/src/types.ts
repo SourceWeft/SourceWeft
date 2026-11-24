@@ -142,6 +142,13 @@ export interface RequestOptions {
   idempotencyKey?: string;
   signal?: AbortSignal;
   suppressLangChainObservation?: boolean;
+  /**
+   * Set by the failover loop for one target attempt: another route target
+   * remains. The SDK then gives a rate-limit, quota or auth failure straight
+   * back for failover instead of retrying the same provider. Callers leave it
+   * unset.
+   */
+  failoverAvailable?: boolean;
 }
 
 export interface UsageInfo {
@@ -299,6 +306,12 @@ export type GatewayMessageContentPart =
   | {
       type: "image_url";
       image_url: {
+        url: string;
+      };
+    }
+  | {
+      type: "video_url";
+      video_url: {
         url: string;
       };
     };
@@ -477,6 +490,31 @@ export interface RouteDecision {
   provider: string;
   providerKind: ProviderKind;
   providerRouting?: ProviderRoutingConfig;
+  /** Where this attempt sits in its request's failover chain. */
+  attempt?: RouteAttempt;
+}
+
+/**
+ * One target attempt within a request's failover chain, recorded on every
+ * generation so fallbacks can be counted from the records alone: an attempt
+ * served by a provider other than `primaryProvider` is a fallback, whether it
+ * followed a failure (`failoverFrom`) or a cooldown (`cooldownSkipped`).
+ */
+export interface RouteAttempt {
+  /** 1-based position in this request's candidate order. */
+  index: number;
+  /** Number of candidates this request had. */
+  of: number;
+  /** The provider the route ranks first, before any cooldown demotion. */
+  primaryProvider: string;
+  /** Earlier attempts of this request that failed, in order. */
+  failoverFrom?: Array<{
+    provider: string;
+    providerModel: string;
+    errorCode: GatewayErrorCode;
+  }>;
+  /** Targets ranked ahead of this one that were skipped for cooldown. */
+  cooldownSkipped?: Array<{ provider: string; providerModel: string }>;
 }
 
 export type GatewayOperation =

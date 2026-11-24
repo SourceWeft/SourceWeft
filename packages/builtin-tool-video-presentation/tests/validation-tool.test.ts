@@ -761,3 +761,124 @@ test("visual validation forwards cancellation, disposes rendering, and fences it
   assert.equal(receipts, 0);
   assert.equal(wipWrites, 0);
 });
+
+function progressTool(options: {
+  profile: boolean;
+  renderPort?: VideoPresentationRenderPort;
+  installExitCode?: number;
+}) {
+  const sourceBytes = new TextEncoder().encode(JSON.stringify(draft()));
+  return createValidateVideoPresentationTool({
+    renderPort: options.renderPort ?? successfulRenderPort(),
+    profile: options.profile
+      ? {
+          gatewayConfigId: "vision-gateway",
+          profileAlias: "vision-default",
+          modelAlias: "vision-model",
+        }
+      : null,
+    services: createFakeVideoServices({
+      receipts: {
+        issueCurrentRunReceipt: async () => ({ receiptId: "receipt" }),
+      },
+      sandbox: {
+        downloadCurrentFile: async () => new Uint8Array([0xff, 0xd8, 0xff]),
+        executeCurrent: async (input) => ({
+          exitCode: input.command.includes("pnpm install")
+            ? (options.installExitCode ?? 0)
+            : 0,
+          output: "ok",
+        }),
+        captureCurrentTree: async () => draftTree(sourceBytes),
+      },
+      workBlobs: {
+        putIfAbsent: async (input) => ({
+          blobRef:
+            input.contentType === "video/mp4" ? "video-wip" : "cover-wip",
+          contentDigest: input.contentDigest,
+        }),
+      },
+      modelGateway: {
+        getClient: async () =>
+          ({
+            chat: {
+              complete: async () => ({
+                model: "vision-model",
+                raw: {
+                  content: JSON.stringify({
+                    verdicts: [{ slideNumber: 1, ok: true, issues: [] }],
+                  }),
+                },
+              }),
+            },
+          }) as never,
+      },
+    }),
+  });
+}
+
+const progressArgs = {
+  projectRoot: "/workspace/video",
+  sourceJsonPath: "/workspace/video/video-presentation.draft.json",
+};
+
+test("validation reports each stage to the stream before it runs", async () => {
+  const events: Array<Record<string, unknown>> = [];
+  const output = (await progressTool({ profile: true }).invoke(progressArgs, {
+    toolCallId: "validation-call",
+    writer: (event: Record<string, unknown>) => events.push(event),
+  } as never)) as Record<string, unknown>;
+
+  assert.equal(output.status, "passed");
+  assert.deepEqual(
+    events.map((event) => event.stage),
+    ["install", "typecheck", "smoke", "samples", "review", "render", "saving"],
+  );
+  for (const event of events) {
+    assert.equal(event.type, "validate_video_presentation_progress");
+    assert.equal(event.tool, "validate_video_presentation");
+    assert.equal(event.toolCallId, "validation-call");
+  }
+});
+
+test("validation without a vision profile skips the review stage", async () => {
+  const events: Array<Record<string, unknown>> = [];
+  const output = (await progressTool({ profile: false }).invoke(progressArgs, {
+    toolCallId: "validation-call",
+    writer: (event: Record<string, unknown>) => events.push(event),
+  } as never)) as Record<string, unknown>;
+
+  assert.equal(output.status, "passed");
+  assert.deepEqual(
+    events.map((event) => event.stage),
+    ["install", "typecheck", "smoke", "samples", "render", "saving"],
+  );
+});
+
+test("a failed install reports only the stages that ran", async () => {
+  const events: Array<Record<string, unknown>> = [];
+  const output = (await progressTool({
+    profile: false,
+    installExitCode: 1,
+  }).invoke(progressArgs, {
+    toolCallId: "validation-call",
+    writer: (event: Record<string, unknown>) => events.push(event),
+  } as never)) as Record<string, unknown>;
+
+  assert.equal(output.status, "failed");
+  assert.deepEqual(
+    events.map((event) => event.stage),
+    ["install"],
+  );
+});
+
+test("a broken progress channel never changes the validation result", async () => {
+  const output = (await progressTool({ profile: false }).invoke(progressArgs, {
+    toolCallId: "validation-call",
+    writer: () => {
+      throw new Error("stream closed");
+    },
+  } as never)) as Record<string, unknown>;
+
+  assert.equal(output.status, "passed");
+});

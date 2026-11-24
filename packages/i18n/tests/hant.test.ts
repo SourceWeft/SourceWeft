@@ -71,3 +71,11 @@ test("the billing top-up glossary entries are scoped to whole phrases, not a bar
     "選擇儲值包並在付款前核對總額。",
   );
 });
+
+test("table columns are 欄 in Taiwan usage while 列表 and 列出 stay", () => {
+  assert.equal(toTaiwanTraditional("{columns} 列"), "{columns} 欄");
+  assert.equal(toTaiwanTraditional("列设置"), "欄設定");
+  assert.equal(toTaiwanTraditional("要显示的列"), "要顯示的欄");
+  assert.equal(toTaiwanTraditional("对话列表"), "對話列表");
+  assert.equal(toTaiwanTraditional("列出工具"), "列出工具");
+});

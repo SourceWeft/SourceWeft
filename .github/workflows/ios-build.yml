@@ -42,6 +42,10 @@ jobs:
       APPLE_DEVELOPMENT_TEAM: PBML833M58
     steps:
       - uses: actions/checkout@v4
+      # App Store Connect only accepts builds made with the iOS 26 SDK. The
+      # runner's default Xcode is older, so both jobs select Xcode 26 explicitly.
+      - name: Select Xcode 26
+        run: sudo xcode-select -s /Applications/Xcode_26.2.app
       - uses: pnpm/action-setup@v4
         with:
           version: 10.19.0
@@ -99,6 +103,10 @@ jobs:
       APP_STORE_CONNECT_PRIVATE_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY_BASE64 }}
     steps:
       - uses: actions/checkout@v4
+      # App Store Connect only accepts builds made with the iOS 26 SDK. The
+      # runner's default Xcode is older, so both jobs select Xcode 26 explicitly.
+      - name: Select Xcode 26
+        run: sudo xcode-select -s /Applications/Xcode_26.2.app
       - name: Check required signing secrets
         run: node scripts/ci/ios-build.mjs check-testflight-secrets
       - uses: pnpm/action-setup@v4
@@ -122,7 +130,7 @@ jobs:
       # applies manual signing from IOS_CERTIFICATE, IOS_CERTIFICATE_PASSWORD and
       # IOS_MOBILE_PROVISION (the Xcode project and export options follow).
       - name: Build and sign the App Store archive
-        run: pnpm --filter @sourceweft/mobile exec tauri ios build --export-method app-store-connect --ci
+        run: pnpm --filter @sourceweft/mobile exec tauri ios build --export-method app-store-connect --build-number ${{ github.run_number }} --ci
       - name: Verify the signed IPA
         run: node scripts/ci/ios-build.mjs verify-ipa
       - name: Upload to TestFlight

@@ -36,6 +36,8 @@ import { createSourceWeftToolCallCountChannelsMiddleware } from "./tool-call-cou
 import { createSourceWeftStepBudgetMiddleware } from "./step-budget";
 import { createSourceWeftModelRetryMiddleware } from "./model-call-observability";
 import { createSourceWeftClosingToolGovernanceMiddleware } from "./closing-tool-governance";
+import { createRunCreditCapMiddleware } from "./run-credit-cap";
+import type { BillingScope } from "../../../../shared/model-gateway/billing/scope";
 
 const RETRYABLE_READ_TOOL_NAMES = [
   AGENT_TOOL_NAMES.searchSources,
@@ -52,8 +54,9 @@ const RETRYABLE_READ_TOOL_NAMES = [
 // generic repeat-tool-call reminder.
 const ASK_USER_RUN_LIMIT = 3;
 
-function askUserMiddleware(): AgentMiddleware[] {
-  if (!config.chat.agent.askUserEnabled) {
+function askUserMiddleware(allowed = true): AgentMiddleware[] {
+  // `allowed` is false for a turn nobody attends: there is no one to answer.
+  if (!allowed || !config.chat.agent.askUserEnabled) {
     return [];
   }
   return [
@@ -71,6 +74,10 @@ export type SourceWeftAgentMiddlewareStackInput = {
   chatProfileConfig?: unknown;
   commandExecutionPolicy?: CommandExecutionPolicy;
   interruptOn?: Parameters<typeof humanInTheLoopMiddleware>[0]["interruptOn"];
+  /** False leaves the `askUser` tool out (an unattended turn). Default true. */
+  askUser?: boolean;
+  /** False leaves `write_todos` and its prompt out (a Router). Default true. */
+  todoList?: boolean;
   contextCompressionReportKey?: string;
   execution?: LangChainModelExecutionConfig;
   extraMiddleware?: AgentMiddleware[];
@@ -84,10 +91,20 @@ export type SourceWeftAgentMiddlewareStackInput = {
   runId?: string | null;
   /** Run start origin for the step-budget wall clock (epoch ms). */
   turnStartedAtMs?: number | null;
+  /**
+   * Host-set credit ceiling for this run (e.g. a ticket's worker-run budget).
+   * Undefined leaves the run uncapped. The threads module has no notion of
+   * what set it; see `StreamThreadEventInput.creditCap`.
+   */
+  creditCap?: number;
+  /** Reads the turn's billing scope; see run-credit-cap.ts. */
+  getBillingScope?: () => BillingScope | undefined;
 };
 
 export type SourceWeftSubagentMiddlewareStackInput = {
   interruptOn?: Parameters<typeof humanInTheLoopMiddleware>[0]["interruptOn"];
+  /** False leaves the `askUser` tool out (an unattended turn). Default true. */
+  askUser?: boolean;
   backend: AnyBackendProtocol;
   chatProfileConfig?: unknown;
   model: BaseLanguageModel;
@@ -97,6 +114,16 @@ export type SourceWeftSubagentMiddlewareStackInput = {
   runId?: string | null;
   /** Root run start origin; child scopes share the run's wall clock. */
   turnStartedAtMs?: number | null;
+  /**
+   * Host-set credit ceiling for this run; see
+   * `SourceWeftAgentMiddlewareStackInput.creditCap`. A subagent's model calls
+   * settle into the same shared `BillingScope` as the root graph's, so the
+   * cap must gate them too — otherwise a run can overshoot it by a whole
+   * delegated subagent's step budget before the root graph gets to check again.
+   */
+  creditCap?: number;
+  /** Reads the turn's billing scope; see run-credit-cap.ts. */
+  getBillingScope?: () => BillingScope | undefined;
 };
 
 /**
@@ -113,8 +140,8 @@ export function createSourceWeftSubagentMiddlewareStack(
     turnStartedAtMs: input.turnStartedAtMs,
   });
   return [
-    // Must precede every toolCallLimitMiddleware so the count channels bind to a
-    // concurrent-safe reducer (parallel `task` subagents write them at once).
+    // Declares the tool-call count channels on every stack: the step budget
+    // resets them even when no toolCallLimitMiddleware is mounted.
     createSourceWeftToolCallCountChannelsMiddleware(),
     stepBudget.governance,
     stepBudget.toolCallRepair,
@@ -125,13 +152,21 @@ export function createSourceWeftSubagentMiddlewareStack(
           ),
         ]
       : []),
+    ...(input.creditCap != null
+      ? [
+          createRunCreditCapMiddleware({
+            capCredits: input.creditCap,
+            getScope: input.getBillingScope ?? (() => undefined),
+          }),
+        ]
+      : []),
     createSourceWeftToolCallContextMiddleware({
       subagentType: input.toolObservabilityContext?.subagentType,
     }),
     // Sub-agents may also ask the user. The interrupt bubbles up to the parent
     // graph's updates stream; the resume is keyed by interrupt id so it targets
     // the correct nested/parallel task. Same flag + per-turn cap as the root.
-    ...askUserMiddleware(),
+    ...askUserMiddleware(input.askUser),
     createRepeatToolCallReminderMiddleware(),
     createSourceWeftToolErrorMiddleware(),
     createSourceWeftToolObservabilityMiddleware({
@@ -194,8 +229,8 @@ export async function createSourceWeftAgentMiddlewareStack(
     });
 
   return [
-    // Must precede every toolCallLimitMiddleware so the count channels bind to a
-    // concurrent-safe reducer (parallel `task` subagents write them at once).
+    // Declares the tool-call count channels on every stack: the step budget
+    // resets them even when no toolCallLimitMiddleware is mounted.
     createSourceWeftToolCallCountChannelsMiddleware(),
     stepBudget.governance,
     stepBudget.toolCallRepair,
@@ -206,13 +241,21 @@ export async function createSourceWeftAgentMiddlewareStack(
           ),
         ]
       : []),
+    ...(input.creditCap != null
+      ? [
+          createRunCreditCapMiddleware({
+            capCredits: input.creditCap,
+            getScope: input.getBillingScope ?? (() => undefined),
+          }),
+        ]
+      : []),
     createSourceWeftToolCallContextMiddleware(),
     // deepagents >=1.12 no longer includes the todo middleware by default;
     // tool tracking and the todo panel depend on the write_todos tool.
-    todoListMiddleware(),
+    ...(input.todoList === false ? [] : [todoListMiddleware()]),
     // Proactive `askUser` (+ a per-turn call cap). Enabled by default; see
     // config.chat.agent.askUserEnabled. Also added to the sub-agent stack.
-    ...askUserMiddleware(),
+    ...askUserMiddleware(input.askUser),
     // Generic advisory loop guard for all tools (nudges out of identical-call
     // loops; complements the askUser cap). Never blocks a call.
     createRepeatToolCallReminderMiddleware(),
@@ -281,6 +324,10 @@ export {
   createSourceWeftContextCompressionMiddleware,
   createSourceWeftSummarizationMiddleware,
 } from "./context-compression";
+export {
+  RUN_CREDIT_CAP_EXCEEDED,
+  createRunCreditCapMiddleware,
+} from "./run-credit-cap";
 export { createKnowledgeFilesystemToolDescriptionMiddleware } from "./filesystem-descriptions";
 export {
   createSourceWeftImageHistorySanitizerMiddleware,

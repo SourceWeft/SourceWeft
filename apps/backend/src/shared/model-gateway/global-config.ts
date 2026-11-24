@@ -648,7 +648,13 @@ function asProviderRoutingSort(
   };
 }
 
-function asOptionalProviderRouting(
+/**
+ * A route target's `providerRouting`, validated: an object with a non-empty
+ * `only` of non-empty host names and/or a valid `sort`. Throws on anything
+ * else; undefined when absent. The system model validates
+ * SYSTEM_MODEL_PROVIDER_ONLY with it too.
+ */
+export function asOptionalProviderRouting(
   value: unknown,
   fieldName: string,
 ): ProviderRoutingConfig | undefined {

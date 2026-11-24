@@ -95,9 +95,26 @@ test("a viewer cannot write", async () => {
   assert.equal((await response.json()).code, "WORKSPACE_ROLE_REQUIRED");
 });
 
+test("a viewer may pin and unpin a chat for themselves but not rename it", async () => {
+  withAccess({ role: "viewer" });
+  assert.equal((await call("PUT", "/threads/t-1/pin")).status, 200);
+  assert.equal((await call("DELETE", "/threads/t-1/pin")).status, 200);
+  assert.equal((await call("PATCH", "/threads/t-1/title")).status, 403);
+});
+
 test("an editor can write content", async () => {
   withAccess({ role: "editor" });
   assert.equal((await call("POST", "/threads")).status, 200);
+});
+
+test("POST /dictation/segments needs the editor role; a viewer is refused", async () => {
+  withAccess({ role: "viewer" });
+  const refused = await call("POST", "/dictation/segments");
+  assert.equal(refused.status, 403);
+  assert.equal((await refused.json()).code, "WORKSPACE_ROLE_REQUIRED");
+
+  withAccess({ role: "editor" });
+  assert.equal((await call("POST", "/dictation/segments")).status, 200);
 });
 
 test("an editor cannot reach content-plane admin surfaces", async () => {
@@ -198,4 +215,11 @@ test("artifact page storage leaves role checks to the records service", async ()
     "/artifacts/a-1/share",
   ])
     assert.equal((await call("DELETE", path)).status, 403, path);
+});
+
+test("sharing a chat keeps the default editor requirement; a viewer is refused", async () => {
+  withAccess({ role: "viewer" });
+  const response = await call("POST", "/threads/t/share");
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).code, "WORKSPACE_ROLE_REQUIRED");
 });

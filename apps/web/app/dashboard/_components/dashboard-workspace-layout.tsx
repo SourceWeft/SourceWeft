@@ -14,6 +14,7 @@ import { useSidebar } from "@sourceweft/ui-web/components/ui/sidebar";
 import { useElementSize } from "../../../lib/use-element-size";
 import { resolveWorkspaceLayout } from "./workspace-layout";
 import { useDesktopTitlebar } from "../../../lib/desktop-titlebar";
+import { findSwipeBack, useLeftEdgeSwipe } from "../../../lib/left-edge-swipe";
 
 const PREFERENCE_KEY = "sourceweft:conversations-expanded";
 type Layout = ReturnType<typeof resolveWorkspaceLayout> & {
@@ -110,6 +111,18 @@ export function DashboardWorkspaceLayout({
     openMobile,
     setOpenMobile,
   ]);
+  // A swipe from the left edge goes back when the page shows a back button and
+  // otherwise opens the drawer, as iOS apps do.
+  const onEdgeSwipe = useCallback(() => {
+    const back = ref.current ? findSwipeBack(ref.current) : null;
+    if (back) {
+      back.click();
+      return;
+    }
+    setHubOpen(false);
+    setOpenMobile(true);
+  }, [ref, setOpenMobile]);
+  useLeftEdgeSwipe(ref, !hasRail && !openMobile, onEdgeSwipe);
   const closeConversations = useCallback(() => {
     setOpenMobile(false);
     setOverlayOpen(false);
@@ -146,7 +159,7 @@ export function DashboardWorkspaceLayout({
         ref={ref}
         data-workspace-layout={layout.mode}
         data-short-window={height > 0 && height <= 720 ? "true" : undefined}
-        className="relative flex h-dvh min-h-0 w-full overflow-hidden overscroll-none bg-background text-foreground"
+        className="relative flex h-[var(--sw-visible-height,100dvh)] min-h-0 w-full overflow-hidden overscroll-none bg-background text-foreground"
       >
         {children}
       </div>

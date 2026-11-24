@@ -59,7 +59,11 @@ export function ProviderButtons({
                 ? "name"
                 : "icon"
           }
-          className={cn(resolvedSocialLayout === "horizontal" && "flex-1")}
+          className={cn(
+            resolvedSocialLayout === "horizontal" && "flex-1",
+            // An odd last button fills its row instead of leaving a gap.
+            resolvedSocialLayout === "grid" && "odd:last:col-span-2"
+          )}
         />
       ))}
     </div>

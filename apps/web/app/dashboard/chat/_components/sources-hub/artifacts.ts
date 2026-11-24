@@ -8,10 +8,42 @@ import type { ArtifactListItem, ArtifactSummaryItem } from "./types";
 
 type ArtifactIdentity = Pick<ArtifactListItem, "artifactType" | "title">;
 
-export function artifactTypeLabel(type: ArtifactIdentity["artifactType"]) {
-  if (type === "audio_overview") return "Audio";
-  if (type === "video_overview") return "Video";
-  if (type === "video_presentation") return "Video presentation";
+/** Types whose name is not their identifier title-cased; worded in every locale. */
+const ARTIFACT_TYPE_LABELS = {
+  audio_overview: "Audio",
+  video_overview: "Video",
+  video_presentation: "Video presentation",
+  table: "Table",
+  flashcards: "Flashcards",
+  quiz: "Quiz",
+  mindmap: "Mind map",
+} as const;
+
+export type LabeledArtifactType = keyof typeof ARTIFACT_TYPE_LABELS;
+
+/** `dashboardSourcesHub` lookup for `artifacts.types.<type>`. */
+export type ArtifactTypeTranslate = (
+  key: `artifacts.types.${LabeledArtifactType}`,
+) => string;
+
+function isLabeledArtifactType(type: string): type is LabeledArtifactType {
+  return Object.hasOwn(ARTIFACT_TYPE_LABELS, type);
+}
+
+/**
+ * The type's display name. With `translate` (the `dashboardSourcesHub`
+ * catalog) the labeled types follow the UI locale; without it they are
+ * English. Other types are their identifier title-cased.
+ */
+export function artifactTypeLabel(
+  type: ArtifactIdentity["artifactType"],
+  translate?: ArtifactTypeTranslate,
+) {
+  if (isLabeledArtifactType(type)) {
+    return translate
+      ? translate(`artifacts.types.${type}`)
+      : ARTIFACT_TYPE_LABELS[type];
+  }
   return type
     .replace(/_/g, " ")
     .replace(/\b\w/g, (match) => match.toUpperCase());

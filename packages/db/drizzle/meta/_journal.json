@@ -526,6 +526,90 @@
       "when": 1794683361745,
       "tag": "0074_notes_follow_their_source",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1794736887976,
+      "tag": "0075_study_learning_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1794746758452,
+      "tag": "0076_notifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1794746759452,
+      "tag": "0077_sso_verified_domain_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1794926206467,
+      "tag": "0078_oauth_state_attempt_ref",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1794940843466,
+      "tag": "0079_agent_tasks",
+      "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1794966416676,
+      "tag": "0080_schedule_occurrence_tenant_not_null",
+      "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1795187911758,
+      "tag": "0081_connector_personal_data_reporting",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1795314280086,
+      "tag": "0082_source_research",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1795347256155,
+      "tag": "0083_thread_pins",
+      "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1795365548470,
+      "tag": "0084_thread_share_snapshots",
+      "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1795408360135,
+      "tag": "0085_assistants",
+      "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1795520123741,
+      "tag": "0086_assistant_feed_ticket_event",
+      "breakpoints": true
     }
   ]
 }

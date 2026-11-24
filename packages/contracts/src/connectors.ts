@@ -89,7 +89,7 @@ export const connectorWebhookEventStatusSchema = z.enum([
 
 const jsonObjectSchema = z.record(z.string(), z.unknown());
 
-const connectorAuthManifestSchema = z.object({
+const oauth2AuthManifestSchema = z.object({
   kind: z.literal("oauth2"),
   authorizationUrl: z.string().url(),
   tokenUrl: z.string().url(),
@@ -98,6 +98,34 @@ const connectorAuthManifestSchema = z.object({
   authorizationParams: z.record(z.string(), z.string()).optional(),
   sendScope: z.boolean().optional(),
 });
+
+/**
+ * An adapter that brokers its own authorization (start, finish, revoke)
+ * instead of running the platform's standard OAuth2 flow. `broker` names the
+ * brokering integration (e.g. "composio"); the platform treats the resulting
+ * credential as opaque. See `ConnectorAdapter.startAuthorization` /
+ * `finishAuthorization` / `revokeAuthorization`.
+ */
+const brokeredAuthManifestSchema = z.object({
+  kind: z.literal("brokered"),
+  broker: z.string().min(1),
+  scopes: z.array(z.string().min(1)),
+});
+
+/**
+ * A connector that needs no account authorization (e.g. a public feed). It
+ * has no OAuth exchange or refresh; its source is read with the connector's
+ * own configuration alone.
+ */
+const noneAuthManifestSchema = z.object({
+  kind: z.literal("none"),
+});
+
+const connectorAuthManifestSchema = z.discriminatedUnion("kind", [
+  oauth2AuthManifestSchema,
+  brokeredAuthManifestSchema,
+  noneAuthManifestSchema,
+]);
 
 export const connectorResourceSpecSchema = z.object({
   type: z.string().min(1),
@@ -119,6 +147,136 @@ export const connectorActionSpecSchema = z.object({
   capabilities: z.array(connectorActionCapabilitySchema).optional(),
 });
 
+// ---------------------------------------------------------------------------
+// Selection contract — browse, search and describe over a connector's items
+// ---------------------------------------------------------------------------
+//
+// Bounds enforced here mirror the equivalent, independently-defined rules in
+// `packages/capability-contracts/src/index.ts` (`connectorContributionSchema`);
+// the two packages have no dependency on each other, so the field-level rules
+// are duplicated on purpose. Only the cross-check against a contribution's
+// declared actions lives on the capability-contracts side.
+
+// Kinds, disabled-reason codes and help-link codes become i18n key segments
+// (`…kinds.<kind>`, `…disabledReason.<code>`, `…helpLink.<code>`), so a dot or
+// any other separator would walk the message tree. Restrict them to lowercase
+// word characters. Existing values (`folder`, `file`, `unsupported`) satisfy it.
+const SELECTION_KEY_SEGMENT = /^[a-z0-9_]+$/;
+
+export const connectorSelectionKindSchema = z
+  .string()
+  .max(64)
+  .regex(SELECTION_KEY_SEGMENT);
+
+export const connectorSelectionItemSchema = z.object({
+  id: z.string().min(1).max(512),
+  kind: connectorSelectionKindSchema,
+});
+
+export const connectorSelectionSpecSchema = z.object({
+  actions: z.object({
+    browse: z.string().min(1),
+    search: z.string().min(1).optional(),
+    describe: z.string().min(1),
+  }),
+  kinds: z
+    .array(connectorSelectionKindSchema)
+    .min(1)
+    .max(20)
+    .superRefine((kinds, context) => {
+      const seen = new Set<string>();
+      kinds.forEach((kind, index) => {
+        if (seen.has(kind)) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Duplicate kind '${kind}'`,
+            path: [index],
+          });
+        }
+        seen.add(kind);
+      });
+    }),
+  maxItems: z.number().int().min(1).max(500),
+});
+
+const connectorSelectionContainerSchema = z.object({
+  id: z.string().min(1).max(512),
+  kind: connectorSelectionKindSchema,
+  name: z.string().max(1024),
+  detail: z.string().max(2048).nullable(),
+});
+
+const connectorSelectionBreadcrumbSchema = z.object({
+  id: z.string().min(1).max(512),
+  name: z.string().max(1024),
+});
+
+export const connectorSelectionEntrySchema = z.object({
+  id: z.string().min(1).max(512),
+  kind: connectorSelectionKindSchema,
+  name: z.string().max(1024),
+  detail: z.string().max(2048).nullable(),
+  selectable: z.boolean(),
+  expandable: z.boolean(),
+  disabledReason: z
+    .string()
+    .max(64)
+    .regex(SELECTION_KEY_SEGMENT)
+    .nullable(),
+  size: z.number().finite().nonnegative().nullable(),
+  modifiedAt: z.string().max(64).nullable(),
+});
+
+function isHttpsUrl(value: string): boolean {
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+const connectorSelectionHelpLinkSchema = z.object({
+  code: z.string().max(64).regex(SELECTION_KEY_SEGMENT),
+  url: z
+    .string()
+    .max(2048)
+    .refine(isHttpsUrl, "helpLink.url must be an https:// URL"),
+});
+
+export const connectorSelectionBrowseResultSchema = z.object({
+  container: connectorSelectionContainerSchema.nullable(),
+  breadcrumbs: z.array(connectorSelectionBreadcrumbSchema).max(50),
+  entries: z.array(connectorSelectionEntrySchema).max(500),
+  cursor: z.string().max(4096),
+  hasMore: z.boolean(),
+  helpLink: connectorSelectionHelpLinkSchema.nullable().default(null),
+});
+
+export const connectorSelectionSearchResultSchema = z.object({
+  entries: z.array(connectorSelectionEntrySchema).max(500),
+  cursor: z.string().max(4096),
+  hasMore: z.boolean(),
+});
+
+export const connectorSelectionDescribeItemSchema = z.object({
+  id: z.string().min(1).max(512),
+  kind: connectorSelectionKindSchema.nullable(),
+  name: z.string().max(1024).nullable(),
+  detail: z.string().max(2048).nullable(),
+  exists: z.boolean(),
+  meta: z
+    .record(z.string(), z.union([z.string().max(2048), z.number(), z.null()]))
+    .refine(
+      (meta) => Object.keys(meta).length <= 20,
+      "meta must have at most 20 keys",
+    )
+    .default({}),
+});
+
+export const connectorSelectionDescribeResultSchema = z.object({
+  items: z.array(connectorSelectionDescribeItemSchema).max(100),
+});
+
 export const connectorManifestSchema = z.object({
   type: z.string().min(1),
   displayName: z.string().min(1),
@@ -131,6 +289,7 @@ export const connectorManifestSchema = z.object({
   }),
   actions: z.array(connectorActionSpecSchema),
   configSchema: jsonObjectSchema,
+  selection: connectorSelectionSpecSchema.optional(),
 });
 
 export const connectorOAuthAccountSchema = z.object({
@@ -306,6 +465,18 @@ export const createConnectorRequestSchema = z.object({
   indexingFrequencyMinutes: z.number().int().positive().optional(),
 });
 
+export const checkConnectorConfigRequestSchema = z.object({
+  connectorType: z.string().trim().min(1),
+  configJson: jsonObjectSchema,
+});
+
+export const checkConnectorConfigResponseSchema = z.object({
+  ready: z.boolean(),
+  reason: z.string().optional(),
+  message: z.string().optional(),
+  metadata: jsonObjectSchema.optional(),
+});
+
 export const updateConnectorRequestSchema = z.object({
   name: z.string().trim().min(1).max(200).optional(),
   oauthAccountId: z.string().trim().min(1).optional(),
@@ -425,6 +596,27 @@ export const connectorWebhookConfigResponseSchema = z.object({
 });
 
 export type ConnectorManifest = z.infer<typeof connectorManifestSchema>;
+export type ConnectorSelectionItem = z.infer<
+  typeof connectorSelectionItemSchema
+>;
+export type ConnectorSelectionSpec = z.infer<
+  typeof connectorSelectionSpecSchema
+>;
+export type ConnectorSelectionEntry = z.infer<
+  typeof connectorSelectionEntrySchema
+>;
+export type ConnectorSelectionBrowseResult = z.infer<
+  typeof connectorSelectionBrowseResultSchema
+>;
+export type ConnectorSelectionSearchResult = z.infer<
+  typeof connectorSelectionSearchResultSchema
+>;
+export type ConnectorSelectionDescribeItem = z.infer<
+  typeof connectorSelectionDescribeItemSchema
+>;
+export type ConnectorSelectionDescribeResult = z.infer<
+  typeof connectorSelectionDescribeResultSchema
+>;
 export type ConnectorOAuthAccount = z.infer<typeof connectorOAuthAccountSchema>;
 export type SourceConnector = z.infer<typeof sourceConnectorSchema>;
 export type ConnectorSyncRun = z.infer<typeof connectorSyncRunSchema>;
@@ -477,6 +669,12 @@ export type ListConnectorOAuthAccountsResponse = z.infer<
 >;
 export type CreateConnectorRequest = z.infer<
   typeof createConnectorRequestSchema
+>;
+export type CheckConnectorConfigRequest = z.infer<
+  typeof checkConnectorConfigRequestSchema
+>;
+export type CheckConnectorConfigResponse = z.infer<
+  typeof checkConnectorConfigResponseSchema
 >;
 export type CreateConnectorResponse = z.infer<
   typeof createConnectorResponseSchema
@@ -751,6 +949,12 @@ export type OAuthRefreshInput = {
 };
 
 export type OAuthTokenSet = {
+  /**
+   * Opaque credential for this account. For a standard OAuth2 adapter this is
+   * the provider's access token; for a brokered adapter it is whatever
+   * opaque reference the broker hands back. Either way the platform stores
+   * it encrypted and returns it only to the adapter that produced it.
+   */
   accessToken: string;
   refreshToken?: string | null;
   expiresAt?: Date | null;
@@ -800,11 +1004,83 @@ export type ConnectorSyncReadinessResult = {
 export type ConnectorActionSpec = z.infer<typeof connectorActionSpecSchema>;
 export type ConnectorResourceSpec = z.infer<typeof connectorResourceSpecSchema>;
 
+export type ConnectorAuthorizationStartInput = {
+  callbackUrl: string;
+  ownerRef: string;
+};
+
+export type ConnectorAuthorizationStartResult = {
+  authorizationUrl: string;
+  attemptRef: string;
+};
+
+export type ConnectorAuthorizationFinishInput = {
+  callbackParams: Record<string, string>;
+  attemptRef: string;
+  ownerRef: string;
+};
+
+/** One stored provider account and when its personal data was last refreshed. */
+export type ConnectorPersonalDataAccount = { accountId: string; updatedAt: Date };
+
+export type ConnectorPersonalDataReport = {
+  /** Account ids the provider reports as closed; only ids that were sent. */
+  closed: string[];
+  /** Account ids the provider reports as changed; only ids that were sent. */
+  updated: string[];
+  /** Provider answer entries that were dropped (not sent, unknown, duplicate). */
+  ignored: number;
+  /** The provider's requested reporting cycle in days, or `null` when unknown. */
+  cyclePeriodDays: number | null;
+};
+
+/** The identity fields a provider stores for an account. */
+export type ConnectorAccountProfile = {
+  providerAccountId: string;
+  email: string | null;
+  displayName: string;
+};
+
+/**
+ * Optional provider personal-data obligations (reporting stored accounts and
+ * re-reading their identity), implemented by providers whose terms require it.
+ */
+export interface ConnectorPersonalDataSupport {
+  /** At most 90 accounts per call. */
+  report(input: {
+    accessToken: string;
+    accounts: ConnectorPersonalDataAccount[];
+  }): Promise<ConnectorPersonalDataReport>;
+  /** Re-reads the identity fields the platform stores for an account. */
+  readProfile(input: { accessToken: string }): Promise<ConnectorAccountProfile>;
+}
+
 export interface ConnectorAdapter {
   capabilityId?: string;
   getManifest(): ConnectorManifest;
-  exchangeOAuthCode(input: OAuthCodeExchangeInput): Promise<OAuthTokenSet>;
-  refreshOAuthToken(input: OAuthRefreshInput): Promise<OAuthTokenSet>;
+  /** Standard OAuth2 only; absent on `none` and brokered adapters. */
+  exchangeOAuthCode?(input: OAuthCodeExchangeInput): Promise<OAuthTokenSet>;
+  /** Standard OAuth2 only; absent on `none` and brokered adapters. */
+  refreshOAuthToken?(input: OAuthRefreshInput): Promise<OAuthTokenSet>;
+  /**
+   * Brokered auth only: start a broker-hosted authorization attempt and
+   * return the URL to send the owner to.
+   */
+  startAuthorization?(
+    input: ConnectorAuthorizationStartInput,
+  ): Promise<ConnectorAuthorizationStartResult>;
+  /**
+   * Brokered auth only: complete a broker-hosted authorization attempt and
+   * return the resulting opaque credential. The adapter is responsible for
+   * verifying the callback against `attemptRef` (that the broker reports the
+   * same attempt it started, and succeeded); the platform does not inspect
+   * `callbackParams` and only passes through the `attemptRef` it stored.
+   */
+  finishAuthorization?(
+    input: ConnectorAuthorizationFinishInput,
+  ): Promise<OAuthTokenSet>;
+  /** Brokered auth only: revoke a previously brokered credential. */
+  revokeAuthorization?(input: { accessToken: string }): Promise<void>;
   checkSyncReadiness?(
     input: ConnectorDiscoverInput,
   ): Promise<ConnectorSyncReadinessResult>;
@@ -815,6 +1091,8 @@ export interface ConnectorAdapter {
   ): AsyncIterable<ConnectorDiscoveryPage>;
   extract(input: ConnectorExtractInput): Promise<ConnectorExtractedContent>;
   executeAction(input: ConnectorActionInput): Promise<ConnectorActionResult>;
+  /** Present on providers with personal-data reporting obligations. */
+  personalData?: ConnectorPersonalDataSupport;
   verifyWebhook?(input: ConnectorWebhookVerifyInput): Promise<void>;
   parseWebhookEvent?(
     input: ConnectorWebhookVerifyInput,

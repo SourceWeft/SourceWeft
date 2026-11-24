@@ -14,6 +14,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type MutableRefObject,
 } from "react";
 import type { FileUIPart } from "ai";
 import {
@@ -56,6 +57,7 @@ import {
   type PromptInputSegment,
   type PromptInputSlashCommand,
 } from "@sourceweft/ui-web/components/ai-elements/prompt-input";
+import { ComposerScheduleButton } from "../../../scheduled/_components/composer-schedule-button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -98,6 +100,9 @@ import {
   type PromptInputActionIconPayload,
 } from "../action-icons";
 import type { SourceItem } from "../source-types";
+import { ComposerDictationButton } from "./dictation/dictation-button";
+import { ComposerInsertSlot } from "./composer-insert";
+import { useDictation } from "./dictation/use-dictation";
 import { SourceIcon, toAttachmentData } from "./source-rendering";
 import {
   buildConfiguredComposerToolsSelection,
@@ -401,6 +406,20 @@ function capabilityOptionDefaultValue(option: ComposerOptionDescriptor) {
   return option.valueType === "boolean" ? false : undefined;
 }
 
+/**
+ * Thrown from the submit handler when send is pressed while dictation is still
+ * active. PromptInput discards a submit whose `onSubmit` throws, leaving the
+ * editor text, attachments and saved draft exactly as they were; a normal
+ * return would be treated as a successful send and would clear them. PromptInput
+ * catches this inside its own submit handler, so it never surfaces as an error.
+ */
+class DictationActiveSubmitError extends Error {
+  constructor() {
+    super("submit ignored while dictation is active");
+    this.name = "DictationActiveSubmitError";
+  }
+}
+
 function ComposerBody({
   onRegisterContinuationInput,
   draftKey,
@@ -443,6 +462,7 @@ function ComposerBody({
   isStopping = false,
   composerOptions = EMPTY_COMPOSER_OPTIONS,
   onComposerOptionsChange,
+  dictationWorkspaceId = null,
 }: {
   onRegisterContinuationInput?: (
     builder: AgentContinuationInputBuilder | null,
@@ -505,9 +525,18 @@ function ComposerBody({
   isStopping?: boolean;
   composerOptions?: ComposerOptionsState;
   onComposerOptionsChange?: (options: ComposerOptionsState) => void;
+  /** Workspace whose dictation availability gates the microphone button. */
+  dictationWorkspaceId?: string | null;
 }) {
   const t = useTranslations("dashboardChatCanvas");
   const rootRef = useRef<HTMLDivElement | null>(null);
+  // The dictation hook lives inside the PromptInputProvider (it needs the
+  // controller), while onSubmit and the editor's onKeyDown are written here.
+  // The slot below publishes the live dictation control up through this ref.
+  const dictationControlRef = useRef<DictationControl>({
+    active: false,
+    stop: () => Promise.resolve(),
+  });
   const [draftText, setDraftText] = useState(initialInput);
   const [draftSegments, setDraftSegments] = useState<PromptInputSegment[]>([]);
   const normalizedComposerOptions = useMemo(
@@ -1466,6 +1495,8 @@ function ComposerBody({
         key={`${String(inputKey ?? "composer")}:${composerSessionKey}:${initialAttachments.map((a) => a.id).join(",")}`}
       >
         {draftKey && <DraftMirror draftKey={draftKey} paused={draftPaused} />}
+        {/* Where an artifact viewer's "ask in chat" puts its text. */}
+        <ComposerInsertSlot />
         <PromptInput
           accept="image/png,image/jpeg,image/webp,image/gif"
           maxFileSize={10 * 1024 * 1024}
@@ -1473,6 +1504,13 @@ function ComposerBody({
           multiple
           submitDisabled={submitDisabled}
           onSubmit={(message) => {
+            if (dictationControlRef.current.active) {
+              // Send while dictating: stop and keep the pending text, don't send.
+              // Throw so PromptInput leaves the editor text, attachments and the
+              // saved draft untouched (a normal return would clear them).
+              void dictationControlRef.current.stop();
+              throw new DictationActiveSubmitError();
+            }
             if (submitDisabled) {
               return;
             }
@@ -1655,6 +1693,15 @@ function ComposerBody({
               initialSegments={initialPromptSegments}
               initialValue={initialInput}
               onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
+                if (
+                  dictationControlRef.current.active &&
+                  event.key === "Escape"
+                ) {
+                  event.preventDefault();
+                  void dictationControlRef.current.stop();
+                  return;
+                }
+
                 if (isEditing && event.key === "Escape") {
                   event.preventDefault();
                   onCancelEditing?.();
@@ -1707,6 +1754,9 @@ function ComposerBody({
             <PromptInputTools className="w-full flex-nowrap gap-2">
               {workingFolderSlot}
               <div className="flex min-w-0 items-center gap-1.5">
+                {dictationWorkspaceId ? (
+                  <ComposerScheduleButton workspaceId={dictationWorkspaceId} />
+                ) : null}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <PromptInputButton
@@ -2508,6 +2558,13 @@ function ComposerBody({
 
                 <ComposerAddImageButton />
 
+                {dictationWorkspaceId ? (
+                  <ComposerDictationSlot
+                    controlRef={dictationControlRef}
+                    workspaceId={dictationWorkspaceId}
+                  />
+                ) : null}
+
                 <div>
                   {(onStopStreaming || stopPending) &&
                   (draftText ?? "").trim().length === 0 ? (
@@ -2710,6 +2767,26 @@ function ComposerImageAttachment({
       </AttachmentHoverCardContent>
     </AttachmentHoverCard>
   );
+}
+
+type DictationControl = { active: boolean; stop: () => Promise<void> };
+
+/**
+ * Owns the dictation hook inside the PromptInputProvider (so it can reach the
+ * prompt controller), renders the microphone button, and publishes the live
+ * control up to the composer through `controlRef` so onSubmit and onKeyDown can
+ * read it.
+ */
+function ComposerDictationSlot({
+  controlRef,
+  workspaceId,
+}: {
+  controlRef: MutableRefObject<DictationControl>;
+  workspaceId: string | null;
+}) {
+  const dictation = useDictation({ workspaceId });
+  controlRef.current = { active: dictation.active, stop: dictation.stop };
+  return <ComposerDictationButton dictation={dictation} />;
 }
 
 function ComposerAddImageButton({ disabled }: { disabled?: boolean }) {

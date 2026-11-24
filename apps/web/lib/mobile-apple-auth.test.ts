@@ -166,5 +166,12 @@ describe("getMobileAppleSignInError", () => {
       "Invalid token",
     );
     expect(getMobileAppleSignInError({})).toMatch(/Unable to sign in/);
+    expect(
+      getMobileAppleSignInError(
+        new Error(
+          "The operation couldn’t be completed. (com.apple.AuthenticationServices.AuthorizationError error 1000.)",
+        ),
+      ),
+    ).toMatch(/signed in to iCloud/);
   });
 });

@@ -31,9 +31,6 @@ const mocks = vi.hoisted(() => ({
   getTeamSecretCipher: vi.fn(),
 }));
 
-vi.mock("../preview", () => ({
-  previewAccessService: { isEnabled: vi.fn().mockResolvedValue(true) },
-}));
 vi.mock("../../shared/logger", () => ({
   logger: { info: mocks.info, warn: mocks.warn, error: vi.fn(), debug: vi.fn() },
 }));
@@ -196,7 +193,10 @@ beforeEach(() => {
   mocks.findAccount.mockImplementation(async () =>
     row ? { ...row } : null,
   );
-  mocks.getAdapter.mockReturnValue({ refreshOAuthToken: mocks.refresh });
+  mocks.getAdapter.mockReturnValue({
+    exchangeOAuthCode: vi.fn(),
+    refreshOAuthToken: mocks.refresh,
+  });
   // The registered connector types the keep-alive pass narrows its query to.
   mocks.listManifests.mockReturnValue([{ type: "google_drive" }]);
   mocks.lock.mockImplementation(
@@ -667,6 +667,7 @@ it("keep-alive refreshes each due account through the locked path and counts out
     }
     const refresher = refreshers[connectorType];
     return {
+      exchangeOAuthCode: vi.fn(),
       refreshOAuthToken:
         refresher ??
         (async () => {
@@ -762,7 +763,10 @@ it("keep-alive decides freshness by lastRefreshAt, not by expiry", async () => {
   const refresh = vi
     .fn()
     .mockResolvedValue({ accessToken: "new-token" } satisfies OAuthTokenSet);
-  mocks.getAdapter.mockImplementation(() => ({ refreshOAuthToken: refresh }));
+  mocks.getAdapter.mockImplementation(() => ({
+    exchangeOAuthCode: vi.fn(),
+    refreshOAuthToken: refresh,
+  }));
 
   expect(await service.refreshIdleAccounts({ now })).toEqual({
     checked: 2,
@@ -793,7 +797,10 @@ it("keep-alive counts an account that disappeared or was marked meanwhile as ski
     keepAliveRow("acct-unavailable", { status: "reauth_required" }),
   );
   const refresh = vi.fn();
-  mocks.getAdapter.mockImplementation(() => ({ refreshOAuthToken: refresh }));
+  mocks.getAdapter.mockImplementation(() => ({
+    exchangeOAuthCode: vi.fn(),
+    refreshOAuthToken: refresh,
+  }));
 
   expect(await service.refreshIdleAccounts({ now })).toEqual({
     checked: 2,

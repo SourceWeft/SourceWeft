@@ -105,21 +105,26 @@ function harness(options?: {
         output: options.failureOutput ?? "command failed",
       };
     }
-    const scene = /render-scene -- (\d+)/u.exec(input.command);
+    const scene = /render-scene -- (\d+) (\d+) (\d+)/u.exec(input.command);
     if (scene) {
       const slideNumber = Number(scene[1]);
+      const part = Number(scene[2]);
+      const parts = Number(scene[3]);
       const range = sceneRanges.get(slideNumber)!;
+      const frames = range[1] - range[0] + 1;
       return {
         exitCode: 0,
         output: JSON.stringify({
           ok: true,
           stage: "render-scene",
           slideNumber,
-          file: `out/scenes/scene-${slideNumber}.ts`,
+          part,
+          parts,
+          file: `out/scenes/scene-${slideNumber}-${part}of${parts}.ts`,
           byteLength: 10 + slideNumber,
           contentDigest: `sha256:${String(slideNumber).repeat(64)}`,
-          from: range[0],
-          to: range[1],
+          from: range[0] + Math.floor(((part - 1) * frames) / parts),
+          to: range[0] + Math.floor((part * frames) / parts) - 1,
           reused: false,
         }),
       };
@@ -267,6 +272,34 @@ test("render policy derives a bounded bitrate from duration and byte budget", ()
   assert.equal(tightened.maxSampleBytes, 1_500_000);
 });
 
+test("scene rendering sizes its concurrency to the sandbox unless a policy pins it", async () => {
+  const run = async (policy?: VideoPresentationRenderPolicy) => {
+    const { commands, sandbox } = harness();
+    const port = createSandboxVideoPresentationRenderPort({
+      sandbox,
+      ...(policy ? { policy } : {}),
+    });
+    const session = await port.prepare({
+      canonicalRoot: "/workspace/video",
+      project,
+      samples,
+    });
+    try {
+      await session.renderSamples();
+      await session.renderFinal();
+    } finally {
+      await session.dispose();
+    }
+    return commands.filter((command) => command.includes("render-scene"));
+  };
+  for (const command of await run()) {
+    assert.match(command, /SOURCEWEFT_VIDEO_CONCURRENCY=auto /u);
+  }
+  for (const command of await run(renderPolicy({ concurrency: 3 }))) {
+    assert.match(command, /SOURCEWEFT_VIDEO_CONCURRENCY=3 /u);
+  }
+});
+
 test("one prepared bundle feeds samples, ordered scene chunks, mux, probe, and bytes", async () => {
   const { commands, sandbox } = harness();
   const port = createSandboxVideoPresentationRenderPort({ sandbox });
@@ -289,14 +322,22 @@ test("one prepared bundle feeds samples, ordered scene chunks, mux, probe, and b
       commands.flatMap((command) => {
         if (command.includes("prepare-render")) return ["prepare"];
         if (command.includes("render-validation-samples")) return ["samples"];
-        const scene = /render-scene -- (\d+)/u.exec(command);
-        if (scene) return [`scene:${scene[1]}`];
+        const scene = /render-scene -- (\d+) (\d+) (\d+)/u.exec(command);
+        if (scene) return [`scene:${scene[1]}:${scene[2]}/${scene[3]}`];
         if (command.includes("render-audio")) return ["audio"];
         if (command.includes("concat-video")) return ["concat"];
         if (command.includes("ffprobe")) return ["probe"];
         return [];
       }),
-      ["prepare", "samples", "scene:1", "scene:2", "audio", "concat", "probe"],
+      [
+        "prepare",
+        "samples",
+        "scene:1:1/1",
+        "scene:2:1/1",
+        "audio",
+        "concat",
+        "probe",
+      ],
     );
     assert.equal(
       commands.filter((command) => command.includes("prepare-render")).length,
@@ -308,6 +349,67 @@ test("one prepared bundle feeds samples, ordered scene chunks, mux, probe, and b
           command.includes("ffprobe") && command.includes("-count_frames"),
       ),
     );
+  } finally {
+    await session.dispose();
+  }
+});
+
+test("a scene longer than the per-command frame budget renders as ordered parts", async () => {
+  const { commands, sandbox } = harness();
+  const port = createSandboxVideoPresentationRenderPort({
+    sandbox,
+    policy: renderPolicy({ maxFramesPerSceneCommand: 40 }),
+  });
+  const session = await port.prepare({
+    canonicalRoot: "/workspace/video",
+    project,
+    samples,
+  });
+  try {
+    await session.renderSamples();
+    await session.renderFinal();
+    assert.deepEqual(
+      commands.flatMap((command) => {
+        const scene = /render-scene -- (\d+) (\d+) (\d+)/u.exec(command);
+        return scene ? [`${scene[1]}:${scene[2]}/${scene[3]}`] : [];
+      }),
+      ["1:1/2", "1:2/2", "2:1/3", "2:2/3", "2:3/3"],
+    );
+  } finally {
+    await session.dispose();
+  }
+});
+
+test("a part whose reported frame range is not the expected slice is rejected", async () => {
+  const { sandbox } = harness();
+  const wrapped: AgentToolSandboxServices = {
+    ...sandbox,
+    executeCurrent: async (input) => {
+      const result = await sandbox.executeCurrent!(input);
+      if (!/render-scene -- 1 2 2/u.test(input.command)) return result;
+      const report = JSON.parse(result.output) as Record<string, number>;
+      return {
+        ...result,
+        output: JSON.stringify({ ...report, from: report.from! + 1 }),
+      };
+    },
+  };
+  const port = createSandboxVideoPresentationRenderPort({
+    sandbox: wrapped,
+    policy: renderPolicy({ maxFramesPerSceneCommand: 40 }),
+  });
+  const session = await port.prepare({
+    canonicalRoot: "/workspace/video",
+    project,
+    samples,
+  });
+  try {
+    await session.renderSamples();
+    await assert.rejects(session.renderFinal(), (error: unknown) => {
+      assert.ok(error instanceof VideoPresentationRenderError);
+      assert.equal(error.code, "VIDEO_RENDER_SCENE_REPORT_INVALID");
+      return true;
+    });
   } finally {
     await session.dispose();
   }

@@ -12,10 +12,24 @@ const state = vi.hoisted(() => ({
   getSession: vi.fn(),
   signInWithMobileApple: vi.fn(),
   signInWithMobileGoogle: vi.fn(),
+  toastError: vi.fn(),
+  prefetch: vi.fn(),
+}));
+
+vi.mock("sonner", () => ({
+  toast: { error: state.toastError, success: vi.fn(), dismiss: vi.fn() },
+}));
+
+vi.mock("../../../lib/mobile-app-shell", () => ({
+  setMobileSessionHint: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: state.replace, refresh: state.refresh }),
+  useRouter: () => ({
+    replace: state.replace,
+    refresh: state.refresh,
+    prefetch: state.prefetch,
+  }),
 }));
 
 vi.mock("../../../lib/auth-client", () => ({
@@ -86,6 +100,7 @@ beforeEach(() => {
   state.getSession.mockResolvedValue({ data: null });
   state.signInWithMobileApple.mockReset();
   state.signInWithMobileGoogle.mockReset();
+  state.toastError.mockReset();
   state.replace.mockReset();
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
@@ -121,6 +136,44 @@ test("iOS offers Apple and Google when the API accepts both, and signs in with t
   await flush();
   assert.equal(state.signInWithMobileApple.mock.calls.length, 1);
   assert.deepEqual(state.replace.mock.calls.at(-1), ["/dashboard/chat"]);
+});
+
+test("a failed Apple sign-in is reported in a toast, not on the page", async () => {
+  answerAuthConfig({ apple: true, googleIosClientId: IOS_CLIENT });
+  state.signInWithMobileApple.mockRejectedValue(new Error("Apple is down"));
+  await mount();
+
+  button("Continue with Apple")?.click();
+  await flush();
+  await flush();
+
+  assert.deepEqual(state.toastError.mock.calls, [["Apple is down"]]);
+  assert(
+    !document.body.textContent?.includes("Apple is down"),
+    "the message is not rendered in the page",
+  );
+});
+
+test("prefetches the dashboard so the step after signing in is quick", async () => {
+  answerAuthConfig({ apple: false, googleIosClientId: IOS_CLIENT });
+  await mount();
+  assert(
+    state.prefetch.mock.calls.some(([href]) => href === "/dashboard/chat"),
+  );
+});
+
+test("offers an SSO sign-in link pointing at /auth/sso", async () => {
+  answerAuthConfig({ apple: false, googleIosClientId: IOS_CLIENT });
+  await mount();
+
+  const link = [...document.querySelectorAll("a")].find(
+    (element) => element.textContent?.trim() === "Sign in with SSO",
+  );
+  assert(link, "the SSO sign-in link is rendered");
+  assert(
+    link.getAttribute("href")?.endsWith("/auth/sso"),
+    "the SSO link points at /auth/sso",
+  );
 });
 
 test("iOS shows no Google button without Sign in with Apple", async () => {

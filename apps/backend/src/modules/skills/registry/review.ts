@@ -3,6 +3,10 @@ import { db, skillDefinitions, skillVersions } from "@sourceweft/db";
 import { ContentError } from "../../content/errors";
 import { recordSkillMarketEvent } from "../market/events";
 import { registryVersionTakesCurrent } from "./repository";
+import {
+  encodeRegistryReviewCursor,
+  type RegistryReviewCursor,
+} from "./review-cursor";
 
 /**
  * Admin moderation queue for registry submissions — mirrors `market/review.ts`
@@ -31,11 +35,10 @@ export type RegistryReviewQueueEntry = {
     | null;
 };
 
-export async function listRegistryReviewQueue(): Promise<
-  RegistryReviewQueueEntry[]
-> {
-  const rows = await db
-    .select({ definition: skillDefinitions, version: skillVersions })
+/** How many submitted versions are waiting in the review queue. */
+export async function countRegistryReviewQueue(): Promise<number> {
+  const [row] = await db
+    .select({ total: sql<number>`count(*)::int` })
     .from(skillVersions)
     .innerJoin(skillDefinitions, eq(skillDefinitions.id, skillVersions.skillId))
     .where(
@@ -43,10 +46,56 @@ export async function listRegistryReviewQueue(): Promise<
         eq(skillDefinitions.sourceType, "registry_github"),
         eq(skillVersions.status, "draft"),
       ),
-    )
-    .orderBy(desc(skillVersions.createdAt));
+    );
+  return row?.total ?? 0;
+}
 
-  return rows.map((row) => {
+/** The queue is read a page at a time; it can hold tens of thousands. */
+export const REGISTRY_REVIEW_PAGE_SIZE = 50;
+export const REGISTRY_REVIEW_PAGE_MAX = 100;
+
+/**
+ * One page of the queue, newest first. Entries are ordered by creation time
+ * cut to the millisecond and then by id, which is exactly what a cursor can
+ * carry, so no entry is skipped or repeated between pages.
+ */
+export async function listRegistryReviewQueue(
+  page: { limit?: number; cursor?: RegistryReviewCursor | null } = {},
+): Promise<{
+  items: RegistryReviewQueueEntry[];
+  nextCursor: string | null;
+}> {
+  const limit = Math.min(
+    Math.max(page.limit ?? REGISTRY_REVIEW_PAGE_SIZE, 1),
+    REGISTRY_REVIEW_PAGE_MAX,
+  );
+  const createdMs = sql`date_trunc('milliseconds', ${skillVersions.createdAt})`;
+  const found = await db
+    .select({ definition: skillDefinitions, version: skillVersions })
+    .from(skillVersions)
+    .innerJoin(skillDefinitions, eq(skillDefinitions.id, skillVersions.skillId))
+    .where(
+      and(
+        eq(skillDefinitions.sourceType, "registry_github"),
+        eq(skillVersions.status, "draft"),
+        page.cursor
+          ? sql`(${createdMs}, ${skillVersions.id}) < (${page.cursor.createdAt.toISOString()}::timestamptz, ${page.cursor.id})`
+          : undefined,
+      ),
+    )
+    .orderBy(desc(createdMs), desc(skillVersions.id))
+    .limit(limit + 1);
+  const rows = found.slice(0, limit);
+  const last = rows.at(-1);
+  const nextCursor =
+    found.length > limit && last
+      ? encodeRegistryReviewCursor({
+          createdAt: last.version.createdAt,
+          id: last.version.id,
+        })
+      : null;
+
+  const items = rows.map((row) => {
     const registry = row.version.manifestJson.registry;
     return {
       slug: row.definition.slug,
@@ -63,6 +112,7 @@ export async function listRegistryReviewQueue(): Promise<
       ingestion: registry?.ingestion ?? null,
     };
   });
+  return { items, nextCursor };
 }
 
 /**

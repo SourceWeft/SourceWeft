@@ -78,3 +78,89 @@ test("ConnectorRegistry rejects missing adapters with connector error", () => {
       error.code === "CONNECTOR_ADAPTER_NOT_FOUND",
   );
 });
+
+const noneManifest: ConnectorManifest = {
+  ...manifest,
+  type: "feedlike",
+  auth: { kind: "none" },
+  actions: [],
+};
+
+const brokeredManifest: ConnectorManifest = {
+  ...manifest,
+  type: "brokered-fake",
+  auth: { kind: "brokered", broker: "composio", scopes: ["read"] },
+  actions: [],
+};
+
+function assertManifestInvalid(register: () => unknown, pattern: RegExp) {
+  assert.throws(
+    register,
+    (error) =>
+      error instanceof ConnectorError &&
+      error.statusCode === 500 &&
+      error.code === "CONNECTOR_MANIFEST_INVALID" &&
+      pattern.test(error.message),
+  );
+}
+
+test("ConnectorRegistry rejects an oauth2 adapter without refreshOAuthToken", () => {
+  const { refreshOAuthToken: _omitted, ...partial } = adapter;
+  assertManifestInvalid(
+    () => new ConnectorRegistry([partial]),
+    /fake.*refreshOAuthToken/,
+  );
+});
+
+test("ConnectorRegistry rejects an oauth2 adapter without exchangeOAuthCode", () => {
+  const { exchangeOAuthCode: _omitted, ...partial } = adapter;
+  assertManifestInvalid(
+    () => new ConnectorRegistry([partial]),
+    /fake.*exchangeOAuthCode/,
+  );
+});
+
+test("ConnectorRegistry rejects a none adapter that implements OAuth methods", () => {
+  const { refreshOAuthToken: _omitted, ...onlyExchange } = adapter;
+  assertManifestInvalid(
+    () =>
+      new ConnectorRegistry([
+        { ...onlyExchange, getManifest: () => noneManifest },
+      ]),
+    /feedlike.*exchangeOAuthCode/,
+  );
+  const { exchangeOAuthCode: _omitted2, ...onlyRefresh } = adapter;
+  assertManifestInvalid(
+    () =>
+      new ConnectorRegistry([
+        { ...onlyRefresh, getManifest: () => noneManifest },
+      ]),
+    /feedlike.*refreshOAuthToken/,
+  );
+});
+
+test("ConnectorRegistry registers a none adapter without OAuth methods", () => {
+  const {
+    exchangeOAuthCode: _exchange,
+    refreshOAuthToken: _refresh,
+    ...noOAuth
+  } = adapter;
+  const registry = new ConnectorRegistry([
+    { ...noOAuth, getManifest: () => noneManifest },
+  ]);
+
+  assert.equal(registry.getManifest("feedlike").auth.kind, "none");
+});
+
+test("ConnectorRegistry leaves a brokered adapter unconstrained", () => {
+  const {
+    exchangeOAuthCode: _exchange,
+    refreshOAuthToken: _refresh,
+    ...noOAuth
+  } = adapter;
+  const registry = new ConnectorRegistry([
+    { ...noOAuth, getManifest: () => brokeredManifest },
+  ]);
+
+  assert.equal(registry.getManifest("brokered-fake").auth.kind, "brokered");
+});

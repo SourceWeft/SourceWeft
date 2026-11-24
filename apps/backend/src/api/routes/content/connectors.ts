@@ -1,6 +1,6 @@
-import { connectorAccessPolicy } from "../../../modules/connectors/access-policy";
 import type { Hono } from "hono";
 import {
+  checkConnectorConfigRequestSchema,
   connectorWebhookConfigResponseSchema,
   createConnectorActionRequestSchema,
   createConnectorRequestSchema,
@@ -29,6 +29,10 @@ import {
   listConnectorActivityRecords,
 } from "../../../modules/connectors/repository";
 import { enqueueConnectorSyncJob } from "../../../modules/content/queue";
+import {
+  parseConnectorSelectionAction,
+  runConnectorSelectionAction,
+} from "../../../modules/connectors/selection";
 import { createGoogleDrivePickerSession } from "../../../modules/connectors/picker-session";
 import { logger } from "../../../shared/logger";
 import {
@@ -87,10 +91,33 @@ export function registerConnectorRoutes(app: Hono) {
       throw ApiError.unauthorized();
     }
 
-    return ApiResponse.success(
-      c,
-      await connectorService.listManifests(getSessionUserId(session)),
-    );
+    return ApiResponse.success(c, connectorService.listManifests());
+  });
+
+  // Literal two-segment path; the `/connectors/:connectorId/...` routes all have
+  // more segments, so this never collides with them.
+  app.post("/connectors/check", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const body = ensureObjectBody(await c.req.json().catch(() => null));
+    const parsed = checkConnectorConfigRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const result = await connectorService.checkConfigReadiness({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+      connectorType: parsed.data.connectorType,
+      configJson: parsed.data.configJson,
+    });
+    c.header("Cache-Control", "no-store");
+    return ApiResponse.success(c, result);
   });
 
   app.get("/connectors/:connectorId/gmail/labels", async (c) => {
@@ -119,27 +146,35 @@ export function registerConnectorRoutes(app: Hono) {
         "Active Gmail connector not found",
       );
     }
-    await connectorAccessPolicy.requireConnection(
-      connector,
-      getSessionUserId(session),
-    );
     const accessToken = await connectorOAuthService.getRuntimeToken({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
       accountId: connector.oauthAccountId,
       connectorType: "gmail",
     });
-    const result = await connectorRegistry.getAdapter("gmail").executeAction({
-      teamId: workspace.organizationId,
-      workspaceId: workspace.id,
-      connectorId,
-      connectorType: "gmail",
-      actionType: "gmail.labels.list",
-      request: {},
-      config: connector.configJson,
-      accessToken,
-      idempotencyKey: "gmail.labels.list",
-    });
+    let result;
+    try {
+      result = await connectorRegistry.getAdapter("gmail").executeAction({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        connectorId,
+        connectorType: "gmail",
+        actionType: "gmail.labels.list",
+        request: {},
+        config: connector.configJson,
+        accessToken,
+        idempotencyKey: "gmail.labels.list",
+      });
+    } catch (error) {
+      await connectorOAuthService.markBrokeredAccountReauthRequired({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        accountId: connector.oauthAccountId,
+        connectorType: "gmail",
+        error,
+      });
+      throw error;
+    }
     return ApiResponse.success(c, result.result);
   });
 
@@ -160,10 +195,6 @@ export function registerConnectorRoutes(app: Hono) {
         workspaceId: workspace.id,
         connectorId,
       });
-      await connectorAccessPolicy.requireConnection(
-        { connectorType: "google_drive", createdBy: connector?.createdBy },
-        getSessionUserId(session),
-      );
       const result = await createGoogleDrivePickerSession({
         connector,
         teamId: workspace.organizationId,
@@ -184,6 +215,43 @@ export function registerConnectorRoutes(app: Hono) {
       return ApiResponse.success(c, result);
     },
   );
+
+  app.post("/connectors/:connectorId/selection/:action", async (c) => {
+    const session = await requireSession(c);
+    if (!session) throw ApiError.unauthorized();
+    const workspaceId = requireRouteParam(c, "workspaceId");
+    const connectorId = requireRouteParam(c, "connectorId");
+    const action = parseConnectorSelectionAction(
+      requireRouteParam(c, "action"),
+    );
+    const { workspace } = await requireConnectorWorkspace({
+      workspaceId,
+      userId: getSessionUserId(session),
+      permission: "connector.manage",
+    });
+    const connector = await findSourceConnectorRecord({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      connectorId,
+    });
+    const body = await c.req.json().catch(() => null);
+    const result = await runConnectorSelectionAction({
+      connector,
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      action,
+      request: body,
+      deps: {
+        getRuntimeToken: connectorOAuthService.getRuntimeToken.bind(
+          connectorOAuthService,
+        ),
+        getAdapter: (type) => connectorRegistry.getAdapter(type),
+        getManifest: (type) => connectorRegistry.getManifest(type),
+      },
+    });
+    c.header("Cache-Control", "no-store");
+    return ApiResponse.success(c, result);
+  });
 
   app.post("/connectors/oauth/:connectorType/start", async (c) => {
     const session = await requireSession(c);

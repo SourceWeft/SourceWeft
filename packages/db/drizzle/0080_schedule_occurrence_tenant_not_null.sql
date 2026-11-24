@@ -1,0 +1,3 @@
+UPDATE "schedule_occurrences" AS o SET "team_id" = s."team_id", "workspace_id" = s."workspace_id" FROM "task_schedules" AS s WHERE o."schedule_id" = s."id" AND (o."team_id" IS NULL OR o."workspace_id" IS NULL);--> statement-breakpoint
+ALTER TABLE "schedule_occurrences" ALTER COLUMN "team_id" SET NOT NULL;--> statement-breakpoint
+ALTER TABLE "schedule_occurrences" ALTER COLUMN "workspace_id" SET NOT NULL;

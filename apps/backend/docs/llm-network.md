@@ -133,7 +133,7 @@ does not invent capabilities or prices for unknown local model IDs. Static
 profiles with manual pricing do not need remote catalog discovery. Local
 deployment does not itself change the application's billing policy.
 
-This path uses a fixed `openai@6.49.0` patch for explicit no-auth construction
+This path uses a fixed `openai@7.55.0` patch for explicit no-auth construction
 and header validation, plus isolation from ambient custom headers. LangChain
 continues to own request conversion, tools, streaming, retries and embeddings.
 Keep the patch and version pin when deploying; see [patch maintenance](../../../patches/README.md).
@@ -144,7 +144,7 @@ Keep the patch and version pin when deploying; see [patch maintenance](../../../
   Cloudflare and SiliconFlow), Azure OpenAI and Anthropic use the supplied
   transport. Only capabilities already supported by each adapter are available.
 - Native Gemini chat, streaming, tool calls and embeddings use the supplied
-  transport through fixed patches to `@langchain/google-genai@2.2.0` and
+  transport through fixed patches to `@langchain/google-genai@2.3.6` and
   `@google/generative-ai@0.24.1`. The original protocol is retained, including
   cached-content transport settings. Embedding failures now throw instead of
   yielding empty vectors. Keep both patches when installing or deploying, and

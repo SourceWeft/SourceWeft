@@ -116,6 +116,10 @@ export class BillingService {
     return this.usageService.getExecutionState(teamId, userId);
   }
 
+  getScheduledTaskLimits(teamId: string, userId: string) {
+    return this.usageService.getScheduledTaskLimits(teamId, userId);
+  }
+
   getUsage(teamId: string, userId: string) {
     return this.usageService.getUsage(teamId, userId);
   }

@@ -33,9 +33,17 @@ time. Queue and provider failures are recorded on the occurrence and connector
 schedule; authentication failures disable future automatic attempts until a
 user reconnects and reenables periodic indexing.
 
-The schedule schema reserves an `agent_task` kind and user ownership for future
-user-created tasks. The dispatcher currently filters to `connector_sync`, and
-there is no user-task creation API or worker handler.
+The connector dispatcher only ever sees `connector_sync` schedules.
+
+## Scheduled tasks
+
+`schedules/agent-tasks.ts` is the second kind on the same engine and runs in
+the same tick: a due `agent_task` schedule becomes an ordinary chat run in a
+new conversation of the task's owner, and the run's outcome is brought back
+onto the occurrence. There is no separate queue or worker handler: the run is
+the same `thread-chat-run` job a person's turn uses, at a lower priority. What
+decides whether a slot runs, and what happens when it does not, is in
+`modules/agent-tasks/README.md`.
 
 ## MCP README fetch
 

@@ -40,7 +40,7 @@ import { cn } from "@sourceweft/ui-web/lib/utils";
 import { RawImage } from "../../../../../_components/raw-image";
 import { memoComponent } from "../memo-component";
 import { TypeBadge } from "../type-badge";
-import { connectorCatalog } from "./catalog";
+import { connectorCatalog, connectorCatalogCapabilities } from "./catalog";
 import type {
   ConnectorAccountItem,
   ConnectorCatalogItem,
@@ -69,6 +69,17 @@ const syncReadinessUiByReason: Record<
   notion_no_pages: {
     summaryKey: "connectors.readinessNoPages",
     suppressWebhookSetup: true,
+  },
+  feed_blocked_address: {
+    summaryKey: "connectors.readiness.feed_blocked_address",
+  },
+  feed_timeout: { summaryKey: "connectors.readiness.feed_timeout" },
+  feed_too_large: { summaryKey: "connectors.readiness.feed_too_large" },
+  feed_not_a_feed: { summaryKey: "connectors.readiness.feed_not_a_feed" },
+  feed_http_error: { summaryKey: "connectors.readiness.feed_http_error" },
+  feed_unreachable: { summaryKey: "connectors.readiness.feed_unreachable" },
+  feed_https_required: {
+    summaryKey: "connectors.readiness.feed_https_required",
   },
 };
 
@@ -180,7 +191,7 @@ export function PlugIcon({ className }: { className?: string }) {
   return <Link2 className={className} />;
 }
 
-function getConnectorProviderName(connectorType: string) {
+export function getConnectorProviderName(connectorType: string) {
   return (
     connectorCatalog.find((item) => item.id === connectorType)?.name ??
     connectorType
@@ -280,6 +291,11 @@ export function getCatalogConnector(
   item: ConnectorCatalogItem,
   connectors: ConnectorItem[],
 ) {
+  // An add-only type has one connector per feed, so no single connector
+  // stands for the card.
+  if (item.addMode) {
+    return null;
+  }
   return (
     connectors.find((connector) => connector.raw.connectorType === item.id) ??
     null
@@ -405,7 +421,9 @@ function getOAuthConnectorStatus(
   return {
     kind: "available",
     label: t("connectors.status.available"),
-    detail: t("connectors.detail.available", { name: input.item.name }),
+    detail: input.item.addMode
+      ? t("connectors.detail.availableAddFeed")
+      : t("connectors.detail.available", { name: input.item.name }),
   };
 }
 
@@ -520,39 +538,65 @@ export const ConnectorCatalogCard = memoComponent(
     item,
     status,
     connector,
+    onAddFeed,
     onCancelConnector,
     onConfigure,
     onConnectConnector,
     onCreateConnector,
     onDisconnect,
     onReconnectConnector,
+    supportsIndexing,
   }: {
     item: ConnectorCatalogItem;
     status: ConnectorCatalogStatus;
     connector: ConnectorItem | null;
+    /** Add-only cards (`item.addMode`) call this instead of starting OAuth.
+     * Required so an add-only card can never render a button that does nothing. */
+    onAddFeed: (item: ConnectorCatalogItem) => void;
     onCancelConnector: (item: ConnectorCatalogItem) => void;
     onConfigure: () => void;
     onConnectConnector: (item: ConnectorCatalogItem) => void;
     onCreateConnector: (item: ConnectorCatalogItem) => void;
     onDisconnect: (connector: ConnectorItem) => void;
     onReconnectConnector: (item: ConnectorCatalogItem) => void;
+    /** Omit when the type's manifest has not loaded yet; see
+     * `connectorCatalogCapabilities`. */
+    supportsIndexing?: boolean;
   }) {
     const t = useTranslations("dashboardSourcesHub");
+    // A deployment can register a type (a tools-only, Composio-brokered Gmail)
+    // with no sync resources; the manifest says so via `supportsIndexing`.
+    // Never advertise that card as indexable, and drop the indexing wording
+    // from its description. `undefined` keeps today's shape (manifest not
+    // loaded yet). Derived here from the same flag the capability chip uses.
+    const cardIsIndexable =
+      supportsIndexing === false ? false : item.isIndexable;
+    const cardDescription =
+      item.id === "gmail" && supportsIndexing === false
+        ? t("connectors.gmail.toolsOnlyCardDescription")
+        : item.description;
     const isBusy = status.kind === "syncing";
     // Authorizing again is safe for any connector that reports a problem, and
     // it is the only fix when the provider no longer accepts the stored grant.
     const canReconnect = Boolean(connector) && status.kind === "error";
     const cta = isBusy
       ? t("connectors.cta.connecting")
-      : canReconnect
-        ? t("connectors.cta.reconnect")
-        : connector
-          ? t("connectors.cta.connected")
-          : status.kind === "connected" && item.postOAuthMode !== "auto_create"
-            ? t("connectors.cta.configure")
-            : t("connectors.cta.connect");
+      : item.addMode
+        ? t("connectors.cta.addFeed")
+        : canReconnect
+          ? t("connectors.cta.reconnect")
+          : connector
+            ? t("connectors.cta.connected")
+            : status.kind === "connected" &&
+                item.postOAuthMode !== "auto_create"
+              ? t("connectors.cta.configure")
+              : t("connectors.cta.connect");
 
     function handleAction() {
+      if (item.addMode) {
+        onAddFeed(item);
+        return;
+      }
       if (canReconnect) {
         onReconnectConnector(item);
         return;
@@ -590,7 +634,7 @@ export const ConnectorCatalogCard = memoComponent(
                   {item.name}
                 </h4>
                 <p className="mt-0.5 line-clamp-1 text-xs leading-5 text-muted-foreground">
-                  {item.description}
+                  {cardDescription}
                 </p>
               </div>
               <div className="flex shrink-0 items-start gap-1">
@@ -618,12 +662,14 @@ export const ConnectorCatalogCard = memoComponent(
             <div className="mt-1.5 hidden flex-wrap gap-1 sm:flex">
               <TypeBadge
                 label={
-                  item.isIndexable
+                  cardIsIndexable
                     ? t("connectors.type.indexable")
                     : t("connectors.type.searchApi")
                 }
               />
-              {item.capabilities.slice(0, 2).map((capability) => (
+              {connectorCatalogCapabilities(item, supportsIndexing)
+                .slice(0, 2)
+                .map((capability) => (
                 <TypeBadge key={capability} label={capability} />
               ))}
             </div>

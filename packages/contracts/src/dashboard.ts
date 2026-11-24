@@ -32,6 +32,9 @@ export const dashboardChatBootstrapResponseSchema = z.object({
   activeWorkspace: workspaceSchema,
   workspaces: z.array(workspaceSchema),
   privateChats: listThreadsResponseSchema,
+  // The viewer's pinned chats; optional so a web build can run against an
+  // API that does not send it yet.
+  pinnedChats: listThreadsResponseSchema.optional(),
   initialChatPreferences: threadChatPreferencesSchema,
   modelCatalog: listThreadModelCatalogResponseSchema.nullable(),
   modelCatalogDeferred: z.boolean().optional(),

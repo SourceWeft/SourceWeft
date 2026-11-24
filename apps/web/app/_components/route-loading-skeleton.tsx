@@ -8,7 +8,14 @@ import {
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { ChatHeaderSkeleton } from "./chat-header-skeleton";
 import { CatalogRouteSkeleton } from "./catalog-loading-skeleton";
-import { TraceListSkeletonRows } from "../dashboard/observability/trace-loading-skeleton";
+import {
+  TraceListHeaderSkeleton,
+  TraceListSkeletonRows,
+  TraceSkeletonBlock,
+  TraceSkeletonLine,
+} from "../dashboard/observability/trace-loading-skeleton";
+import { ScheduledTasksRouteSkeleton } from "../dashboard/scheduled/_components/scheduled-tasks-skeleton";
+import { AssistantRouteSkeleton } from "../dashboard/assistant/_components/assistant-skeleton";
 
 type SkeletonProps = {
   className?: string;
@@ -107,6 +114,10 @@ export function DashboardSkeletonContentForPath({
     return <CatalogRouteSkeleton kind="mcp" />;
   if (pathname.startsWith("/dashboard/mcp/"))
     return <SkillDetailSkeletonContent kind="mcp" />;
+  if (pathname.replace(/\/+$/, "") === "/dashboard/scheduled")
+    return <ScheduledTasksRouteSkeleton />;
+  if (pathname.replace(/\/+$/, "") === "/dashboard/assistant")
+    return <AssistantRouteSkeleton />;
   if (pathname.startsWith("/dashboard/billing")) {
     return (
       <BillingSkeletonContent
@@ -135,12 +146,15 @@ export function DashboardSidebarSkeleton({
       <aside
         style={{ width }}
         className={cn(
-          "flex h-svh shrink-0 flex-col items-center gap-1 border-r border-sidebar-border bg-sidebar px-2 pb-3",
-          desktopTitlebar ? "pt-0" : "pt-3",
+          "relative flex h-svh shrink-0 flex-col items-center gap-1 bg-sidebar px-2 pb-3",
+          desktopTitlebar ? "pt-0" : "border-r border-sidebar-border pt-3",
         )}
       >
         {desktopTitlebar ? (
-          <div data-desktop-drag-region="" className="h-10 w-full shrink-0" />
+          <>
+            <div data-desktop-drag-region="" className="h-14 w-full shrink-0" />
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 top-[55px] border-r border-t border-sidebar-border" />
+          </>
         ) : (
           brand
         )}
@@ -158,45 +172,42 @@ export function DashboardSidebarSkeleton({
     );
   }
 
-  // The conversation column beside the rail: workspace, then the chats.
+  // The conversation column beside the rail: workspace, then the chats. The
+  // macOS client's first row sits beside the traffic lights, so there it
+  // holds the list's icon actions and the workspace follows it.
   return (
     <aside
       style={{ width }}
       className="flex h-svh shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground"
     >
-      <div className="shrink-0 px-3">
-        {desktopTitlebar && (
-          <div data-desktop-drag-region="" className="h-10 shrink-0" />
-        )}
-        <div className="flex h-12 items-center gap-2 sm:h-14">
-          <SkeletonBlock className="h-8 flex-1 rounded-lg" />
+      {desktopTitlebar ? (
+        <>
+          <div
+            data-desktop-drag-region=""
+            className="flex h-14 shrink-0 items-center justify-end gap-1 border-b border-sidebar-border pl-7 pr-3"
+          >
+            {Array.from({ length: 4 }, (_, index) => (
+              <SkeletonBlock key={index} className="size-8 rounded-md" />
+            ))}
+          </div>
+          <div className="flex h-12 shrink-0 items-center px-3">
+            <SkeletonBlock className="h-8 flex-1 rounded-lg" />
+          </div>
+        </>
+      ) : (
+        <div className="shrink-0 px-3">
+          <div className="flex h-12 items-center gap-2 sm:h-14">
+            <SkeletonBlock className="h-8 flex-1 rounded-lg" />
+          </div>
         </div>
-      </div>
+      )}
       <div className="min-h-0 flex-1 space-y-5 overflow-hidden px-3 py-4">
-        <SkeletonLine className="w-16" />
+        {desktopTitlebar ? null : <SkeletonLine className="w-16" />}
         {Array.from({ length: 8 }, (_, index) => (
           <SkeletonLine key={index} className="w-44" />
         ))}
       </div>
     </aside>
-  );
-}
-
-export function DashboardMobileBottomNavSkeleton() {
-  return (
-    <nav className="absolute inset-x-0 bottom-0 z-40 border-t border-border bg-background/95 px-2 pb-[env(safe-area-inset-bottom)] pt-1.5 md:hidden">
-      <div className="grid grid-cols-5 gap-1">
-        {Array.from({ length: 5 }).map((_, index) => (
-          <div
-            className="flex h-11 flex-col items-center justify-center gap-1"
-            key={index}
-          >
-            <SkeletonBlock className="size-5 rounded-md" />
-            <SkeletonLine className="w-9" />
-          </div>
-        ))}
-      </div>
-    </nav>
   );
 }
 
@@ -212,16 +223,29 @@ export function DashboardContentRouteSkeleton({
   return <div className="min-h-0 flex-1">{children}</div>;
 }
 
+/**
+ * The home toolbar's team switcher before the session's teams load: the
+ * switcher's h-10 button at the width a short team name takes. The route
+ * skeleton and the page both use it, so the toolbar does not change when the
+ * page replaces the route skeleton.
+ */
+export function DashboardHomeTeamSwitcherSkeleton() {
+  return <SkeletonBlock className="h-10 w-32 rounded-lg" />;
+}
+
 function DashboardHomeHeaderSkeleton() {
   return (
     <header className="sticky top-0 z-10 shrink-0 border-b border-border/70 bg-background/95 backdrop-blur">
       <div className="flex min-h-16 items-center justify-between gap-2 px-3 py-2 md:h-16 md:gap-3 md:px-6 md:py-0 xl:px-8">
         <div className="flex min-w-0 items-center gap-2 md:gap-3">
-          <SkeletonBlock className="h-9 w-36 max-w-[48vw] rounded-xl md:w-48" />
+          <DashboardHomeTeamSwitcherSkeleton />
         </div>
 
         <div className="flex min-w-0 flex-1 items-center justify-end gap-2 md:gap-3">
-          <SkeletonBlock className="h-10 w-full max-w-[42vw] rounded-xl md:max-w-72" />
+          {/* Same box as the page's search field. */}
+          <div className="relative w-full min-w-0 max-w-[42vw] md:max-w-72">
+            <SkeletonBlock className="h-10 w-full rounded-xl" />
+          </div>
         </div>
       </div>
     </header>
@@ -330,13 +354,19 @@ function DashboardHomeWorkspaceCardSkeleton({ create }: { create?: boolean }) {
         )}
       </div>
 
+      {/* Line boxes match the card's 24px title and 18.75px subtitle, so the
+          card keeps its height when the workspaces arrive. */}
       <div className="flex items-start justify-between gap-3 px-1.5 pb-1 pt-3.5">
-        <div className="min-w-0 flex-1 space-y-2">
-          <SkeletonLine className="h-4 w-36" />
-          <SkeletonLine className="w-24" />
+        <div className="min-w-0 flex-1">
+          <div className="flex h-6 items-center">
+            <SkeletonLine className="h-4 w-36" />
+          </div>
+          <div className="mt-1 flex h-[18.75px] items-center">
+            <SkeletonLine className="w-24" />
+          </div>
         </div>
         {!create ? (
-          <SkeletonBlock className="h-6 w-16 shrink-0 rounded-full" />
+          <SkeletonBlock className="h-[24.5px] w-12 shrink-0 rounded-full" />
         ) : null}
       </div>
     </div>
@@ -656,14 +686,14 @@ function ObservabilityFilterSkeleton() {
   return (
     <aside className="hidden w-[260px] shrink-0 border-r border-border bg-card p-3 md:block">
       <div className="mb-4 flex items-center justify-between">
-        <SkeletonLine className="h-4 w-28" />
-        <SkeletonBlock className="h-8 w-16 rounded-md" />
+        <TraceSkeletonLine className="h-4 w-28" />
+        <TraceSkeletonBlock className="h-8 w-16 rounded-md" />
       </div>
       <div className="space-y-3">
         {Array.from({ length: 7 }).map((_, index) => (
           <div className="space-y-2" key={index}>
-            <SkeletonLine className="w-24" />
-            <SkeletonBlock className="h-9 rounded-lg" />
+            <TraceSkeletonLine className="w-24" />
+            <TraceSkeletonBlock className="h-9 rounded-lg" />
           </div>
         ))}
       </div>
@@ -677,19 +707,7 @@ function ObservabilitySkeletonContent() {
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <ObservabilityFilterSkeleton />
         <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card">
-          <div className="shrink-0 border-b border-border px-3 py-2">
-            <div className="flex min-h-8 flex-wrap items-center justify-between gap-2">
-              <div className="flex min-w-0 items-center gap-2">
-                <SkeletonBlock className="size-8 rounded-md md:hidden" />
-                <SkeletonLine className="h-4 w-32" />
-                <SkeletonBlock className="h-6 w-16 rounded-full" />
-              </div>
-              <div className="flex shrink-0 gap-2">
-                <SkeletonBlock className="h-8 w-24 rounded-md" />
-                <SkeletonBlock className="h-8 w-8 rounded-md" />
-              </div>
-            </div>
-          </div>
+          <TraceListHeaderSkeleton />
           <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
             <TraceListSkeletonRows allWorkspacesSelected={false} />
           </div>

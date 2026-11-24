@@ -22,6 +22,7 @@ const {
   deleteConnector,
   deleteAccount,
   create,
+  checkConfig,
 } = vi.hoisted(() => ({
   list: vi.fn(),
   listAccounts: vi.fn(),
@@ -34,6 +35,7 @@ const {
   deleteConnector: vi.fn(),
   deleteAccount: vi.fn(),
   create: vi.fn(),
+  checkConfig: vi.fn(),
 }));
 
 const sessionState = vi.hoisted(() => ({ userId: "user-1" }));
@@ -57,6 +59,7 @@ vi.mock("../../../../../../lib/sdk", () => ({
     delete: deleteConnector,
     deleteAccount,
     create,
+    checkConfig,
   },
 }));
 
@@ -74,10 +77,108 @@ vi.mock("sonner", () => ({
   },
 }));
 
+// Add a tools-only connector type (no indexing, hidden behind rollout) to the
+// catalog so a selection-spec connect can be driven through the OAuth return.
+vi.mock("./catalog", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./catalog")>();
+  const { Box } = await import("lucide-react");
+  return {
+    ...actual,
+    connectorCatalog: [
+      ...actual.connectorCatalog,
+      {
+        id: "x-tools",
+        name: "X Tools",
+        category: "Knowledge & Docs",
+        description: "",
+        capabilities: [],
+        postOAuthMode: "auto_create",
+        requiresBackendRegistration: true,
+        isIndexable: false,
+        supportsPeriodicSync: false,
+        supportsActions: true,
+        supportsWebhook: false,
+        icon: Box,
+      },
+    ],
+  };
+});
+
+const dropboxSelectionSpec = {
+  actions: {
+    browse: "dropbox.browse",
+    search: "dropbox.search",
+    describe: "dropbox.describe",
+  },
+  kinds: ["folder", "file"],
+  maxItems: 500,
+};
+const toolsSelectionSpec = {
+  actions: { browse: "x.browse", describe: "x.describe" },
+  kinds: ["item"],
+  maxItems: 100,
+};
+const githubSelectionSpec = {
+  actions: {
+    browse: "github.browse",
+    search: "github.search",
+    describe: "github.describe",
+  },
+  kinds: ["account", "repository"],
+  maxItems: 20,
+};
+
+const linearSelectionSpec = {
+  actions: {
+    browse: "linear.browse",
+    search: "linear.search",
+    describe: "linear.describe",
+  },
+  kinds: ["team", "project"],
+  maxItems: 100,
+};
+
+const jiraSelectionSpec = {
+  actions: {
+    browse: "jira.browse",
+    search: "jira.search",
+    describe: "jira.describe",
+  },
+  kinds: ["site", "project"],
+  maxItems: 100,
+};
+
+const confluenceSelectionSpec = {
+  actions: {
+    browse: "confluence.browse",
+    search: "confluence.search",
+    describe: "confluence.describe",
+  },
+  kinds: ["site", "space", "page"],
+  maxItems: 100,
+};
+
 async function flushMicrotasks() {
   for (let i = 0; i < 25; i += 1) {
     await Promise.resolve();
   }
+}
+
+// Minimal shapes the hook actually reads (`auth.kind`/`auth.broker` and
+// `sync.resources.length`), not the full `ConnectorManifest` contract shape —
+// nothing else in the hook touches a manifest field.
+function fakeManifest(
+  type: string,
+  overrides: {
+    resources?: unknown[];
+    auth?: { kind: "oauth2" } | { kind: "brokered"; broker: string };
+  } = {},
+) {
+  return {
+    type,
+    auth: overrides.auth ?? { kind: "oauth2" },
+    sync: { resources: overrides.resources ?? [{ type: "resource" }] },
+  };
 }
 
 function fakeConnector(
@@ -156,6 +257,7 @@ beforeEach(() => {
     deleteConnector,
     deleteAccount,
     create,
+    checkConfig,
     toastError,
     toastSuccess,
     toastInfo,
@@ -165,7 +267,12 @@ beforeEach(() => {
   // Sensible defaults; individual tests override as needed.
   list.mockResolvedValue({ items: [] });
   listAccounts.mockResolvedValue({ items: [] });
-  listManifests.mockResolvedValue({ items: [{ type: "notion" }] });
+  listManifests.mockResolvedValue({
+    items: [
+      fakeManifest("notion"),
+      { ...fakeManifest("dropbox"), selection: dropboxSelectionSpec },
+    ],
+  });
   listActivity.mockResolvedValue({ items: [] });
   getWebhookConfig.mockResolvedValue(null);
   listWebhookEvents.mockResolvedValue({ items: [] });
@@ -328,7 +435,7 @@ test("handleConfirmDisconnectConnector deletes (soft) and clears pending state",
 });
 
 test("account switch clears prior manifest eligibility even while the next fetch is pending", async () => {
-  listManifests.mockResolvedValueOnce({ items: [{ type: "gmail" }] });
+  listManifests.mockResolvedValueOnce({ items: [fakeManifest("gmail")] });
   const input = baseInput("ws-shared-preview");
   function Harness() {
     latest = useConnectors(input);
@@ -344,7 +451,7 @@ test("account switch clears prior manifest eligibility even while the next fetch
 });
 
 test("failed manifest refresh clears old Gmail eligibility", async () => {
-  listManifests.mockResolvedValueOnce({ items: [{ type: "gmail" }] });
+  listManifests.mockResolvedValueOnce({ items: [fakeManifest("gmail")] });
   await mountHook(baseInput("ws-preview-error"));
   expect(api().availableConnectorTypes).toEqual(["gmail"]);
   listManifests.mockRejectedValueOnce(new Error("offline"));
@@ -352,6 +459,186 @@ test("failed manifest refresh clears old Gmail eligibility", async () => {
     await api().refreshConnectors();
   });
   expect(api().availableConnectorTypes).toEqual([]);
+});
+
+test("connectorManifestInfoByType derives supportsIndexing and broker from each manifest", async () => {
+  listManifests.mockResolvedValueOnce({
+    items: [
+      fakeManifest("notion"),
+      fakeManifest("gmail", {
+        resources: [],
+        auth: { kind: "brokered", broker: "composio" },
+      }),
+    ],
+  });
+
+  await mountHook(baseInput("ws-manifest-info"));
+
+  expect(api().connectorManifestInfoByType).toEqual({
+    notion: { supportsIndexing: true, broker: null },
+    gmail: { supportsIndexing: false, broker: "composio" },
+  });
+});
+
+// --- Connecting a tools-only, Composio-brokered Gmail ---------------------
+// A manifest with no sync resources carries no mode to choose: the redirect
+// never asks for one, and the connector created on return takes the
+// tools-only config the brief requires, regardless of what a stale
+// `gmail_mode` might otherwise suggest.
+
+test("handleConnectConnector omits gmail_mode for a tools-only Gmail manifest", async () => {
+  listManifests.mockResolvedValueOnce({
+    items: [
+      fakeManifest("gmail", {
+        resources: [],
+        auth: { kind: "brokered", broker: "composio" },
+      }),
+    ],
+  });
+  const assign = vi.fn();
+  const original = window.location;
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    value: { ...original, href: original.href, origin: original.origin, assign },
+  });
+  try {
+    await mountHook(baseInput("ws-brokered-start"));
+    act(() => {
+      api().handleConnectConnector(
+        { id: "gmail", name: "Gmail" } as never,
+        "tools",
+      );
+    });
+
+    expect(assign).toHaveBeenCalledTimes(1);
+    const target = new URL(String(assign.mock.calls[0]![0]));
+    const returnTo = new URL(target.searchParams.get("return_to")!);
+    expect(returnTo.searchParams.has("gmail_mode")).toBe(false);
+  } finally {
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: original,
+    });
+  }
+});
+
+test("handleConnectConnector still carries gmail_mode for today's indexable Gmail manifest", async () => {
+  listManifests.mockResolvedValueOnce({ items: [fakeManifest("gmail")] });
+  const assign = vi.fn();
+  const original = window.location;
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    value: { ...original, href: original.href, origin: original.origin, assign },
+  });
+  try {
+    await mountHook(baseInput("ws-indexable-start"));
+    act(() => {
+      api().handleConnectConnector(
+        { id: "gmail", name: "Gmail" } as never,
+        "both",
+      );
+    });
+
+    const target = new URL(String(assign.mock.calls[0]![0]));
+    const returnTo = new URL(target.searchParams.get("return_to")!);
+    expect(returnTo.searchParams.get("gmail_mode")).toBe("both");
+  } finally {
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: original,
+    });
+  }
+});
+
+test("a first authorization for a tools-only, brokered Gmail creates it with liveSearchEnabled only", async () => {
+  // Prove the direct-fetch fallback actually ran, not just that the manifest
+  // was available by coincidence: the mount-time `refreshConnectors` call to
+  // `listManifests` hangs forever, so `connectorManifestInfoByTypeRef` can
+  // never be populated that way. The only remaining source for the tools-only
+  // manifest is `ensureConnector`'s own direct `listManifests` call, which
+  // gets the second queued response.
+  listManifests
+    .mockImplementationOnce(() => new Promise(() => {}))
+    .mockResolvedValueOnce({
+      items: [
+        fakeManifest("gmail", {
+          resources: [],
+          auth: { kind: "brokered", broker: "composio" },
+        }),
+      ],
+    });
+  listAccounts.mockResolvedValue({
+    items: [
+      {
+        id: "acc-1",
+        status: "active",
+        displayName: "Person",
+        createdAt: "2024-01-01T00:00:00.000Z",
+      },
+    ],
+  });
+  create.mockResolvedValue({
+    connector: fakeConnector({
+      id: "gmail-1",
+      connectorType: "gmail",
+      configJson: { liveSearchEnabled: true },
+    }),
+  });
+  returnFromAuthorization({
+    workspaceId: "ws-brokered-first",
+    connectorType: "gmail",
+    accountId: "acc-1",
+  });
+
+  await mountHook(baseInput("ws-brokered-first"));
+
+  // The mount-time call never resolves, so `connectorManifestInfoByType`
+  // (the hook's cached, state-backed view) never learns about Gmail through
+  // the normal channel; `listManifests` was called again regardless,
+  // confirming the fallback path, not the cache, is what ran.
+  expect(listManifests.mock.calls.length).toBeGreaterThanOrEqual(2);
+  expect(api().availableConnectorTypes).not.toContain("gmail");
+  expect(create).toHaveBeenCalledWith(
+    "ws-brokered-first",
+    expect.objectContaining({
+      connectorType: "gmail",
+      configJson: { liveSearchEnabled: true },
+    }),
+  );
+  // Settings are never auto-opened for the tools-only config.
+  expect(api().connectorSettingsConnector).toBeNull();
+});
+
+test("a first authorization never guesses a Gmail mode when the direct manifest check fails", async () => {
+  // Same race as above (the mount-time fetch never resolves), but this time
+  // `ensureConnector`'s own direct `listManifests` call rejects. The brief's
+  // "no silent fallback" rule means this must not default to either shape:
+  // the connector is never created, and the failure surfaces through the
+  // same error path any other failed connector creation already uses.
+  listManifests
+    .mockImplementationOnce(() => new Promise(() => {}))
+    .mockRejectedValueOnce(new Error("manifest fetch failed"));
+  listAccounts.mockResolvedValue({
+    items: [
+      {
+        id: "acc-1",
+        status: "active",
+        displayName: "Person",
+        createdAt: "2024-01-01T00:00:00.000Z",
+      },
+    ],
+  });
+  returnFromAuthorization({
+    workspaceId: "ws-brokered-fails",
+    connectorType: "gmail",
+    accountId: "acc-1",
+  });
+
+  await mountHook(baseInput("ws-brokered-fails"));
+
+  expect(create).not.toHaveBeenCalled();
+  expect(toastError).toHaveBeenCalledWith("manifest fetch failed");
+  expect(api().connectorWaitingByType.gmail).toBeUndefined();
 });
 
 // --- Reconnecting an existing connector -----------------------------------
@@ -509,6 +796,584 @@ test("a first authorization still creates the connector", async () => {
   expect(toastSuccess).toHaveBeenCalledWith("Google Drive connected.");
 });
 
+test("dropbox connect creates an empty selection and opens settings", async () => {
+  listAccounts.mockResolvedValue({
+    items: [
+      {
+        id: "acc-db",
+        status: "active",
+        displayName: "Person",
+        createdAt: "2024-01-01T00:00:00.000Z",
+      },
+    ],
+  });
+  const created = fakeConnector({
+    id: "dropbox-1",
+    connectorType: "dropbox",
+    name: "Person",
+    oauthAccountId: "acc-db",
+    configJson: { items: [] },
+    periodicIndexingEnabled: true,
+    indexingFrequencyMinutes: 360,
+  });
+  // The new connector is listed once it exists.
+  create.mockImplementation(async () => {
+    list.mockResolvedValue({ items: [created] });
+    return { connector: created };
+  });
+  returnFromAuthorization({
+    workspaceId: "ws-dropbox",
+    connectorType: "dropbox",
+    accountId: "acc-db",
+  });
+
+  await mountHook(baseInput("ws-dropbox"));
+
+  expect(create).toHaveBeenCalledWith("ws-dropbox", {
+    connectorType: "dropbox",
+    name: "Person",
+    oauthAccountId: "acc-db",
+    configJson: { items: [] },
+    periodicIndexingEnabled: true,
+    indexingFrequencyMinutes: 360,
+  });
+  // Nothing is selected yet, so nothing is synced; settings open instead.
+  expect(sync).not.toHaveBeenCalled();
+  expect(api().connectorSettingsConnector?.id).toBe("dropbox-1");
+  expect(toastSuccess).toHaveBeenCalledWith("Dropbox connected.");
+});
+
+test("github connect creates an empty selection without periodic indexing and opens settings", async () => {
+  listManifests.mockResolvedValue({
+    items: [
+      { type: "notion" },
+      { type: "dropbox", selection: dropboxSelectionSpec },
+      { type: "github", selection: githubSelectionSpec },
+    ],
+  });
+  listAccounts.mockResolvedValue({
+    items: [
+      {
+        id: "acc-gh",
+        status: "active",
+        displayName: "Person",
+        createdAt: "2024-01-01T00:00:00.000Z",
+      },
+    ],
+  });
+  const created = fakeConnector({
+    id: "github-1",
+    connectorType: "github",
+    name: "Person",
+    oauthAccountId: "acc-gh",
+    configJson: { items: [] },
+    periodicIndexingEnabled: false,
+  });
+  // The new connector is listed once it exists.
+  create.mockImplementation(async () => {
+    list.mockResolvedValue({ items: [created] });
+    return { connector: created };
+  });
+  returnFromAuthorization({
+    workspaceId: "ws-github",
+    connectorType: "github",
+    accountId: "acc-gh",
+  });
+
+  await mountHook(baseInput("ws-github"));
+
+  expect(create).toHaveBeenCalledWith("ws-github", {
+    connectorType: "github",
+    name: "Person",
+    oauthAccountId: "acc-gh",
+    configJson: { items: [] },
+    periodicIndexingEnabled: false,
+  });
+  expect(create.mock.calls[0]?.[1]).not.toHaveProperty(
+    "indexingFrequencyMinutes",
+  );
+  // Nothing is selected yet, so nothing is synced; settings open instead.
+  expect(sync).not.toHaveBeenCalled();
+  expect(api().connectorSettingsConnector?.id).toBe("github-1");
+  expect(toastSuccess).toHaveBeenCalledWith("GitHub connected.");
+});
+
+test("linear connect creates an empty selection without periodic sync and opens settings", async () => {
+  listManifests.mockResolvedValue({
+    items: [
+      { type: "notion" },
+      { type: "dropbox", selection: dropboxSelectionSpec },
+      { type: "linear", selection: linearSelectionSpec },
+    ],
+  });
+  listAccounts.mockResolvedValue({
+    items: [
+      {
+        id: "acc-linear",
+        status: "active",
+        displayName: "Person",
+        createdAt: "2024-01-01T00:00:00.000Z",
+      },
+    ],
+  });
+  const created = fakeConnector({
+    id: "linear-1",
+    connectorType: "linear",
+    name: "Person",
+    oauthAccountId: "acc-linear",
+    configJson: { items: [] },
+    periodicIndexingEnabled: false,
+  });
+  // The new connector is listed once it exists.
+  create.mockImplementation(async () => {
+    list.mockResolvedValue({ items: [created] });
+    return { connector: created };
+  });
+  returnFromAuthorization({
+    workspaceId: "ws-linear",
+    connectorType: "linear",
+    accountId: "acc-linear",
+  });
+
+  await mountHook(baseInput("ws-linear"));
+
+  // A tools-only selection connector: an empty selection, periodic indexing
+  // stays off (it is not in the explicit periodic-index list), no sync is
+  // triggered (nothing selected), and settings open so the admin can choose
+  // teams and projects.
+  expect(create).toHaveBeenCalledWith("ws-linear", {
+    connectorType: "linear",
+    name: "Person",
+    oauthAccountId: "acc-linear",
+    configJson: { items: [] },
+    periodicIndexingEnabled: false,
+  });
+  expect(sync).not.toHaveBeenCalled();
+  expect(api().connectorSettingsConnector?.id).toBe("linear-1");
+  expect(toastSuccess).toHaveBeenCalledWith("Linear connected.");
+});
+
+test("jira connect creates an empty selection without periodic sync and opens settings", async () => {
+  listManifests.mockResolvedValue({
+    items: [
+      { type: "notion" },
+      { type: "dropbox", selection: dropboxSelectionSpec },
+      { type: "jira", selection: jiraSelectionSpec },
+    ],
+  });
+  listAccounts.mockResolvedValue({
+    items: [
+      {
+        id: "acc-jira",
+        status: "active",
+        displayName: "Person",
+        createdAt: "2024-01-01T00:00:00.000Z",
+      },
+    ],
+  });
+  const created = fakeConnector({
+    id: "jira-1",
+    connectorType: "jira",
+    name: "Person",
+    oauthAccountId: "acc-jira",
+    configJson: { items: [] },
+    periodicIndexingEnabled: false,
+  });
+  create.mockImplementation(async () => {
+    list.mockResolvedValue({ items: [created] });
+    return { connector: created };
+  });
+  returnFromAuthorization({
+    workspaceId: "ws-jira",
+    connectorType: "jira",
+    accountId: "acc-jira",
+  });
+
+  await mountHook(baseInput("ws-jira"));
+
+  // Jira is a tools-only selection connector, not in the periodic-index list:
+  // an empty selection is created, periodic indexing stays off, and settings
+  // open so the admin can pick projects.
+  expect(create).toHaveBeenCalledWith("ws-jira", {
+    connectorType: "jira",
+    name: "Person",
+    oauthAccountId: "acc-jira",
+    configJson: { items: [] },
+    periodicIndexingEnabled: false,
+  });
+  expect(sync).not.toHaveBeenCalled();
+  expect(api().connectorSettingsConnector?.id).toBe("jira-1");
+  expect(toastSuccess).toHaveBeenCalledWith("Jira connected.");
+});
+
+test("confluence connect creates an empty selection without periodic sync and opens settings", async () => {
+  listManifests.mockResolvedValue({
+    items: [
+      { type: "notion" },
+      { type: "dropbox", selection: dropboxSelectionSpec },
+      { type: "confluence", selection: confluenceSelectionSpec },
+    ],
+  });
+  listAccounts.mockResolvedValue({
+    items: [
+      {
+        id: "acc-confluence",
+        status: "active",
+        displayName: "Person",
+        createdAt: "2024-01-01T00:00:00.000Z",
+      },
+    ],
+  });
+  const created = fakeConnector({
+    id: "confluence-1",
+    connectorType: "confluence",
+    name: "Person",
+    oauthAccountId: "acc-confluence",
+    configJson: { items: [] },
+    periodicIndexingEnabled: false,
+  });
+  create.mockImplementation(async () => {
+    list.mockResolvedValue({ items: [created] });
+    return { connector: created };
+  });
+  returnFromAuthorization({
+    workspaceId: "ws-confluence",
+    connectorType: "confluence",
+    accountId: "acc-confluence",
+  });
+
+  await mountHook(baseInput("ws-confluence"));
+
+  // Confluence is a tools-only selection connector, not in the periodic-index list:
+  // an empty selection is created, periodic indexing stays off, and settings
+  // open so the admin can pick spaces and pages.
+  expect(create).toHaveBeenCalledWith("ws-confluence", {
+    connectorType: "confluence",
+    name: "Person",
+    oauthAccountId: "acc-confluence",
+    configJson: { items: [] },
+    periodicIndexingEnabled: false,
+  });
+  expect(sync).not.toHaveBeenCalled();
+  expect(api().connectorSettingsConnector?.id).toBe("confluence-1");
+  expect(toastSuccess).toHaveBeenCalledWith("Confluence connected.");
+});
+
+test("a manifest fetch that fails after OAuth return still creates the connector from the spec in state", async () => {
+  // Call #1 is the mount-time refresh: it SUCCEEDS, so the spec is in state and
+  // a manifest load has been recorded as successful. Call #2 is the
+  // just-authorised fetch: it fails. The connect must not abort or show an auth
+  // error — it falls back to the spec already loaded into state.
+  listManifests
+    .mockResolvedValueOnce({
+      items: [
+        fakeManifest("notion"),
+        { ...fakeManifest("dropbox"), selection: dropboxSelectionSpec },
+      ],
+    })
+    .mockRejectedValueOnce(new Error("manifests offline"));
+  listAccounts.mockResolvedValue({
+    items: [
+      {
+        id: "acc-db",
+        status: "active",
+        displayName: "Person",
+        createdAt: "2024-01-01T00:00:00.000Z",
+      },
+    ],
+  });
+  const created = fakeConnector({
+    id: "dropbox-2",
+    connectorType: "dropbox",
+    name: "Person",
+    oauthAccountId: "acc-db",
+    configJson: { items: [] },
+    periodicIndexingEnabled: true,
+    indexingFrequencyMinutes: 360,
+  });
+  create.mockImplementation(async () => {
+    list.mockResolvedValue({ items: [created] });
+    return { connector: created };
+  });
+  returnFromAuthorization({
+    workspaceId: "ws-db-fail",
+    connectorType: "dropbox",
+    accountId: "acc-db",
+  });
+
+  await mountHook(baseInput("ws-db-fail"));
+
+  expect(create).toHaveBeenCalledWith(
+    "ws-db-fail",
+    expect.objectContaining({
+      connectorType: "dropbox",
+      configJson: { items: [] },
+    }),
+  );
+  // The mount-time manifest load applied, so the spec was in state to fall
+  // back to.
+  expect(api().availableConnectorTypes).toContain("dropbox");
+  expect(api().connectorSettingsConnector?.id).toBe("dropbox-2");
+  expect(toastError).not.toHaveBeenCalled();
+});
+
+test("when manifests cannot be loaded at all after OAuth return, nothing is created and the person is told to connect again", async () => {
+  // Every manifest load fails — the mount-time one and the just-authorised
+  // one — so the selection capability is genuinely unknown. The connector must
+  // not be created and no success-toned toast may appear.
+  listManifests.mockRejectedValue(new Error("manifests offline"));
+  listAccounts.mockResolvedValue({
+    items: [
+      {
+        id: "acc-db",
+        status: "active",
+        displayName: "Person",
+        createdAt: "2024-01-01T00:00:00.000Z",
+      },
+    ],
+  });
+  returnFromAuthorization({
+    workspaceId: "ws-db-unknown",
+    connectorType: "dropbox",
+    accountId: "acc-db",
+  });
+
+  await mountHook(baseInput("ws-db-unknown"));
+
+  expect(create).not.toHaveBeenCalled();
+  expect(toastError).toHaveBeenCalledWith(
+    "Dropbox was authorized, but setup could not finish. Connect it again.",
+  );
+  // No success toast of any kind, and the configure-next info toast is not
+  // shown either.
+  expect(toastSuccess).not.toHaveBeenCalled();
+  expect(toastInfo).not.toHaveBeenCalled();
+  // The waiting state is cleared, like the block's other failure exits.
+  expect(api().connectorWaitingByType.dropbox).toBeFalsy();
+});
+
+test("an explicitly handled type without a selection spec keeps its own path", async () => {
+  // Manifests load successfully but carry no selection for Google Drive, so the
+  // capability is known-and-absent: Google Drive keeps its own create path
+  // (empty file selection, settings opened), never the setup-incomplete exit.
+  listManifests.mockResolvedValue({
+    items: [
+      fakeManifest("notion"),
+      { ...fakeManifest("dropbox"), selection: dropboxSelectionSpec },
+      fakeManifest("google_drive"),
+    ],
+  });
+  listAccounts.mockResolvedValue({
+    items: [
+      {
+        id: "acc-1",
+        status: "active",
+        displayName: "Person",
+        createdAt: "2024-01-01T00:00:00.000Z",
+      },
+    ],
+  });
+  create.mockResolvedValue({ connector: driveConnector() });
+  returnFromAuthorization({
+    workspaceId: "ws-drive-nosel",
+    connectorType: "google_drive",
+    accountId: "acc-1",
+  });
+
+  await mountHook(baseInput("ws-drive-nosel"));
+
+  expect(create).toHaveBeenCalledWith(
+    "ws-drive-nosel",
+    expect.objectContaining({
+      connectorType: "google_drive",
+      configJson: { fileIds: [] },
+    }),
+  );
+  expect(toastSuccess).toHaveBeenCalledWith("Google Drive connected.");
+  expect(toastError).not.toHaveBeenCalled();
+});
+
+test("a type without a selection spec that is not specially handled gets the configure-next path", async () => {
+  // x-tools declares no selection and is not one of the explicitly handled
+  // types (notion / gmail / google_drive), so with the manifests known the
+  // connect takes the configure-next path: nothing created, an info toast.
+  listManifests.mockResolvedValue({
+    items: [fakeManifest("notion"), fakeManifest("x-tools")],
+  });
+  listAccounts.mockResolvedValue({
+    items: [
+      {
+        id: "acc-x",
+        status: "active",
+        displayName: "Person",
+        createdAt: "2024-01-01T00:00:00.000Z",
+      },
+    ],
+  });
+  returnFromAuthorization({
+    workspaceId: "ws-x-nosel",
+    connectorType: "x-tools",
+    accountId: "acc-x",
+  });
+
+  await mountHook(baseInput("ws-x-nosel"));
+
+  expect(create).not.toHaveBeenCalled();
+  expect(toastInfo).toHaveBeenCalledWith(
+    "X Tools is connected. Configure syncing next.",
+  );
+  expect(toastError).not.toHaveBeenCalled();
+});
+
+test("a failed refresh keeps the selection specs", async () => {
+  await mountHook(baseInput("ws-keep-specs"));
+  expect(api().selectionSpecByType.dropbox).toBeTruthy();
+
+  // A refresh whose manifest load rejects must not drop the last good spec.
+  listManifests.mockRejectedValueOnce(new Error("offline"));
+  await act(async () => {
+    await api().refreshConnectors();
+  });
+
+  expect(api().selectionSpecByType.dropbox).toBeTruthy();
+});
+
+test("after a good load and a failed refresh, an OAuth return with a failing manifests fetch still creates the connector", async () => {
+  listAccounts.mockResolvedValue({
+    items: [
+      {
+        id: "acc-db",
+        status: "active",
+        displayName: "Person",
+        createdAt: "2024-01-01T00:00:00.000Z",
+      },
+    ],
+  });
+  const created = fakeConnector({
+    id: "dropbox-keep",
+    connectorType: "dropbox",
+    name: "Person",
+    oauthAccountId: "acc-db",
+    configJson: { items: [] },
+    periodicIndexingEnabled: true,
+    indexingFrequencyMinutes: 360,
+  });
+  create.mockImplementation(async () => {
+    list.mockResolvedValue({ items: [created] });
+    return { connector: created };
+  });
+
+  // Mount: a successful manifest load records the spec in state.
+  await mountHook(baseInput("ws-db-keep"));
+  expect(api().selectionSpecByType.dropbox).toBeTruthy();
+
+  // A failed refresh. Previously this wiped the specs while keeping the loaded
+  // flag, so the later fallback read them as "no selection".
+  listManifests.mockRejectedValueOnce(new Error("offline"));
+  await act(async () => {
+    await api().refreshConnectors();
+  });
+
+  // The OAuth return now arrives and its own manifest fetch also fails: the
+  // connect falls back to the spec kept in state rather than creating nothing.
+  listManifests.mockRejectedValueOnce(new Error("offline again"));
+  await act(async () => {
+    window.dispatchEvent(
+      new StorageEvent("storage", {
+        key: "sourceweft:connectors:oauth",
+        newValue: JSON.stringify({
+          id: "dropbox:acc-db",
+          workspaceId: "ws-db-keep",
+          connectorType: "dropbox",
+          accountId: "acc-db",
+          status: "success",
+          createdAt: new Date().toISOString(),
+        }),
+      }),
+    );
+    await flushMicrotasks();
+  });
+
+  expect(create).toHaveBeenCalledWith(
+    "ws-db-keep",
+    expect.objectContaining({
+      connectorType: "dropbox",
+      configJson: { items: [] },
+    }),
+  );
+  expect(api().connectorSettingsConnector?.id).toBe("dropbox-keep");
+  expect(toastError).not.toHaveBeenCalled();
+});
+
+test("switching workspace clears the selection specs", async () => {
+  const input = baseInput("ws-a");
+  function Harness() {
+    latest = useConnectors(input);
+    return null;
+  }
+  const view = await mountWithIntl(createElement(Harness));
+  await flush(25);
+  expect(api().selectionSpecByType.dropbox).toBeTruthy();
+
+  // Switch to workspace B; its manifests have not loaded yet (the fetch hangs),
+  // so A's specs must not be visible under B.
+  listManifests.mockImplementationOnce(() => new Promise(() => {}));
+  input.workspaceId = "ws-b";
+  input.currentWorkspaceIdRef.current = "ws-b";
+  await view.render(withIntl(createElement(Harness)));
+  expect(api().selectionSpecByType.dropbox).toBeUndefined();
+});
+
+test("a tools-only selection connector connects with an empty selection and no periodic sync", async () => {
+  listManifests.mockResolvedValue({
+    items: [
+      fakeManifest("notion"),
+      { ...fakeManifest("x-tools"), selection: toolsSelectionSpec },
+    ],
+  });
+  listAccounts.mockResolvedValue({
+    items: [
+      {
+        id: "acc-x",
+        status: "active",
+        displayName: "Person",
+        createdAt: "2024-01-01T00:00:00.000Z",
+      },
+    ],
+  });
+  const created = fakeConnector({
+    id: "x-1",
+    connectorType: "x-tools",
+    name: "Person",
+    oauthAccountId: "acc-x",
+    configJson: { items: [] },
+    periodicIndexingEnabled: false,
+  });
+  create.mockImplementation(async () => {
+    list.mockResolvedValue({ items: [created] });
+    return { connector: created };
+  });
+  returnFromAuthorization({
+    workspaceId: "ws-x-tools",
+    connectorType: "x-tools",
+    accountId: "acc-x",
+  });
+
+  await mountHook(baseInput("ws-x-tools"));
+
+  // A type with a selection spec but not in the periodic-index list creates an
+  // empty selection, stays off periodic indexing, and opens settings.
+  expect(create).toHaveBeenCalledWith("ws-x-tools", {
+    connectorType: "x-tools",
+    name: "Person",
+    oauthAccountId: "acc-x",
+    configJson: { items: [] },
+    periodicIndexingEnabled: false,
+  });
+  expect(sync).not.toHaveBeenCalled();
+  expect(api().connectorSettingsConnector?.id).toBe("x-1");
+});
+
 test("handleReconnectConnector starts authorization for the connector's provider", async () => {
   list.mockResolvedValue({ items: [driveConnector()] });
   const assign = vi.fn();
@@ -539,4 +1404,157 @@ test("handleReconnectConnector starts authorization for the connector's provider
       value: original,
     });
   }
+});
+
+test("handleCheckFeed checks the rss config and maps title and item count", async () => {
+  checkConfig.mockResolvedValue({
+    ready: true,
+    metadata: { title: "Example Blog", itemCount: 42 },
+  });
+  await mountHook(baseInput("ws-feed"));
+
+  const result = await api().handleCheckFeed(
+    "https://example.com/feed.xml?token=SECRET-TOKEN-123",
+  );
+
+  expect(checkConfig).toHaveBeenCalledWith("ws-feed", {
+    connectorType: "rss",
+    configJson: { feedUrl: "https://example.com/feed.xml?token=SECRET-TOKEN-123" },
+  });
+  expect(result).toEqual({
+    ready: true,
+    reason: "",
+    message: "",
+    title: "Example Blog",
+    itemCount: 42,
+  });
+});
+
+test("handleCheckFeed passes the not-ready reason through without a title", async () => {
+  checkConfig.mockResolvedValue({
+    ready: false,
+    reason: "feed_timeout",
+    message: "The feed request timed out.",
+  });
+  await mountHook(baseInput("ws-feed"));
+
+  const result = await api().handleCheckFeed("https://example.com/feed.xml");
+
+  expect(result).toEqual({
+    ready: false,
+    reason: "feed_timeout",
+    message: "The feed request timed out.",
+    title: null,
+    itemCount: null,
+  });
+});
+
+test("handleCheckFeed with no workspace toasts and does not call the API", async () => {
+  await mountHook(baseInput("", { workspaceId: null }));
+
+  const result = await api().handleCheckFeed("https://example.com/feed.xml");
+
+  expect(checkConfig).not.toHaveBeenCalled();
+  expect(toastError).toHaveBeenCalledWith("No workspace selected yet.");
+  expect(result.ready).toBe(false);
+});
+
+test("handleAddFeed creates the connector with the exact body, refreshes, then syncs once", async () => {
+  const created = fakeConnector({
+    id: "feed-1",
+    connectorType: "rss",
+    name: "Example Blog",
+    configJson: { feedUrl: "https://example.com/feed.xml" },
+  });
+  create.mockResolvedValue({ connector: created });
+  sync.mockResolvedValue({
+    run: {
+      id: "run1",
+      connectorId: "feed-1",
+      discoveredCount: 0,
+      indexedCount: 0,
+      failedCount: 0,
+    },
+    skipped: false,
+    alreadyRunning: false,
+  });
+  await mountHook(baseInput("ws-feed"));
+  const listCallsBefore = list.mock.calls.length;
+
+  await act(async () => {
+    await api().handleAddFeed({
+      name: "Example Blog",
+      feedUrl: "https://example.com/feed.xml",
+    });
+  });
+  await flush(25);
+
+  expect(create).toHaveBeenCalledTimes(1);
+  expect(create).toHaveBeenCalledWith("ws-feed", {
+    connectorType: "rss",
+    name: "Example Blog",
+    configJson: { feedUrl: "https://example.com/feed.xml" },
+    periodicIndexingEnabled: true,
+    indexingFrequencyMinutes: 360,
+  });
+  expect("oauthAccountId" in create.mock.calls[0]![1]).toBe(false);
+  expect(list.mock.calls.length).toBeGreaterThan(listCallsBefore);
+  expect(sync).toHaveBeenCalledTimes(1);
+  expect(sync).toHaveBeenCalledWith("ws-feed", "feed-1");
+});
+
+test("handleAddFeed keeps the connector and tells the person when the first sync fails to start", async () => {
+  create.mockResolvedValue({
+    connector: fakeConnector({ id: "feed-2", connectorType: "rss" }),
+  });
+  sync.mockRejectedValue(new Error("queue down"));
+  await mountHook(baseInput("ws-feed"));
+
+  await act(async () => {
+    await api().handleAddFeed({
+      name: "Example Blog",
+      feedUrl: "https://example.com/feed.xml",
+    });
+  });
+  await flush(25);
+
+  expect(create).toHaveBeenCalledTimes(1);
+  expect(toastError).toHaveBeenCalledWith("queue down");
+});
+
+test("handleAddFeed rethrows a 409 without toasting, syncing or treating it as connected", async () => {
+  create.mockRejectedValue(
+    new HttpClientError({
+      message: "exists",
+      status: 409,
+      statusText: "Conflict",
+      code: "CONNECTOR_ALREADY_EXISTS",
+    }),
+  );
+  await mountHook(baseInput("ws-feed"));
+
+  await expect(
+    api().handleAddFeed({
+      name: "Example Blog",
+      feedUrl: "https://example.com/feed.xml",
+    }),
+  ).rejects.toMatchObject({ code: "CONNECTOR_ALREADY_EXISTS" });
+
+  expect(sync).not.toHaveBeenCalled();
+  expect(toastError).not.toHaveBeenCalled();
+  expect(toastSuccess).not.toHaveBeenCalled();
+});
+
+test("handleAddFeed with no workspace toasts and does not create", async () => {
+  await mountHook(baseInput("", { workspaceId: null }));
+
+  await expect(
+    api().handleAddFeed({
+      name: "Example Blog",
+      feedUrl: "https://example.com/feed.xml",
+    }),
+  ).rejects.toThrow("No workspace selected yet.");
+
+  expect(create).not.toHaveBeenCalled();
+  expect(toastError).toHaveBeenCalledWith("No workspace selected yet.");
 });

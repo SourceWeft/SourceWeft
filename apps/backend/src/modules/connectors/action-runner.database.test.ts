@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, test, vi } from "vitest";
 import { createIsolatedTestDatabase } from "../../test/isolated-database";
-import type { ConnectorAccessPolicy } from "./access-policy";
 import type {
   ConnectorActionInput,
   ConnectorActionSpec,
@@ -12,17 +11,36 @@ import type {
 
 let schema: typeof import("@sourceweft/db");
 let runnerModule: typeof import("./action-runner");
-let accessModule: typeof import("./access-policy");
 let registryModule: typeof import("./registry");
 let isolated: Awaited<ReturnType<typeof createIsolatedTestDatabase>>;
 const originalUrl = process.env.DATABASE_URL;
+
+/**
+ * Runs after the runner reads the connector row in `execute`, which happens
+ * after it reads the approved action and before it claims it.
+ */
+const repositoryHooks = vi.hoisted(() => ({
+  afterConnectorRead: null as null | (() => Promise<void>),
+}));
+vi.mock("./repository", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./repository")>();
+  return {
+    ...actual,
+    findSourceConnectorRecord: async (
+      ...args: Parameters<typeof actual.findSourceConnectorRecord>
+    ) => {
+      const record = await actual.findSourceConnectorRecord(...args);
+      await repositoryHooks.afterConnectorRead?.();
+      return record;
+    },
+  };
+});
 
 beforeAll(async () => {
   isolated = await createIsolatedTestDatabase("connector_action");
   process.env.DATABASE_URL = isolated.url;
   schema = await import("@sourceweft/db");
   runnerModule = await import("./action-runner");
-  accessModule = await import("./access-policy");
   registryModule = await import("./registry");
 }, 120_000);
 
@@ -77,6 +95,8 @@ function actionAdapter(connectorType: string, action: ConnectorActionSpec) {
       actions: [action],
       configSchema: { type: "object" },
     }),
+    exchangeOAuthCode: async () => ({ accessToken: "unused" }),
+    refreshOAuthToken: async () => ({ accessToken: "unused" }),
     async *discover() {},
     executeAction,
   } as unknown as ConnectorAdapter;
@@ -137,11 +157,9 @@ async function setup(input: {
 
   const registry = new registryModule.ConnectorRegistry([input.adapter]);
   const oauthService = { getRuntimeToken: async () => "runtime-token" };
-  const preview = { isEnabled: async () => true };
   const runner = new runnerModule.ConnectorActionRunner(
     registry,
     oauthService as never,
-    new accessModule.ConnectorAccessPolicy(preview as never, registry),
   );
 
   /**
@@ -150,22 +168,10 @@ async function setup(input: {
    * it, so both executions are inside the check-then-act window at once.
    */
   function racingRunners() {
-    const bothRead = barrier(2);
-    class HoldingAccessPolicy extends accessModule.ConnectorAccessPolicy {
-      override async requireConnection(
-        ...args: Parameters<ConnectorAccessPolicy["requireConnection"]>
-      ) {
-        await super.requireConnection(...args);
-        await bothRead();
-      }
-    }
+    repositoryHooks.afterConnectorRead = barrier(2);
     return [1, 2].map(
       () =>
-        new runnerModule.ConnectorActionRunner(
-          registry,
-          oauthService as never,
-          new HoldingAccessPolicy(preview as never, registry),
-        ),
+        new runnerModule.ConnectorActionRunner(registry, oauthService as never),
     );
   }
 
