@@ -173,6 +173,10 @@ export type SourceConnectorRecord = {
   nextScheduledAt: string | null;
   syncBlock?: ConnectorSyncBlock | null;
   lastError: string | null;
+  // Set by the service only for `credential`-kind connectors; the secret is
+  // never included.
+  credentialConfigured?: boolean;
+  credentialDisplayName?: string | null;
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;

@@ -10,6 +10,7 @@ import {
 } from "../sources";
 import { getBillingDeploymentCapabilities } from "../../billing-host/bindings";
 import { workspaceService } from "../workspace";
+import { logger } from "../../shared/logger";
 import { resolveCredential, type CredentialDeps } from "./credential";
 import { ConnectorError, toConnectorError } from "./errors";
 import { IngestionPageBudget, isPagesLimitExceeded } from "./ingestion-budget";
@@ -33,6 +34,7 @@ import {
   listSyncRunRecords,
   listWorkspaceSyncRunRecords,
   markConnectorSyncBlockChecked,
+  markOAuthAccountReauthRequiredRecord,
   touchConnectorAfterSync,
   updateSourceConnectorRecord,
   updateSyncRunRecord,
@@ -268,6 +270,61 @@ export class ConnectorSyncOrchestrator {
     };
   }
 
+  /** The connector's declared auth kind, or `undefined` when its adapter is not
+   * registered in this process (switched off at deployment level). Never throws,
+   * so the reauth handling below stays safe for an absent adapter. */
+  private safeManifestAuthKind(connectorType: string): string | undefined {
+    try {
+      return this.registry.getManifest(connectorType).auth?.kind;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Mark a `credential` connector's own account `reauth_required` after the
+   * provider rejected the stored secret, so the connector shows the reconnect
+   * banner (the account is no longer `active`, so `credentialConfigured` turns
+   * false) and the credential stops counting as usable until it is rotated.
+   *
+   * Scoped to the connector's team, workspace and account, and a no-op for every
+   * other case: an `oauth2` account is marked by its own refresh path (never
+   * here), a `none` connector has no account, and a connector without an account
+   * row has nothing to mark. Never throws — the caller is already failing the
+   * run — and only flips a row that is still `active`.
+   */
+  private async markCredentialAccountReauthRequired(input: {
+    teamId: string;
+    workspaceId: string;
+    connector: SourceConnectorRecord;
+  }): Promise<void> {
+    if (this.safeManifestAuthKind(input.connector.connectorType) !== "credential") {
+      return;
+    }
+    const accountId = input.connector.oauthAccountId;
+    if (!accountId) return;
+    try {
+      const marked = await markOAuthAccountReauthRequiredRecord({
+        teamId: input.teamId,
+        workspaceId: input.workspaceId,
+        accountId,
+        lastError: "The stored credential was rejected. Reconnect the connector.",
+      });
+      if (marked) {
+        logger.warn("connector_credential_account_reauth_required", {
+          accountId,
+          connectorType: input.connector.connectorType,
+        });
+      }
+    } catch (error) {
+      logger.error("connector_credential_account_mark_failed", {
+        accountId,
+        connectorType: input.connector.connectorType,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   async enqueueManualRun(input: {
     workspaceId: string;
     userId: string;
@@ -312,6 +369,17 @@ export class ConnectorSyncOrchestrator {
       userId: input.userId,
     });
     if (!readiness.ready) {
+      // A readiness check that reports the stored credential was rejected marks
+      // the connector's account so the reconnect banner shows; a no-op for
+      // every non-credential connector (see the helper). This is the common
+      // path: a revoked credential is caught here, before any sync is enqueued.
+      if (readiness.reason === "reauth_required") {
+        await this.markCredentialAccountReauthRequired({
+          teamId: workspace.organizationId,
+          workspaceId: workspace.id,
+          connector,
+        });
+      }
       const now = new Date();
       const run = await createSyncRunRecord({
         teamId: workspace.organizationId,
@@ -490,6 +558,16 @@ export class ConnectorSyncOrchestrator {
       connector,
     });
     if (!readiness.ready) {
+      // As in the manual path: a rejected stored credential surfaced by the
+      // readiness check marks the connector's account so the reconnect banner
+      // shows. A no-op for non-credential connectors.
+      if (readiness.reason === "reauth_required") {
+        await this.markCredentialAccountReauthRequired({
+          teamId: input.teamId,
+          workspaceId: input.workspaceId,
+          connector,
+        });
+      }
       const now = new Date();
       const run = await createSyncRunRecord({
         teamId: input.teamId,
@@ -1133,6 +1211,26 @@ export class ConnectorSyncOrchestrator {
             ),
           });
         }
+        // A rejected credential on a credential-kind connector (an adapter error
+        // whose code ends `_REAUTH_REQUIRED`) is a reconnect condition, not a
+        // retryable failure. Mark the connector's own account so the reconnect
+        // banner shows, and normalise the code the schedule sees to
+        // CONNECTOR_REAUTH_REQUIRED so its existing reauth rule stops retrying
+        // and disables the schedule. oauth2/none stay exactly as before: oauth2
+        // reauth is already surfaced as CONNECTOR_REAUTH_REQUIRED and marked by
+        // the refresh path, the helper acts on credential kinds only, and a
+        // provider's own `*_REAUTH_REQUIRED` mid-discovery keeps its code and
+        // its current retry behaviour.
+        const credentialReauth =
+          summary.code.endsWith("_REAUTH_REQUIRED") &&
+          this.safeManifestAuthKind(connector.connectorType) === "credential";
+        if (credentialReauth) {
+          await this.markCredentialAccountReauthRequired({
+            teamId: input.teamId,
+            workspaceId: input.workspaceId,
+            connector,
+          });
+        }
         const now = new Date();
         await updateSyncRunRecord({
           ...input,
@@ -1158,7 +1256,9 @@ export class ConnectorSyncOrchestrator {
         await completeScheduleOccurrence({
           runId: input.runId,
           succeeded: false,
-          errorCode: summary.code,
+          errorCode: credentialReauth
+            ? "CONNECTOR_REAUTH_REQUIRED"
+            : summary.code,
         });
         throw error;
       }

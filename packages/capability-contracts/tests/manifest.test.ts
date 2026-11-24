@@ -814,3 +814,57 @@ test("capability-manifest.pipeline rejects invalid job names", () => {
   });
   assert.equal(result.success, false);
 });
+
+test("capability-manifest.connector parses a credential auth connector", () => {
+  const manifest = capabilityManifestSchema.parse({
+    schemaVersion: 1,
+    id: "sourceweft/webdav",
+    kind: "connector",
+    name: "WebDAV Connector",
+    version: "0.1.0",
+    connectors: [
+      {
+        id: "webdav",
+        title: "WebDAV",
+        auth: { kind: "credential", scheme: "basic" },
+        sync: {
+          supportsIncremental: true,
+          defaultFrequencyMinutes: 360,
+          resources: [{ type: "webdav_file", title: "WebDAV file" }],
+        },
+        actions: [],
+        configSchema: {},
+      },
+    ],
+  });
+
+  assert.deepEqual(manifest.contributes.connectors[0]?.auth, {
+    kind: "credential",
+    scheme: "basic",
+  });
+});
+
+test("capability-manifest.connector rejects an unknown credential scheme", () => {
+  const result = capabilityManifestSchema.safeParse({
+    schemaVersion: 1,
+    id: "sourceweft/webdav",
+    kind: "connector",
+    name: "WebDAV Connector",
+    version: "0.1.0",
+    connectors: [
+      {
+        id: "webdav",
+        title: "WebDAV",
+        auth: { kind: "credential", scheme: "digest" },
+        sync: {
+          supportsIncremental: true,
+          defaultFrequencyMinutes: 360,
+          resources: [],
+        },
+        actions: [],
+        configSchema: {},
+      },
+    ],
+  });
+  assert.equal(result.success, false);
+});

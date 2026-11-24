@@ -58,6 +58,7 @@ import { ManageConnectorsDialog } from "./connectors/manage-dialog";
 import { ConnectorSettingsDialog } from "./connectors/settings-dialog";
 import { ConnectorsTab } from "./connectors/tab";
 import { ConnectorDisconnectDialog } from "./connectors/disconnect-dialog";
+import { RotateCredentialDialog } from "./connectors/rotate-credential-dialog";
 import {
   useConnectors,
   type TrackConnectorSyncRun,
@@ -489,6 +490,11 @@ export function SourcesHub({
     handleSyncConnector,
     handleCheckFeed,
     handleAddFeed,
+    handleCheckCredential,
+    handleAddCredential,
+    rotateCredentialConnector,
+    setRotateCredentialConnector,
+    handleRotateCredential,
     handleToggleConnectorStatus,
     handleSaveConnectorSettings,
     handleConfirmDisconnectConnector,
@@ -1469,6 +1475,7 @@ export function SourcesHub({
         isLoading={isLoadingConnectors}
         loadingError={connectorsLoadingError}
         onCancelConnector={handleCancelConnector}
+        onCheckCredential={handleCheckCredential}
         onCheckFeed={handleCheckFeed}
         onConnectConnector={handleConnectConnector}
         onCopyWebhook={handleCopyWebhook}
@@ -1476,6 +1483,7 @@ export function SourcesHub({
         onDisconnectConnector={setPendingDisconnectConnector}
         onOpenChange={setIsManageConnectorsOpen}
         onOpenSettings={openConnectorSettings}
+        onSubmitCredential={handleAddCredential}
         onSubmitFeed={handleAddFeed}
         onSyncConnector={(connector) => void handleSyncConnector(connector)}
         onToggleConnectorStatus={(connector) =>
@@ -1523,6 +1531,21 @@ export function SourcesHub({
               null)
             : null
         }
+      />
+
+      <RotateCredentialDialog
+        connectorName={rotateCredentialConnector?.name ?? ""}
+        initialUsername={
+          rotateCredentialConnector?.raw.credentialDisplayName ?? null
+        }
+        onOpenChange={(open) => {
+          if (!open) setRotateCredentialConnector(null);
+        }}
+        onRotate={(input) => {
+          if (!rotateCredentialConnector) return Promise.resolve();
+          return handleRotateCredential(rotateCredentialConnector, input);
+        }}
+        open={rotateCredentialConnector !== null}
       />
 
       {workspaceId ? (

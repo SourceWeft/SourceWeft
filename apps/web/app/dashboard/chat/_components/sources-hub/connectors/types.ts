@@ -39,10 +39,11 @@ export type ConnectorCatalogItem = {
   /** Hidden from the catalog until the backend reports the type as available.
    * Set for connectors that depend on backend rollout registration. */
   requiresBackendRegistration?: boolean;
-  /** Add-only connector: there is no account to authorize, and each feed is
+  /** Add-only connector: there is no account to authorize, and each entry is
    * its own connector, so the card never reads as connected and its action
-   * adds another one (`feed_url` asks for a feed URL). */
-  addMode?: "feed_url";
+   * adds another one. `feed_url` asks for a feed URL; `credential` asks for an
+   * endpoint, a username and an app password (WebDAV). */
+  addMode?: "feed_url" | "credential";
   isIndexable: boolean;
   supportsPeriodicSync: boolean;
   supportsActions: boolean;
@@ -80,6 +81,21 @@ export type FeedCheckResult = ConnectorReadinessState & {
   ready: boolean;
   title: string | null;
   itemCount: number | null;
+};
+
+/** A username and app password entered for a `credential` connector. The
+ * secret is held only in local dialog state and never persisted anywhere on
+ * the client (no query cache, URL or storage). */
+export type ConnectorCredentialInputValues = {
+  username: string;
+  secret: string;
+};
+
+/** Outcome of the pre-create credential check (`POST /connectors/check`): the
+ * readiness verdict for the entered endpoint and credential. Persists nothing
+ * and never echoes the secret. */
+export type CredentialCheckResult = ConnectorReadinessState & {
+  ready: boolean;
 };
 
 /**

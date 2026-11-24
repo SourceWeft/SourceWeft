@@ -23,6 +23,7 @@ const {
   deleteAccount,
   create,
   checkConfig,
+  rotateCredential,
 } = vi.hoisted(() => ({
   list: vi.fn(),
   listAccounts: vi.fn(),
@@ -36,6 +37,7 @@ const {
   deleteAccount: vi.fn(),
   create: vi.fn(),
   checkConfig: vi.fn(),
+  rotateCredential: vi.fn(),
 }));
 
 const sessionState = vi.hoisted(() => ({ userId: "user-1" }));
@@ -60,6 +62,7 @@ vi.mock("../../../../../../lib/sdk", () => ({
     deleteAccount,
     create,
     checkConfig,
+    rotateCredential,
   },
 }));
 
@@ -258,6 +261,7 @@ beforeEach(() => {
     deleteAccount,
     create,
     checkConfig,
+    rotateCredential,
     toastError,
     toastSuccess,
     toastInfo,
@@ -499,7 +503,12 @@ test("handleConnectConnector omits gmail_mode for a tools-only Gmail manifest", 
   const original = window.location;
   Object.defineProperty(window, "location", {
     configurable: true,
-    value: { ...original, href: original.href, origin: original.origin, assign },
+    value: {
+      ...original,
+      href: original.href,
+      origin: original.origin,
+      assign,
+    },
   });
   try {
     await mountHook(baseInput("ws-brokered-start"));
@@ -528,7 +537,12 @@ test("handleConnectConnector still carries gmail_mode for today's indexable Gmai
   const original = window.location;
   Object.defineProperty(window, "location", {
     configurable: true,
-    value: { ...original, href: original.href, origin: original.origin, assign },
+    value: {
+      ...original,
+      href: original.href,
+      origin: original.origin,
+      assign,
+    },
   });
   try {
     await mountHook(baseInput("ws-indexable-start"));
@@ -1406,6 +1420,142 @@ test("handleReconnectConnector starts authorization for the connector's provider
   }
 });
 
+function webdavConnector(overrides: Partial<SourceConnector> = {}) {
+  return fakeConnector({
+    id: "webdav-1",
+    connectorType: "webdav",
+    name: "My WebDAV",
+    oauthAccountId: "acc-webdav",
+    configJson: { endpoint: "https://dav.example.com", roots: ["/"] },
+    credentialConfigured: true,
+    credentialDisplayName: "alice",
+    ...overrides,
+  });
+}
+
+test("handleReconnectConnector opens the rotate dialog for a credential connector, without redirecting", async () => {
+  list.mockResolvedValue({ items: [webdavConnector()] });
+  const assign = vi.fn();
+  const original = window.location;
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    value: {
+      ...original,
+      href: original.href,
+      origin: original.origin,
+      assign,
+    },
+  });
+  try {
+    await mountHook(baseInput("ws-rotate"));
+    expect(api().rotateCredentialConnector).toBeNull();
+    act(() => {
+      api().handleReconnectConnector(api().connectors[0]!);
+    });
+
+    expect(assign).not.toHaveBeenCalled();
+    expect(api().rotateCredentialConnector?.id).toBe("webdav-1");
+  } finally {
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: original,
+    });
+  }
+});
+
+test("handleCheckCredential checks the webdav endpoint with the credential and whole-endpoint root", async () => {
+  checkConfig.mockResolvedValue({ ready: true });
+  await mountHook(baseInput("ws-cred"));
+
+  const result = await api().handleCheckCredential({
+    endpoint: "https://dav.example.com",
+    username: "alice",
+    secret: "app-pass",
+  });
+
+  expect(checkConfig).toHaveBeenCalledWith("ws-cred", {
+    connectorType: "webdav",
+    configJson: { endpoint: "https://dav.example.com", roots: ["/"] },
+    credential: { username: "alice", secret: "app-pass" },
+  });
+  expect(result).toEqual({ ready: true, reason: "", message: "" });
+});
+
+test("handleAddCredential creates the webdav connector with the credential and chosen roots", async () => {
+  create.mockResolvedValue({ connector: webdavConnector() });
+  sync.mockResolvedValue({});
+  await mountHook(baseInput("ws-add"));
+
+  await act(async () => {
+    await api().handleAddCredential({
+      name: "My WebDAV",
+      endpoint: "https://dav.example.com",
+      username: "alice",
+      secret: "app-pass",
+      roots: ["/Documents/"],
+      // Opt-in scheduled sync: the dialog forwards the member's choice.
+      periodicIndexingEnabled: false,
+    });
+  });
+
+  expect(create).toHaveBeenCalledWith("ws-add", {
+    connectorType: "webdav",
+    name: "My WebDAV",
+    configJson: { endpoint: "https://dav.example.com", roots: ["/Documents/"] },
+    credential: { username: "alice", secret: "app-pass" },
+    periodicIndexingEnabled: false,
+    indexingFrequencyMinutes: 360,
+  });
+});
+
+test("handleAddCredential forwards an enabled scheduled sync", async () => {
+  create.mockResolvedValue({ connector: webdavConnector() });
+  sync.mockResolvedValue({});
+  await mountHook(baseInput("ws-add2"));
+
+  await act(async () => {
+    await api().handleAddCredential({
+      name: "My WebDAV",
+      endpoint: "https://dav.example.com",
+      username: "alice",
+      secret: "app-pass",
+      roots: ["/Documents/"],
+      periodicIndexingEnabled: true,
+    });
+  });
+
+  expect(create.mock.calls[0]?.[1]).toMatchObject({
+    periodicIndexingEnabled: true,
+  });
+});
+
+test("handleRotateCredential rotates the credential and closes the rotate dialog", async () => {
+  list.mockResolvedValue({ items: [webdavConnector()] });
+  rotateCredential.mockResolvedValue({
+    credentialConfigured: true,
+    displayName: "alice",
+  });
+  await mountHook(baseInput("ws-rotate2"));
+  const connector = api().connectors[0]!;
+  act(() => {
+    api().setRotateCredentialConnector(connector);
+  });
+  expect(api().rotateCredentialConnector?.id).toBe("webdav-1");
+
+  await act(async () => {
+    await api().handleRotateCredential(connector, {
+      username: "bob",
+      secret: "new-pass",
+    });
+  });
+
+  expect(rotateCredential).toHaveBeenCalledWith("ws-rotate2", "webdav-1", {
+    username: "bob",
+    secret: "new-pass",
+  });
+  expect(api().rotateCredentialConnector).toBeNull();
+});
+
 test("handleCheckFeed checks the rss config and maps title and item count", async () => {
   checkConfig.mockResolvedValue({
     ready: true,
@@ -1419,7 +1569,9 @@ test("handleCheckFeed checks the rss config and maps title and item count", asyn
 
   expect(checkConfig).toHaveBeenCalledWith("ws-feed", {
     connectorType: "rss",
-    configJson: { feedUrl: "https://example.com/feed.xml?token=SECRET-TOKEN-123" },
+    configJson: {
+      feedUrl: "https://example.com/feed.xml?token=SECRET-TOKEN-123",
+    },
   });
   expect(result).toEqual({
     ready: true,

@@ -248,6 +248,74 @@ export async function markOAuthAccountReauthRequiredRecord(input: {
   return rows.length > 0;
 }
 
+/**
+ * The stored account for one provider identity inside a single workspace, in
+ * any status. A `credential` connector stores a stable `provider_account_id`
+ * (a non-secret hash of endpoint + username), so this is how create rejects a
+ * second connector for the same endpoint and user. Scoped to the team,
+ * workspace and connector type; the connector_oauth_accounts table has no
+ * unique constraint on provider_account_id, so the dedupe is enforced here.
+ */
+export async function findOAuthAccountByProviderAccountInWorkspace(input: {
+  teamId: string;
+  workspaceId: string;
+  connectorType: string;
+  providerAccountId: string;
+}) {
+  const [row] = await db
+    .select()
+    .from(connectorOAuthAccounts)
+    .where(
+      and(
+        eq(connectorOAuthAccounts.teamId, input.teamId),
+        eq(connectorOAuthAccounts.workspaceId, input.workspaceId),
+        eq(connectorOAuthAccounts.connectorType, input.connectorType),
+        eq(connectorOAuthAccounts.providerAccountId, input.providerAccountId),
+      ),
+    )
+    .limit(1);
+
+  return row ? mapOAuthAccount(row) : null;
+}
+
+/**
+ * Replace a `credential` account's stored secret in place: the new encrypted
+ * value, the (possibly new) non-secret identity and display name, and a return
+ * to `active` with any prior error cleared. This is the credential "reconnect"
+ * (rotate) path — the same row and id are kept, so the connector that runs
+ * against the account keeps working. Returns the mapped (non-secret) account,
+ * or `null` when no row matched the workspace scope.
+ */
+export async function updateOAuthAccountCredentialRecord(input: {
+  teamId: string;
+  workspaceId: string;
+  accountId: string;
+  displayName: string;
+  providerAccountId: string;
+  accessTokenEncrypted: string;
+}) {
+  const [row] = await db
+    .update(connectorOAuthAccounts)
+    .set({
+      accessTokenEncrypted: input.accessTokenEncrypted,
+      displayName: input.displayName,
+      providerAccountId: input.providerAccountId,
+      status: "active",
+      lastError: null,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(connectorOAuthAccounts.id, input.accountId),
+        eq(connectorOAuthAccounts.teamId, input.teamId),
+        eq(connectorOAuthAccounts.workspaceId, input.workspaceId),
+      ),
+    )
+    .returning();
+
+  return row ? mapOAuthAccount(row) : null;
+}
+
 export async function listOAuthAccountRecordsByProviderAccount(input: {
   connectorType: string;
   providerAccountId: string;

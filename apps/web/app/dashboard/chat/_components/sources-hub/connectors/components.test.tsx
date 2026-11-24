@@ -37,6 +37,7 @@ async function card(input: {
   supportsIndexing?: boolean;
 }) {
   const handlers = {
+    onAddCredential: vi.fn(),
     onAddFeed: vi.fn(),
     onCancelConnector: vi.fn(),
     onConfigure: vi.fn(),
@@ -162,6 +163,7 @@ test("an add-only RSS card offers Add feed and never starts OAuth", async () => 
   const rss = connectorCatalog.find((entry) => entry.id === "rss")!;
   const onAddFeed = vi.fn();
   const handlers = {
+    onAddCredential: vi.fn(),
     onCancelConnector: vi.fn(),
     onConfigure: vi.fn(),
     onConnectConnector: vi.fn(),
@@ -186,6 +188,40 @@ test("an add-only RSS card offers Add feed and never starts OAuth", async () => 
   await act(async () => action.click());
 
   expect(onAddFeed).toHaveBeenCalledWith(rss);
+  expect(handlers.onConnectConnector).not.toHaveBeenCalled();
+  expect(handlers.onCreateConnector).not.toHaveBeenCalled();
+  expect(handlers.onReconnectConnector).not.toHaveBeenCalled();
+});
+
+test("an add-only WebDAV card offers Connect and calls onAddCredential, never OAuth", async () => {
+  const webdav = connectorCatalog.find((entry) => entry.id === "webdav")!;
+  const onAddCredential = vi.fn();
+  const handlers = {
+    onAddFeed: vi.fn(),
+    onCancelConnector: vi.fn(),
+    onConfigure: vi.fn(),
+    onConnectConnector: vi.fn(),
+    onCreateConnector: vi.fn(),
+    onDisconnect: vi.fn(),
+    onReconnectConnector: vi.fn(),
+  };
+  const mounted = await mountWithIntl(
+    createElement(ConnectorCatalogCard, {
+      item: webdav,
+      connector: null,
+      status: { kind: "available", label: "Available", detail: "Ready" },
+      onAddCredential,
+      ...handlers,
+    }),
+  );
+  const buttons = Array.from(mounted.container.querySelectorAll("button"));
+  const action = buttons[buttons.length - 1]!;
+
+  expect(action.textContent).toBe("Connect");
+  await act(async () => action.click());
+
+  expect(onAddCredential).toHaveBeenCalledWith(webdav);
+  expect(handlers.onAddFeed).not.toHaveBeenCalled();
   expect(handlers.onConnectConnector).not.toHaveBeenCalled();
   expect(handlers.onCreateConnector).not.toHaveBeenCalled();
   expect(handlers.onReconnectConnector).not.toHaveBeenCalled();

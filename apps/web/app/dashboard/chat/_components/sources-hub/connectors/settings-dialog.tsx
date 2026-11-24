@@ -77,6 +77,10 @@ import { needsGmailBrokerNotice } from "./gmail-mode";
 import { SelectionItems } from "./selection-items";
 import { commitSelection } from "./selection";
 import { selectionPresenterFor } from "./selection-presenters";
+import {
+  webdavRootsToSelectionItems,
+  webdavSelectionItemsToRoots,
+} from "./webdav-roots";
 import { GoogleDriveFiles } from "./google-drive-files";
 import { isGoogleDrivePickerElement } from "./google-drive-picker";
 import { commitGoogleDriveSelection } from "./google-drive-selection";
@@ -333,6 +337,22 @@ export function ConnectorSettingsDialog({
     typeof connector.raw.configJson.feedUrl === "string"
       ? redactUrlQuery(connector.raw.configJson.feedUrl)
       : "";
+  // The shared selection list reads `configJson.items`, which WebDAV does not
+  // store (its selection is `configJson.roots`). Present the roots to the list
+  // as selection items; saving converts them back in `handleChangeSelectionItems`.
+  const selectionConnector =
+    connector.raw.connectorType === "webdav"
+      ? {
+          ...connector,
+          raw: {
+            ...connector.raw,
+            configJson: {
+              ...connector.raw.configJson,
+              items: webdavRootsToSelectionItems(connector.raw.configJson),
+            },
+          },
+        }
+      : connector;
   const parsedGmailLimit = Number(gmailMaxMessages);
   const validGmailLimit =
     Number.isInteger(parsedGmailLimit) &&
@@ -415,6 +435,32 @@ export function ConnectorSettingsDialog({
     const hasIndexing = Boolean(
       selectionPresenterFor(currentConnector.raw.connectorType).indexing,
     );
+    // WebDAV stores its selection as `configJson.roots` (trailing-slash
+    // collection paths), not the generic `configJson.items`. Bridge the shared
+    // picker's items back to roots in this one connector's path; every other
+    // type keeps writing `items` unchanged. An invalid or empty selection is
+    // refused without saving, so the backend never reconciles against nothing.
+    if (currentConnector.raw.connectorType === "webdav") {
+      const roots = webdavSelectionItemsToRoots(items);
+      if (!roots.ok) {
+        toast.error(t("connectors.webdav.dialog.invalidRoots"));
+        return Promise.resolve(false);
+      }
+      const rawEndpoint = currentConnector.raw.configJson.endpoint;
+      const endpoint = typeof rawEndpoint === "string" ? rawEndpoint : "";
+      return commitSelection({
+        save: () =>
+          onSaveSettings(currentConnector, {
+            name: currentConnector.name,
+            periodicIndexingEnabled:
+              currentConnector.raw.periodicIndexingEnabled,
+            indexingFrequencyMinutes:
+              currentConnector.raw.indexingFrequencyMinutes,
+            configJson: { endpoint, roots: roots.roots },
+          }),
+        sync: () => onSyncConnector(currentConnector),
+      });
+    }
     return commitSelection({
       save: () =>
         onSaveSettings(currentConnector, {
@@ -697,7 +743,7 @@ export function ConnectorSettingsDialog({
                 ) : null}
                 {selectionSpec ? (
                   <SelectionItems
-                    connector={connector}
+                    connector={selectionConnector}
                     disabled={isSavingSettings}
                     latestSyncRun={latestSyncRun}
                     onChangeItems={handleChangeSelectionItems}

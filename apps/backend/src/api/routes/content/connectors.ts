@@ -11,6 +11,7 @@ import {
   listConnectorOAuthAccountsRequestSchema,
   listWorkspaceConnectorSyncRunsRequestSchema,
   listConnectorWebhookEventsRequestSchema,
+  rotateConnectorCredentialRequestSchema,
   startConnectorOAuthRequestSchema,
   updateConnectorRequestSchema,
 } from "@sourceweft/contracts";
@@ -115,6 +116,11 @@ export function registerConnectorRoutes(app: Hono) {
       userId: getSessionUserId(session),
       connectorType: parsed.data.connectorType,
       configJson: parsed.data.configJson,
+      // Forwarded only for a credential connector; absent otherwise so the
+      // credential-free call shape is unchanged.
+      ...(parsed.data.credential
+        ? { credential: parsed.data.credential }
+        : {}),
     });
     c.header("Cache-Control", "no-store");
     return ApiResponse.success(c, result);
@@ -363,6 +369,9 @@ export function registerConnectorRoutes(app: Hono) {
       configJson: parsed.data.configJson,
       periodicIndexingEnabled: parsed.data.periodicIndexingEnabled,
       indexingFrequencyMinutes: parsed.data.indexingFrequencyMinutes,
+      ...(parsed.data.credential
+        ? { credential: parsed.data.credential }
+        : {}),
     });
     return ApiResponse.success(c, result, 201);
   });
@@ -439,6 +448,33 @@ export function registerConnectorRoutes(app: Hono) {
       periodicIndexingEnabled: parsed.data.periodicIndexingEnabled,
       indexingFrequencyMinutes: parsed.data.indexingFrequencyMinutes,
     });
+    return ApiResponse.success(c, result);
+  });
+
+  // Reconnect a credential connector by replacing its stored username/secret in
+  // place. Same permission as editing the connector (`connector.manage`). The
+  // body carries the secret, so it must never be logged (see logger redaction).
+  app.put("/connectors/:connectorId/credential", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const body = ensureObjectBody(await c.req.json().catch(() => null));
+    const parsed = rotateConnectorCredentialRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const result = await connectorService.rotateConnectorCredential({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+      connectorId: requireRouteParam(c, "connectorId"),
+      credential: parsed.data,
+    });
+    c.header("Cache-Control", "no-store");
     return ApiResponse.success(c, result);
   });
 

@@ -1,0 +1,735 @@
+import assert from "node:assert/strict";
+import { beforeEach, describe, test, vi } from "vitest";
+import { ConnectorRegistry } from "./registry";
+import type { ConnectorAdapter, ConnectorManifest } from "./types";
+
+const mocks = vi.hoisted(() => ({
+  requireConnectorWorkspace: vi.fn(),
+  encryptTeamSecret: vi.fn(),
+  createCredentialConnectorRecord: vi.fn(),
+  createSourceConnectorRecord: vi.fn(),
+  findOAuthAccountByProviderAccountInWorkspace: vi.fn(),
+  findOAuthAccountRecord: vi.fn(),
+  findSourceConnectorRecord: vi.fn(),
+  findSourceConnectorRecordByName: vi.fn(),
+  getConnectorScheduleStatus: vi.fn(),
+  listSourceConnectorRecords: vi.fn(),
+  listConnectorScheduleStatuses: vi.fn(),
+  updateOAuthAccountCredentialRecord: vi.fn(),
+  updateSourceConnectorRecord: vi.fn(),
+  putConnectorSchedule: vi.fn(),
+  archiveConnectorSources: vi.fn(),
+}));
+
+vi.mock("./permissions", () => ({
+  requireConnectorWorkspace: mocks.requireConnectorWorkspace,
+}));
+vi.mock("../../shared/team-secrets", () => ({
+  encryptTeamSecret: mocks.encryptTeamSecret,
+}));
+vi.mock("./repository", () => ({
+  createCredentialConnectorRecord: mocks.createCredentialConnectorRecord,
+  createSourceConnectorRecord: mocks.createSourceConnectorRecord,
+  findOAuthAccountByProviderAccountInWorkspace:
+    mocks.findOAuthAccountByProviderAccountInWorkspace,
+  findOAuthAccountRecord: mocks.findOAuthAccountRecord,
+  findSourceConnectorRecord: mocks.findSourceConnectorRecord,
+  findSourceConnectorRecordByName: mocks.findSourceConnectorRecordByName,
+  getConnectorScheduleStatus: mocks.getConnectorScheduleStatus,
+  listSourceConnectorRecords: mocks.listSourceConnectorRecords,
+  listConnectorScheduleStatuses: mocks.listConnectorScheduleStatuses,
+  updateOAuthAccountCredentialRecord: mocks.updateOAuthAccountCredentialRecord,
+  updateSourceConnectorRecord: mocks.updateSourceConnectorRecord,
+  putConnectorSchedule: mocks.putConnectorSchedule,
+  archiveConnectorSources: mocks.archiveConnectorSources,
+}));
+
+import { logger } from "../../shared/logger";
+import { ConnectorService } from "./service";
+
+const SECRET = "app-password-SHHH-9f3a2b";
+const USERNAME = "dav-user";
+const ENDPOINT = "https://dav.example.com/";
+const CONFIG = { endpoint: ENDPOINT, roots: ["/Docs/"] };
+
+const configSchema = {
+  type: "object",
+  required: ["endpoint"],
+  properties: {
+    endpoint: { type: "string" },
+    roots: { type: "array", items: { type: "string" } },
+  },
+  additionalProperties: false,
+};
+
+/** Deterministic non-secret identity the adapter derives; never embeds the
+ * secret. The test asserts the service stores exactly this. */
+function identityOf(config: Record<string, unknown>, username: string) {
+  return `pid:${String(config.endpoint)}#${username}`;
+}
+
+const credentialIdentity = vi.fn(
+  (
+    config: Record<string, unknown>,
+    credential: { username: string; secret: string },
+  ) => identityOf(config, credential.username),
+);
+const checkSyncReadiness = vi.fn();
+
+function manifest(
+  type: string,
+  auth: ConnectorManifest["auth"],
+): ConnectorManifest {
+  return {
+    type,
+    displayName: type,
+    auth,
+    sync: {
+      supportsIncremental: true,
+      defaultFrequencyMinutes: 360,
+      minFrequencyMinutes: 30,
+      resources: [],
+    },
+    actions: [],
+    configSchema,
+  } as ConnectorManifest;
+}
+
+function credentialAdapter(withIdentity = true): ConnectorAdapter {
+  const m = manifest("webdav", { kind: "credential", scheme: "basic" });
+  return {
+    getManifest: () => m,
+    ...(withIdentity ? { credentialIdentity } : {}),
+    checkSyncReadiness,
+    async *discover() {},
+    extract: async ({ item }: { item: unknown }) => ({ item }),
+    executeAction: async () => ({ result: {} }),
+  } as unknown as ConnectorAdapter;
+}
+
+function noneAdapter(): ConnectorAdapter {
+  const m = manifest("public-feed", { kind: "none" });
+  return {
+    getManifest: () => m,
+    checkSyncReadiness,
+    async *discover() {},
+    extract: async ({ item }: { item: unknown }) => ({ item }),
+    executeAction: async () => ({ result: {} }),
+  } as unknown as ConnectorAdapter;
+}
+
+function oauth2Adapter(): ConnectorAdapter {
+  const m = manifest("oauth-test", {
+    kind: "oauth2",
+    authorizationUrl: "https://example.com/auth",
+    tokenUrl: "https://example.com/token",
+    scopes: [],
+  });
+  return {
+    getManifest: () => m,
+    exchangeOAuthCode: vi.fn(),
+    refreshOAuthToken: vi.fn(),
+    checkSyncReadiness,
+    async *discover() {},
+    extract: async ({ item }: { item: unknown }) => ({ item }),
+    executeAction: async () => ({ result: {} }),
+  } as unknown as ConnectorAdapter;
+}
+
+function service(...adapters: ConnectorAdapter[]) {
+  return new ConnectorService(
+    new ConnectorRegistry(adapters.length ? adapters : [credentialAdapter()]),
+  );
+}
+
+const createdConnector = {
+  id: "conn_cred",
+  teamId: "team",
+  workspaceId: "workspace",
+  connectorType: "webdav",
+  name: "WebDAV",
+  configJson: CONFIG,
+  oauthAccountId: "acc_cred",
+  status: "active",
+  periodicIndexingEnabled: false,
+  indexingFrequencyMinutes: null,
+  lastIndexedAt: null,
+  nextScheduledAt: null,
+  lastError: null,
+  createdBy: "user",
+  createdAt: "2026-11-24T00:00:00.000Z",
+  updatedAt: "2026-11-24T00:00:00.000Z",
+};
+
+const credentialAccountRow = {
+  id: "acc_cred",
+  teamId: "team",
+  workspaceId: "workspace",
+  connectorType: "webdav",
+  providerAccountId: identityOf(CONFIG, USERNAME),
+  providerAccountEmail: null,
+  displayName: USERNAME,
+  scopes: [] as string[],
+  status: "active" as const,
+  expiresAt: null,
+  lastRefreshAt: null,
+  lastError: null,
+  createdBy: "user",
+  createdAt: "2026-11-24T00:00:00.000Z",
+  updatedAt: "2026-11-24T00:00:00.000Z",
+  accessTokenEncrypted: "enc:stored",
+  refreshTokenEncrypted: null,
+};
+
+function create(
+  svc: ConnectorService,
+  overrides: Partial<Parameters<ConnectorService["createConnector"]>[0]> = {},
+) {
+  return svc.createConnector({
+    workspaceId: "workspace",
+    userId: "user",
+    connectorType: "webdav",
+    name: "WebDAV",
+    configJson: CONFIG,
+    credential: { username: USERNAME, secret: SECRET },
+    ...overrides,
+  });
+}
+
+async function rejection(promise: Promise<unknown>) {
+  try {
+    await promise;
+  } catch (error) {
+    return error as {
+      statusCode?: number;
+      code?: string;
+      message: string;
+      details?: Record<string, unknown>;
+    };
+  }
+  throw new Error("expected the promise to reject");
+}
+
+/** Every argument handed to the spied logger, serialized, so a test can assert
+ * the secret is nowhere in any log line. */
+function loggedText(...spies: Array<ReturnType<typeof vi.spyOn>>) {
+  return spies
+    .flatMap((spy) => spy.mock.calls)
+    .map((call) => JSON.stringify(call))
+    .join("\n");
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.requireConnectorWorkspace.mockResolvedValue({
+    workspace: { id: "workspace", organizationId: "team" },
+  });
+  mocks.findSourceConnectorRecordByName.mockResolvedValue(null);
+  mocks.listSourceConnectorRecords.mockResolvedValue([]);
+  mocks.listConnectorScheduleStatuses.mockResolvedValue(new Map());
+  mocks.findOAuthAccountByProviderAccountInWorkspace.mockResolvedValue(null);
+  mocks.findOAuthAccountRecord.mockResolvedValue(credentialAccountRow);
+  mocks.findSourceConnectorRecord.mockResolvedValue(createdConnector);
+  mocks.getConnectorScheduleStatus.mockResolvedValue(null);
+  mocks.createCredentialConnectorRecord.mockResolvedValue({
+    connector: createdConnector,
+    accountId: "acc_cred",
+  });
+  mocks.encryptTeamSecret.mockImplementation(
+    async (plain: string) => `enc:${plain}`,
+  );
+  mocks.updateSourceConnectorRecord.mockImplementation(
+    async (input: { configJson?: Record<string, unknown> }) => ({
+      ...createdConnector,
+      ...(input.configJson ? { configJson: input.configJson } : {}),
+    }),
+  );
+  mocks.putConnectorSchedule.mockResolvedValue(undefined);
+  mocks.archiveConnectorSources.mockResolvedValue(undefined);
+  checkSyncReadiness.mockResolvedValue({ ready: true });
+});
+
+describe("createConnector for a credential connector", () => {
+  test("rejects an OAuth account and persists nothing", async () => {
+    const error = await rejection(create(service(), { oauthAccountId: "acc" }));
+    assert.equal(error.statusCode, 400);
+    assert.equal(error.code, "CONNECTOR_OAUTH_ACCOUNT_NOT_ALLOWED");
+    assert.equal(mocks.createCredentialConnectorRecord.mock.calls.length, 0);
+    assert.equal(mocks.encryptTeamSecret.mock.calls.length, 0);
+  });
+
+  test("requires a credential and persists nothing", async () => {
+    const error = await rejection(create(service(), { credential: undefined }));
+    assert.equal(error.statusCode, 400);
+    assert.equal(error.code, "CONNECTOR_CREDENTIAL_REQUIRED");
+    assert.equal(mocks.createCredentialConnectorRecord.mock.calls.length, 0);
+  });
+
+  test("writes the account and connector together with an encrypted secret", async () => {
+    const result = await create(service());
+
+    assert.equal(mocks.createCredentialConnectorRecord.mock.calls.length, 1);
+    const persisted = mocks.createCredentialConnectorRecord.mock.calls[0]?.[0];
+    // The non-secret identity the adapter derived is what is stored.
+    assert.equal(persisted.providerAccountId, identityOf(CONFIG, USERNAME));
+    assert.equal(persisted.displayName, USERNAME);
+    // The stored value is the encrypted username+secret JSON, never plaintext.
+    assert.equal(
+      persisted.accessTokenEncrypted,
+      `enc:${JSON.stringify({ username: USERNAME, secret: SECRET })}`,
+    );
+    assert.equal(
+      mocks.encryptTeamSecret.mock.calls[0]?.[0],
+      JSON.stringify({ username: USERNAME, secret: SECRET }),
+    );
+    // The secret is never copied into the stored configJson.
+    assert.ok(!JSON.stringify(persisted.configJson).includes(SECRET));
+    // The response exposes the non-secret status fields and no secret.
+    assert.equal(result.connector.credentialConfigured, true);
+    assert.equal(result.connector.credentialDisplayName, USERNAME);
+    assert.ok(!JSON.stringify(result).includes(SECRET));
+  });
+
+  test("rejects a duplicate provider account in the same workspace with 409", async () => {
+    mocks.findOAuthAccountByProviderAccountInWorkspace.mockResolvedValue(
+      credentialAccountRow,
+    );
+    const error = await rejection(create(service()));
+    assert.equal(error.statusCode, 409);
+    assert.equal(error.code, "CONNECTOR_CREDENTIAL_ACCOUNT_EXISTS");
+    assert.equal(mocks.createCredentialConnectorRecord.mock.calls.length, 0);
+    assert.equal(mocks.encryptTeamSecret.mock.calls.length, 0);
+  });
+
+  test("rejects an adapter that cannot derive a credential identity", async () => {
+    const error = await rejection(create(service(credentialAdapter(false))));
+    assert.equal(error.code, "CONNECTOR_CREDENTIAL_IDENTITY_UNSUPPORTED");
+    assert.equal(mocks.createCredentialConnectorRecord.mock.calls.length, 0);
+  });
+
+  test("a name conflict is rejected before anything is written", async () => {
+    mocks.findSourceConnectorRecordByName.mockResolvedValue({
+      id: "same",
+      status: "active",
+    });
+    const error = await rejection(create(service()));
+    assert.equal(error.code, "CONNECTOR_ALREADY_EXISTS");
+    assert.equal(mocks.createCredentialConnectorRecord.mock.calls.length, 0);
+  });
+
+  test("rejects a username containing a colon and persists nothing", async () => {
+    const error = await rejection(
+      create(service(), { credential: { username: "a:b", secret: SECRET } }),
+    );
+    assert.equal(error.statusCode, 400);
+    assert.equal(error.code, "CONNECTOR_CREDENTIAL_USERNAME_INVALID");
+    assert.equal(mocks.createCredentialConnectorRecord.mock.calls.length, 0);
+    assert.equal(mocks.encryptTeamSecret.mock.calls.length, 0);
+    assert.equal(checkSyncReadiness.mock.calls.length, 0);
+  });
+
+  test("runs readiness with the supplied credential before writing", async () => {
+    await create(service());
+    // The adapter is checked with the entered credential JSON, not "".
+    assert.equal(
+      checkSyncReadiness.mock.calls[0]?.[0].accessToken,
+      JSON.stringify({ username: USERNAME, secret: SECRET }),
+    );
+    assert.equal(mocks.createCredentialConnectorRecord.mock.calls.length, 1);
+  });
+
+  test("a not-ready credential fails create and persists nothing", async () => {
+    checkSyncReadiness.mockResolvedValue({
+      ready: false,
+      reason: "reauth_required",
+      message: "nope",
+    });
+    const error = await rejection(create(service()));
+    assert.equal(error.statusCode, 400);
+    assert.equal(error.code, "CONNECTOR_CONFIG_NOT_READY");
+    assert.equal(mocks.createCredentialConnectorRecord.mock.calls.length, 0);
+    assert.equal(mocks.encryptTeamSecret.mock.calls.length, 0);
+  });
+});
+
+describe("checkConfigReadiness for a credential connector", () => {
+  const base = {
+    workspaceId: "workspace",
+    userId: "user",
+    connectorType: "webdav",
+    configJson: CONFIG,
+  };
+
+  test("passes the credential JSON to the adapter and persists nothing", async () => {
+    checkSyncReadiness.mockResolvedValue({ ready: true });
+    const result = await service().checkConfigReadiness({
+      ...base,
+      credential: { username: USERNAME, secret: SECRET },
+    });
+
+    assert.deepEqual(result, { ready: true });
+    assert.equal(
+      checkSyncReadiness.mock.calls[0]?.[0].accessToken,
+      JSON.stringify({ username: USERNAME, secret: SECRET }),
+    );
+    assert.equal(checkSyncReadiness.mock.calls[0]?.[0].connectorId, "pending");
+    // Persists nothing: no write repository call was made.
+    assert.equal(mocks.createCredentialConnectorRecord.mock.calls.length, 0);
+    assert.equal(mocks.updateOAuthAccountCredentialRecord.mock.calls.length, 0);
+  });
+
+  test("requires a credential for a credential connector", async () => {
+    const error = await rejection(service().checkConfigReadiness(base));
+    assert.equal(error.statusCode, 400);
+    assert.equal(error.code, "CONNECTOR_CREDENTIAL_REQUIRED");
+    assert.equal(checkSyncReadiness.mock.calls.length, 0);
+  });
+
+  test("rejects a username containing a colon without a readiness request", async () => {
+    const error = await rejection(
+      service().checkConfigReadiness({
+        ...base,
+        credential: { username: "a:b", secret: SECRET },
+      }),
+    );
+    assert.equal(error.statusCode, 400);
+    assert.equal(error.code, "CONNECTOR_CREDENTIAL_USERNAME_INVALID");
+    assert.equal(checkSyncReadiness.mock.calls.length, 0);
+  });
+
+  test("a none connector still runs with an empty access token", async () => {
+    checkSyncReadiness.mockResolvedValue({ ready: true });
+    await service(noneAdapter()).checkConfigReadiness({
+      ...base,
+      connectorType: "public-feed",
+    });
+    assert.equal(checkSyncReadiness.mock.calls[0]?.[0].accessToken, "");
+  });
+});
+
+describe("updateConnector locks a credential connector's endpoint origin", () => {
+  const patch = (
+    svc: ConnectorService,
+    configJson: Record<string, unknown>,
+    overrides: Partial<Parameters<ConnectorService["updateConnector"]>[0]> = {},
+  ) =>
+    svc.updateConnector({
+      workspaceId: "workspace",
+      userId: "user",
+      connectorId: "conn_cred",
+      configJson,
+      ...overrides,
+    });
+
+  test("rejects a different endpoint origin and persists nothing", async () => {
+    const error = await rejection(
+      patch(service(), {
+        endpoint: "https://evil.example.com/",
+        roots: ["/Docs/"],
+      }),
+    );
+    assert.equal(error.statusCode, 400);
+    assert.equal(error.code, "CONNECTOR_CREDENTIAL_ENDPOINT_LOCKED");
+    // The message echoes no input (no endpoint, path or credential).
+    assert.ok(!error.message.includes("evil.example.com"));
+    assert.equal(mocks.updateSourceConnectorRecord.mock.calls.length, 0);
+    assert.equal(mocks.putConnectorSchedule.mock.calls.length, 0);
+  });
+
+  test("rejects an unparsable endpoint", async () => {
+    const error = await rejection(
+      patch(service(), { endpoint: "not a url", roots: ["/Docs/"] }),
+    );
+    assert.equal(error.code, "CONNECTOR_CREDENTIAL_ENDPOINT_LOCKED");
+    assert.equal(mocks.updateSourceConnectorRecord.mock.calls.length, 0);
+  });
+
+  test("allows a same-origin base-path change", async () => {
+    await patch(service(), {
+      endpoint: "https://dav.example.com/dav2/",
+      roots: ["/Docs/"],
+    });
+    assert.equal(mocks.updateSourceConnectorRecord.mock.calls.length, 1);
+    assert.equal(
+      mocks.updateSourceConnectorRecord.mock.calls[0]?.[0].configJson.endpoint,
+      "https://dav.example.com/dav2/",
+    );
+  });
+
+  test("allows a roots-only change", async () => {
+    await patch(service(), { endpoint: ENDPOINT, roots: ["/Other/"] });
+    assert.equal(mocks.updateSourceConnectorRecord.mock.calls.length, 1);
+    assert.deepEqual(
+      mocks.updateSourceConnectorRecord.mock.calls[0]?.[0].configJson.roots,
+      ["/Other/"],
+    );
+  });
+
+  test("does not lock a non-credential (oauth2) connector's endpoint", async () => {
+    mocks.findSourceConnectorRecord.mockResolvedValue({
+      ...createdConnector,
+      connectorType: "oauth-test",
+      oauthAccountId: null,
+    });
+    await patch(service(oauth2Adapter()), {
+      endpoint: "https://elsewhere.example.com/",
+      roots: ["/x/"],
+    });
+    assert.equal(mocks.updateSourceConnectorRecord.mock.calls.length, 1);
+  });
+});
+
+describe("rotateConnectorCredential", () => {
+  const rotate = (
+    svc: ConnectorService,
+    overrides: Partial<
+      Parameters<ConnectorService["rotateConnectorCredential"]>[0]
+    > = {},
+  ) =>
+    svc.rotateConnectorCredential({
+      workspaceId: "workspace",
+      userId: "user",
+      connectorId: "conn_cred",
+      credential: { username: USERNAME, secret: "new-secret-7c1d" },
+      ...overrides,
+    });
+
+  test("replaces the stored value in place and returns active status", async () => {
+    mocks.updateOAuthAccountCredentialRecord.mockResolvedValue({
+      ...credentialAccountRow,
+      status: "active",
+    });
+    const result = await rotate(service());
+
+    assert.deepEqual(result, {
+      credentialConfigured: true,
+      displayName: USERNAME,
+    });
+    // The new username+secret JSON is encrypted and written to the same account.
+    assert.equal(
+      mocks.encryptTeamSecret.mock.calls[0]?.[0],
+      JSON.stringify({ username: USERNAME, secret: "new-secret-7c1d" }),
+    );
+    const update = mocks.updateOAuthAccountCredentialRecord.mock.calls[0]?.[0];
+    assert.equal(update.accountId, "acc_cred");
+    assert.equal(
+      update.accessTokenEncrypted,
+      `enc:${JSON.stringify({ username: USERNAME, secret: "new-secret-7c1d" })}`,
+    );
+  });
+
+  test("rejects a connector in another workspace (not found)", async () => {
+    mocks.findSourceConnectorRecord.mockResolvedValue(null);
+    const error = await rejection(rotate(service()));
+    assert.equal(error.statusCode, 404);
+    assert.equal(error.code, "CONNECTOR_NOT_FOUND");
+    assert.equal(mocks.updateOAuthAccountCredentialRecord.mock.calls.length, 0);
+  });
+
+  test("propagates a missing-permission rejection and writes nothing", async () => {
+    mocks.requireConnectorWorkspace.mockRejectedValue(
+      Object.assign(new Error("forbidden"), {
+        statusCode: 403,
+        code: "FORBIDDEN",
+      }),
+    );
+    const error = await rejection(rotate(service()));
+    assert.equal(error.code, "FORBIDDEN");
+    assert.equal(mocks.updateOAuthAccountCredentialRecord.mock.calls.length, 0);
+    assert.equal(mocks.encryptTeamSecret.mock.calls.length, 0);
+  });
+
+  test("rejects a non-credential connector", async () => {
+    mocks.findSourceConnectorRecord.mockResolvedValue({
+      ...createdConnector,
+      connectorType: "public-feed",
+    });
+    const error = await rejection(rotate(service(noneAdapter())));
+    assert.equal(error.statusCode, 400);
+    assert.equal(error.code, "CONNECTOR_CREDENTIAL_UNSUPPORTED");
+  });
+
+  test("rejects a username containing a colon and writes nothing", async () => {
+    const error = await rejection(
+      rotate(service(), { credential: { username: "a:b", secret: "x" } }),
+    );
+    assert.equal(error.statusCode, 400);
+    assert.equal(error.code, "CONNECTOR_CREDENTIAL_USERNAME_INVALID");
+    assert.equal(mocks.updateOAuthAccountCredentialRecord.mock.calls.length, 0);
+    assert.equal(mocks.encryptTeamSecret.mock.calls.length, 0);
+  });
+
+  test("does not run a readiness check (rotate never calls the adapter)", async () => {
+    mocks.updateOAuthAccountCredentialRecord.mockResolvedValue({
+      ...credentialAccountRow,
+      status: "active",
+    });
+    await rotate(service());
+    assert.equal(checkSyncReadiness.mock.calls.length, 0);
+  });
+
+  test("clears the connector's error state after a successful rotate", async () => {
+    mocks.findSourceConnectorRecord.mockResolvedValue({
+      ...createdConnector,
+      status: "error",
+      lastError: "Reconnect the provider account to resume scheduled sync",
+    });
+    mocks.updateOAuthAccountCredentialRecord.mockResolvedValue({
+      ...credentialAccountRow,
+      status: "active",
+    });
+    await rotate(service());
+    assert.equal(mocks.updateSourceConnectorRecord.mock.calls.length, 1);
+    const reset = mocks.updateSourceConnectorRecord.mock.calls[0]?.[0];
+    assert.equal(reset.connectorId, "conn_cred");
+    assert.equal(reset.status, "active");
+    assert.equal(reset.lastError, null);
+  });
+
+  test("does not touch a connector that is not in error", async () => {
+    mocks.updateOAuthAccountCredentialRecord.mockResolvedValue({
+      ...credentialAccountRow,
+      status: "active",
+    });
+    await rotate(service());
+    assert.equal(mocks.updateSourceConnectorRecord.mock.calls.length, 0);
+  });
+});
+
+describe("a credential sent to a non-credential connector is rejected", () => {
+  const credential = { username: USERNAME, secret: SECRET };
+
+  test("create rejects a credential for a none connector and persists nothing", async () => {
+    const error = await rejection(
+      service(noneAdapter()).createConnector({
+        workspaceId: "workspace",
+        userId: "user",
+        connectorType: "public-feed",
+        name: "Feed",
+        configJson: CONFIG,
+        credential,
+      }),
+    );
+    assert.equal(error.statusCode, 400);
+    assert.equal(error.code, "CONNECTOR_CREDENTIAL_NOT_ALLOWED");
+    assert.equal(mocks.createSourceConnectorRecord.mock.calls.length, 0);
+    assert.equal(mocks.createCredentialConnectorRecord.mock.calls.length, 0);
+    assert.equal(mocks.encryptTeamSecret.mock.calls.length, 0);
+  });
+
+  test("create rejects a credential for an oauth2 connector and persists nothing", async () => {
+    const error = await rejection(
+      service(oauth2Adapter()).createConnector({
+        workspaceId: "workspace",
+        userId: "user",
+        connectorType: "oauth-test",
+        name: "OAuth",
+        configJson: CONFIG,
+        credential,
+      }),
+    );
+    assert.equal(error.statusCode, 400);
+    assert.equal(error.code, "CONNECTOR_CREDENTIAL_NOT_ALLOWED");
+    assert.equal(mocks.createSourceConnectorRecord.mock.calls.length, 0);
+    assert.equal(mocks.createCredentialConnectorRecord.mock.calls.length, 0);
+    assert.equal(mocks.encryptTeamSecret.mock.calls.length, 0);
+  });
+
+  test("check rejects a credential for a none connector and runs nothing", async () => {
+    const error = await rejection(
+      service(noneAdapter()).checkConfigReadiness({
+        workspaceId: "workspace",
+        userId: "user",
+        connectorType: "public-feed",
+        configJson: CONFIG,
+        credential,
+      }),
+    );
+    assert.equal(error.statusCode, 400);
+    assert.equal(error.code, "CONNECTOR_CREDENTIAL_NOT_ALLOWED");
+    assert.equal(checkSyncReadiness.mock.calls.length, 0);
+  });
+
+  test("check rejects a credential for an oauth2 connector and runs nothing", async () => {
+    const error = await rejection(
+      service(oauth2Adapter()).checkConfigReadiness({
+        workspaceId: "workspace",
+        userId: "user",
+        connectorType: "oauth-test",
+        configJson: CONFIG,
+        credential,
+      }),
+    );
+    assert.equal(error.statusCode, 400);
+    assert.equal(error.code, "CONNECTOR_CREDENTIAL_NOT_ALLOWED");
+    assert.equal(checkSyncReadiness.mock.calls.length, 0);
+  });
+
+  test("none/oauth2 rejection paths never log the secret", async () => {
+    const info = vi.spyOn(logger, "info");
+    const warn = vi.spyOn(logger, "warn");
+    const error = vi.spyOn(logger, "error");
+    const debug = vi.spyOn(logger, "debug");
+
+    await rejection(
+      service(noneAdapter()).createConnector({
+        workspaceId: "workspace",
+        userId: "user",
+        connectorType: "public-feed",
+        name: "Feed",
+        configJson: CONFIG,
+        credential,
+      }),
+    );
+    await rejection(
+      service(oauth2Adapter()).checkConfigReadiness({
+        workspaceId: "workspace",
+        userId: "user",
+        connectorType: "oauth-test",
+        configJson: CONFIG,
+        credential,
+      }),
+    );
+
+    assert.ok(!loggedText(info, warn, error, debug).includes(SECRET));
+
+    info.mockRestore();
+    warn.mockRestore();
+    error.mockRestore();
+    debug.mockRestore();
+  });
+});
+
+describe("the service never logs the secret", () => {
+  test("create, check and rotate emit no log line carrying the secret", async () => {
+    const info = vi.spyOn(logger, "info");
+    const warn = vi.spyOn(logger, "warn");
+    const error = vi.spyOn(logger, "error");
+    const debug = vi.spyOn(logger, "debug");
+
+    mocks.updateOAuthAccountCredentialRecord.mockResolvedValue(
+      credentialAccountRow,
+    );
+    await create(service());
+    await service().checkConfigReadiness({
+      workspaceId: "workspace",
+      userId: "user",
+      connectorType: "webdav",
+      configJson: CONFIG,
+      credential: { username: USERNAME, secret: SECRET },
+    });
+    await service().rotateConnectorCredential({
+      workspaceId: "workspace",
+      userId: "user",
+      connectorId: "conn_cred",
+      credential: { username: USERNAME, secret: SECRET },
+    });
+
+    assert.ok(!loggedText(info, warn, error, debug).includes(SECRET));
+
+    info.mockRestore();
+    warn.mockRestore();
+    error.mockRestore();
+    debug.mockRestore();
+  });
+});

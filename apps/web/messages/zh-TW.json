@@ -3437,6 +3437,48 @@
           "addFailed": "新增訂閱源失敗。"
         }
       },
+      "webdav": {
+        "endpointLabel": "伺服器網址",
+        "usernameLabel": "使用者名稱",
+        "passwordLabel": "應用專用密碼",
+        "nameLabel": "名稱（選填）",
+        "foldersLabel": "要索引的資料夾",
+        "foldersHint": "每行填寫一個資料夾路徑。保留預設值即可索引整臺伺服器。",
+        "dialog": {
+          "title": "連接 WebDAV 伺服器",
+          "description": "輸入你的 WebDAV 伺服器地址和應用專用密碼。SourceWeft 會先檢查連接，再為你選擇的資料夾建立索引並保持同步。",
+          "check": "測試連接",
+          "checking": "測試中…",
+          "connected": "連接已驗證",
+          "add": "新增連接",
+          "autoSync": "自動同步",
+          "autoSyncHint": "定期檢查新增和變更的檔案。預設關閉；你隨時可以手動同步。",
+          "invalidEndpoint": "請輸入以 http:// 或 https:// 開頭的伺服器網址，且不要包含使用者名稱、密碼或查詢字串。",
+          "invalidUsername": "請輸入不含冒號的使用者名稱。",
+          "passwordRequired": "請輸入應用專用密碼。",
+          "invalidRoots": "請每行填寫一個有效的資料夾路徑，路徑不能包含「..」。",
+          "rootsLimit": "最多只能選擇 20 個資料夾。",
+          "checkFailed": "無法連接到此伺服器，請重試。",
+          "nameConflict": "此工作區中已存在同名連接器。請更改名稱，或使用已有的連接器。",
+          "accountConflict": "此工作區中已存在使用該伺服器和使用者名稱的連接器。",
+          "credentialNotAllowed": "此部署不允許該伺服器地址。",
+          "addFailed": "新增連接失敗。"
+        },
+        "readiness": {
+          "reauth_required": "伺服器拒絕了該使用者名稱或應用專用密碼。請檢查後重試。",
+          "blocked_endpoint": "此部署不允許該伺服器地址。",
+          "unreachable": "無法連接到伺服器。請檢查地址後重試。",
+          "config_invalid": "伺服器地址無效。",
+          "path_forbidden": "該帳戶無權讀取所選的某個資料夾。",
+          "path_not_found": "在伺服器上找不到所選的某個資料夾。"
+        },
+        "rotate": {
+          "title": "重新連接 WebDAV",
+          "description": "請輸入 {name} 的使用者名稱和應用專用密碼。新憑證將替換已儲存的憑證。",
+          "save": "重新連接",
+          "failed": "無法更新憑證，請重試。"
+        }
+      },
       "gmail": {
         "modeTitle": "選擇 Gmail 用途",
         "modeDescription": "連接前選擇初始模式，之後仍可在連接器設定中修改。",
@@ -3581,6 +3623,20 @@
               "description": "開啟資料夾檢視其中內容，然後勾選要索引的檔案和資料夾。",
               "root": "Dropbox",
               "note": "資料夾合計最多同步 1,000 個檔案",
+              "emptyContainer": "此資料夾為空。"
+            }
+          },
+          "webdav": {
+            "itemsTitle": "資料夾",
+            "itemsDescription": "選擇要索引的 WebDAV 資料夾。所選資料夾中的內容都會按連接器的同步排程保持同步。",
+            "choose": "選擇資料夾",
+            "empty": "尚未選擇任何內容。選擇資料夾以進行索引。",
+            "kinds": {
+              "folder": "資料夾"
+            },
+            "browser": {
+              "description": "開啟資料夾檢視其中內容，然後勾選要索引的資料夾。",
+              "root": "伺服器根目錄",
               "emptyContainer": "此資料夾為空。"
             }
           },

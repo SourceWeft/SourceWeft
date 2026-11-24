@@ -538,6 +538,7 @@ export const ConnectorCatalogCard = memoComponent(
     item,
     status,
     connector,
+    onAddCredential,
     onAddFeed,
     onCancelConnector,
     onConfigure,
@@ -550,8 +551,12 @@ export const ConnectorCatalogCard = memoComponent(
     item: ConnectorCatalogItem;
     status: ConnectorCatalogStatus;
     connector: ConnectorItem | null;
-    /** Add-only cards (`item.addMode`) call this instead of starting OAuth.
-     * Required so an add-only card can never render a button that does nothing. */
+    /** Add-only credential cards (`item.addMode === "credential"`) call this
+     * instead of starting OAuth, so WebDAV opens its endpoint/credential dialog. */
+    onAddCredential: (item: ConnectorCatalogItem) => void;
+    /** Add-only feed cards (`item.addMode === "feed_url"`) call this instead of
+     * starting OAuth. Required so an add-only card can never render a button
+     * that does nothing. */
     onAddFeed: (item: ConnectorCatalogItem) => void;
     onCancelConnector: (item: ConnectorCatalogItem) => void;
     onConfigure: () => void;
@@ -581,18 +586,24 @@ export const ConnectorCatalogCard = memoComponent(
     const canReconnect = Boolean(connector) && status.kind === "error";
     const cta = isBusy
       ? t("connectors.cta.connecting")
-      : item.addMode
-        ? t("connectors.cta.addFeed")
-        : canReconnect
-          ? t("connectors.cta.reconnect")
-          : connector
-            ? t("connectors.cta.connected")
-            : status.kind === "connected" &&
-                item.postOAuthMode !== "auto_create"
-              ? t("connectors.cta.configure")
-              : t("connectors.cta.connect");
+      : item.addMode === "credential"
+        ? t("connectors.cta.connect")
+        : item.addMode
+          ? t("connectors.cta.addFeed")
+          : canReconnect
+            ? t("connectors.cta.reconnect")
+            : connector
+              ? t("connectors.cta.connected")
+              : status.kind === "connected" &&
+                  item.postOAuthMode !== "auto_create"
+                ? t("connectors.cta.configure")
+                : t("connectors.cta.connect");
 
     function handleAction() {
+      if (item.addMode === "credential") {
+        onAddCredential(item);
+        return;
+      }
       if (item.addMode) {
         onAddFeed(item);
         return;

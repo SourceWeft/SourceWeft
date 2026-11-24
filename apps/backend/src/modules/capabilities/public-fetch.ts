@@ -17,3 +17,23 @@ export function createPublicFetchScope(): ConnectorPublicFetchScope {
   );
   return { fetch: scope.fetch, close: scope.close };
 }
+
+/**
+ * Opens a fetch scope for a connector that sends a stored credential.
+ *
+ * Address checks stay on and only the deployment's listed private origins are
+ * reachable over plain HTTP or a private address. Cross-origin redirects are
+ * refused, so an Authorization header can never be carried to another origin;
+ * same-origin redirects are followed within the controlled fetch's hop cap.
+ * The origin list never reaches the connector package. Every call opens a new
+ * scope; the holder closes it.
+ */
+export function createCredentialedFetchScope(
+  allowedInternalOrigins: readonly string[],
+): ConnectorPublicFetchScope {
+  const scope = createControlledFetch(
+    { enforceAddressChecks: true, allowedInternalOrigins },
+    { allowCrossOriginRedirects: false },
+  );
+  return { fetch: scope.fetch, close: scope.close };
+}

@@ -3,15 +3,16 @@ import type { ConnectorAdapter, ConnectorManifest } from "./types";
 
 /**
  * The standard OAuth2 token calls belong to `oauth2` connectors only: both
- * are required there, and a `none` connector has no account to exchange or
- * refresh, so neither may be present. `brokered` connectors are unconstrained.
+ * are required there, and a `none` or `credential` connector has no OAuth
+ * account to exchange or refresh, so neither may be present. `brokered`
+ * connectors are unconstrained.
  */
 function assertAdapterMatchesAuthKind(
   adapter: ConnectorAdapter,
   manifest: ConnectorManifest,
 ) {
   const kind = manifest.auth.kind;
-  if (kind !== "oauth2" && kind !== "none") return;
+  if (kind !== "oauth2" && kind !== "none" && kind !== "credential") return;
   const methods = ["exchangeOAuthCode", "refreshOAuthToken"] as const;
   if (kind === "oauth2") {
     const missing = methods.filter(
@@ -31,7 +32,7 @@ function assertAdapterMatchesAuthKind(
     throw new ConnectorError(
       500,
       "CONNECTOR_MANIFEST_INVALID",
-      `Connector '${manifest.type}' uses auth kind 'none' but implements ${forbidden.join(" and ")}`,
+      `Connector '${manifest.type}' uses auth kind '${kind}' but implements ${forbidden.join(" and ")}`,
     );
   }
 }

@@ -1,0 +1,45 @@
+<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns" xmlns:oc="http://owncloud.org/ns" xmlns:nc="http://nextcloud.org/ns">
+  <d:response>
+    <d:href>/remote.php/dav/files/alice/Documents/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:getlastmodified>Mon, 23 Nov 2026 10:00:00 GMT</d:getlastmodified>
+        <d:resourcetype><d:collection/></d:resourcetype>
+        <d:getetag>&quot;6564bd4a2d1c8&quot;</d:getetag>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+    <d:propstat>
+      <d:prop>
+        <d:getcontentlength/>
+        <d:getcontenttype/>
+      </d:prop>
+      <d:status>HTTP/1.1 404 Not Found</d:status>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/remote.php/dav/files/alice/Documents/My%20Report.pdf</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:getlastmodified>Sun, 22 Nov 2026 08:30:15 GMT</d:getlastmodified>
+        <d:getcontentlength>48213</d:getcontentlength>
+        <d:resourcetype/>
+        <d:getetag>&quot;a1b2c3d4&quot;</d:getetag>
+        <d:getcontenttype>application/pdf</d:getcontenttype>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/remote.php/dav/files/alice/Documents/Reports/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:getlastmodified>Sat, 21 Nov 2026 12:00:00 GMT</d:getlastmodified>
+        <d:resourcetype><d:collection/></d:resourcetype>
+        <d:getetag>&quot;folderetag&quot;</d:getetag>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>

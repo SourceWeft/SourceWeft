@@ -3437,6 +3437,48 @@
           "addFailed": "添加订阅源失败。"
         }
       },
+      "webdav": {
+        "endpointLabel": "服务器网址",
+        "usernameLabel": "用户名",
+        "passwordLabel": "应用专用密码",
+        "nameLabel": "名称（可选）",
+        "foldersLabel": "要索引的文件夹",
+        "foldersHint": "每行填写一个文件夹路径。保留默认值即可索引整台服务器。",
+        "dialog": {
+          "title": "连接 WebDAV 服务器",
+          "description": "输入你的 WebDAV 服务器地址和应用专用密码。SourceWeft 会先检查连接，再为你选择的文件夹建立索引并保持同步。",
+          "check": "测试连接",
+          "checking": "测试中…",
+          "connected": "连接已验证",
+          "add": "添加连接",
+          "autoSync": "自动同步",
+          "autoSyncHint": "定期检查新增和变更的文件。默认关闭；你随时可以手动同步。",
+          "invalidEndpoint": "请输入以 http:// 或 https:// 开头的服务器网址，且不要包含用户名、密码或查询字符串。",
+          "invalidUsername": "请输入不含冒号的用户名。",
+          "passwordRequired": "请输入应用专用密码。",
+          "invalidRoots": "请每行填写一个有效的文件夹路径，路径不能包含“..”。",
+          "rootsLimit": "最多只能选择 20 个文件夹。",
+          "checkFailed": "无法连接到此服务器，请重试。",
+          "nameConflict": "此工作区中已存在同名连接器。请更改名称，或使用已有的连接器。",
+          "accountConflict": "此工作区中已存在使用该服务器和用户名的连接器。",
+          "credentialNotAllowed": "此部署不允许该服务器地址。",
+          "addFailed": "添加连接失败。"
+        },
+        "readiness": {
+          "reauth_required": "服务器拒绝了该用户名或应用专用密码。请检查后重试。",
+          "blocked_endpoint": "此部署不允许该服务器地址。",
+          "unreachable": "无法连接到服务器。请检查地址后重试。",
+          "config_invalid": "服务器地址无效。",
+          "path_forbidden": "该账户无权读取所选的某个文件夹。",
+          "path_not_found": "在服务器上未找到所选的某个文件夹。"
+        },
+        "rotate": {
+          "title": "重新连接 WebDAV",
+          "description": "请输入 {name} 的用户名和应用专用密码。新凭据将替换已保存的凭据。",
+          "save": "重新连接",
+          "failed": "无法更新凭据，请重试。"
+        }
+      },
       "gmail": {
         "modeTitle": "选择 Gmail 用途",
         "modeDescription": "连接前选择初始模式，之后仍可在连接器设置中修改。",
@@ -3581,6 +3623,20 @@
               "description": "打开文件夹查看其中内容，然后勾选要索引的文件和文件夹。",
               "root": "Dropbox",
               "note": "文件夹合计最多同步 1,000 个文件",
+              "emptyContainer": "此文件夹为空。"
+            }
+          },
+          "webdav": {
+            "itemsTitle": "文件夹",
+            "itemsDescription": "选择要索引的 WebDAV 文件夹。所选文件夹中的内容都会按连接器的同步计划保持同步。",
+            "choose": "选择文件夹",
+            "empty": "尚未选择任何内容。选择文件夹以进行索引。",
+            "kinds": {
+              "folder": "文件夹"
+            },
+            "browser": {
+              "description": "打开文件夹查看其中内容，然后勾选要索引的文件夹。",
+              "root": "服务器根目录",
               "emptyContainer": "此文件夹为空。"
             }
           },

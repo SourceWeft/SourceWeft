@@ -7,6 +7,7 @@ import {
   ListChecks,
   Mail,
   Rss,
+  Server,
   SquareKanban,
 } from "lucide-react";
 import type { ConnectorCatalogCategory, ConnectorCatalogItem } from "./types";
@@ -155,6 +156,21 @@ export const connectorCatalog: ConnectorCatalogItem[] = [
     supportsPeriodicSync: true,
     supportsWebhook: false,
     addMode: "feed_url",
+  },
+  {
+    id: "webdav",
+    name: "WebDAV",
+    category: "Knowledge & Docs",
+    description:
+      "Index documents from a WebDAV server (Nextcloud, ownCloud and more) and keep them in sync.",
+    capabilities: ["Folders", "Scheduled sync"],
+    requiresBackendRegistration: true,
+    icon: Server,
+    isIndexable: true,
+    supportsActions: false,
+    supportsPeriodicSync: true,
+    supportsWebhook: false,
+    addMode: "credential",
   },
 ];
 
