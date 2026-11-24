@@ -79,6 +79,7 @@
     "@sourceweft/builtin-connector-linear": "workspace:*",
     "@sourceweft/builtin-connector-jira": "workspace:*",
     "@sourceweft/builtin-connector-confluence": "workspace:*",
+    "@sourceweft/builtin-connector-webdav": "workspace:*",
     "@sourceweft/builtin-document-parsers": "workspace:*",
     "@sourceweft/builtin-retrieval": "workspace:*",
     "@sourceweft/builtin-skill-feynman": "workspace:*",

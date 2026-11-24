@@ -211,6 +211,9 @@ importers:
       '@sourceweft/builtin-connector-rss':
         specifier: workspace:*
         version: link:../../packages/builtin-connector-rss
+      '@sourceweft/builtin-connector-webdav':
+        specifier: workspace:*
+        version: link:../../packages/builtin-connector-webdav
       '@sourceweft/builtin-document-parsers':
         specifier: workspace:*
         version: link:../../packages/builtin-document-parsers
@@ -997,6 +1000,9 @@ importers:
       '@sourceweft/builtin-connector-rss':
         specifier: workspace:*
         version: link:../builtin-connector-rss
+      '@sourceweft/builtin-connector-webdav':
+        specifier: workspace:*
+        version: link:../builtin-connector-webdav
       '@sourceweft/builtin-retrieval':
         specifier: workspace:*
         version: link:../builtin-retrieval

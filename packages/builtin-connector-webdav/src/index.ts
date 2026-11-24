@@ -5,6 +5,7 @@ export {
 } from "./contribution";
 export { builtinWebDavConnectorCapabilityManifest } from "./manifest";
 export { toBackendWebDavManifest } from "./backend-manifest";
+export { createConnectorAdapters } from "./host-services";
 export {
   createWebdavAdapter,
   WebDavAdapterError,

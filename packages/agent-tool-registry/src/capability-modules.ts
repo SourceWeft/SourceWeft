@@ -51,6 +51,8 @@ export const BUILTIN_CAPABILITY_MODULES: Record<
     import("@sourceweft/builtin-connector-jira"),
   "@sourceweft/builtin-connector-confluence": () =>
     import("@sourceweft/builtin-connector-confluence"),
+  "@sourceweft/builtin-connector-webdav": () =>
+    import("@sourceweft/builtin-connector-webdav"),
   "@sourceweft/builtin-retrieval": () =>
     import("@sourceweft/builtin-retrieval"),
   "@sourceweft/builtin-skill-ppt-deck": () =>
