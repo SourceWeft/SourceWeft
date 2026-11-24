@@ -17,7 +17,11 @@ import {
 } from "@sourceweft/db";
 import { ConnectorError } from "../errors";
 import { mapSourceConnector } from "../mappers";
-import type { ConnectorStatus, ConnectorSyncBlock } from "../types";
+import type {
+  ConnectorStatus,
+  ConnectorSyncBlock,
+  SourceConnectorRecord,
+} from "../types";
 import { stableJitterMs } from "./schedule";
 
 export async function createSourceConnectorRecord(input: {
@@ -81,6 +85,99 @@ export async function createSourceConnectorRecord(input: {
       nextDueAt,
     });
     return mapSourceConnector(row);
+  });
+}
+
+/**
+ * Create a `credential` connector and its stored credential account together,
+ * in one transaction. The account row holds the encrypted
+ * `{ username, secret }` value (passed already encrypted by the caller), a
+ * stable non-secret `providerAccountId`, no refresh token and no expiry; the
+ * connector points at it. If the connector insert fails — most importantly the
+ * workspace/type/name unique index — the whole transaction rolls back, so a
+ * failed create never leaves an orphan account behind. The account's schedule
+ * row is created exactly as {@link createSourceConnectorRecord} does.
+ */
+export async function createCredentialConnectorRecord(input: {
+  teamId: string;
+  workspaceId: string;
+  connectorType: string;
+  name: string;
+  configJson: Record<string, unknown>;
+  providerAccountId: string;
+  displayName: string;
+  accessTokenEncrypted: string;
+  periodicIndexingEnabled?: boolean;
+  indexingFrequencyMinutes?: number | null;
+  createdBy?: string | null;
+}): Promise<{ connector: SourceConnectorRecord; accountId: string }> {
+  return db.transaction(async (tx) => {
+    const accountId = randomUUID();
+    await tx.insert(connectorOAuthAccounts).values({
+      id: accountId,
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+      connectorType: input.connectorType,
+      providerAccountId: input.providerAccountId,
+      providerAccountEmail: null,
+      displayName: input.displayName,
+      scopes: [],
+      accessTokenEncrypted: input.accessTokenEncrypted,
+      refreshTokenEncrypted: null,
+      expiresAt: null,
+      status: "active",
+      createdBy: input.createdBy ?? null,
+    });
+
+    const connectorId = randomUUID();
+    const intervalMinutes = input.indexingFrequencyMinutes ?? 360;
+    const nextDueAt = input.periodicIndexingEnabled
+      ? new Date(
+          Date.now() +
+            intervalMinutes * 60_000 +
+            stableJitterMs(connectorId, intervalMinutes),
+        )
+      : null;
+    const [row] = await tx
+      .insert(sourceConnectors)
+      .values({
+        id: connectorId,
+        teamId: input.teamId,
+        workspaceId: input.workspaceId,
+        connectorType: input.connectorType,
+        name: input.name,
+        configJson: input.configJson,
+        oauthAccountId: accountId,
+        status: "active",
+        periodicIndexingEnabled: input.periodicIndexingEnabled ?? false,
+        indexingFrequencyMinutes: input.indexingFrequencyMinutes ?? null,
+        nextScheduledAt: nextDueAt,
+        createdBy: input.createdBy ?? null,
+      })
+      .returning();
+
+    if (!row) {
+      throw new ConnectorError(
+        500,
+        "CONNECTOR_CREATE_FAILED",
+        "Failed to create connector",
+        { teamId: input.teamId, workspaceId: input.workspaceId },
+      );
+    }
+    await tx.insert(taskSchedules).values({
+      id: randomUUID(),
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+      taskKind: "connector_sync",
+      ownerKind: "workspace",
+      connectorId,
+      enabled: input.periodicIndexingEnabled ?? false,
+      intervalMinutes,
+      specJson: { kind: "interval", minutes: intervalMinutes },
+      timezone: "UTC",
+      nextDueAt,
+    });
+    return { connector: mapSourceConnector(row), accountId };
   });
 }
 

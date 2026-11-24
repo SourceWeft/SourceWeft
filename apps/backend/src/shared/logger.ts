@@ -18,6 +18,18 @@ const base = pino({
       "req.headers.cookie",
       "meta.headers.authorization",
       "meta.headers.cookie",
+      // Connector `credential` bodies (POST /connectors, POST /connectors/check,
+      // PUT /connectors/:id/credential). No code path logs these, but redact
+      // them as a last line of defence so a username or app password can never
+      // reach a log line even if a future caller logs a request body.
+      "credential",
+      "credential.secret",
+      "credential.username",
+      "secret",
+      "req.body.credential",
+      "req.body.secret",
+      "body.credential",
+      "body.secret",
     ],
     censor: "[REDACTED]",
   },

@@ -1,13 +1,20 @@
+import type {
+  ConnectorCredentialInput,
+  ConnectorCredentialStatus,
+} from "@sourceweft/contracts";
 import { ConnectorError } from "./errors";
 import { validateObjectWithJsonSchema } from "./config-validation";
 import { comparableConfig } from "./json-compare";
 import { withoutSyncReadinessMetadata } from "./sync-readiness-metadata";
 import { ConnectorOAuthService } from "./oauth-service";
 import { requireConnectorWorkspace } from "./permissions";
+import { encryptTeamSecret } from "../../shared/team-secrets";
 import {
   archiveConnectorSources,
+  createCredentialConnectorRecord,
   createSourceConnectorRecord,
   deleteOAuthAccountRecord,
+  findOAuthAccountByProviderAccountInWorkspace,
   findOAuthAccountRecord,
   findSourceConnectorRecord,
   findSourceConnectorRecordByName,
@@ -20,10 +27,29 @@ import {
   listConnectorScheduleStatuses,
   listWorkspaceSourceConnectorRecordsByOAuthAccount,
   putConnectorSchedule,
+  updateOAuthAccountCredentialRecord,
   updateSourceConnectorRecord,
 } from "./repository";
 import { ConnectorRegistry, connectorRegistry } from "./registry";
-import type { ConnectorStatus, ConnectorSyncReadinessResult } from "./types";
+import type {
+  ConnectorStatus,
+  ConnectorSyncReadinessResult,
+  SourceConnectorRecord,
+} from "./types";
+
+/**
+ * The opaque credential string an adapter receives in `accessToken` for a
+ * `credential` connector: the member's username and secret as JSON. Built in
+ * exactly one place so the check path and the stored value never diverge. The
+ * secret never leaves this shape — it is encrypted before storage and never
+ * logged, copied into configJson, or returned.
+ */
+function credentialAccessToken(credential: ConnectorCredentialInput): string {
+  return JSON.stringify({
+    username: credential.username,
+    secret: credential.secret,
+  });
+}
 
 export class ConnectorService {
   constructor(
@@ -46,6 +72,10 @@ export class ConnectorService {
     connectorId: string;
     connectorName?: string;
     configJson: Record<string, unknown>;
+    /** The credential a readiness check runs with. `""` (the default) for a
+     * credential-free connector; the credential JSON for a `credential` one.
+     * It is passed straight to the adapter and never persisted. */
+    accessToken?: string;
   }): Promise<ConnectorSyncReadinessResult> {
     const adapter = this.registry.getAdapter(input.connectorType);
     if (!adapter.checkSyncReadiness) {
@@ -58,8 +88,53 @@ export class ConnectorService {
       connectorType: input.connectorType,
       connectorName: input.connectorName,
       config: input.configJson,
-      accessToken: "",
+      accessToken: input.accessToken ?? "",
     });
+  }
+
+  /** The connector's declared auth kind, or `undefined` when its adapter is not
+   * registered in this process (e.g. a connector type switched off at
+   * deployment level). Never throws, so response enrichment and listing stay
+   * safe for a connector whose adapter is absent. */
+  private safeManifestAuthKind(connectorType: string): string | undefined {
+    try {
+      return this.registry.getManifest(connectorType).auth?.kind;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Attach `credentialConfigured`/`credentialDisplayName` to a connector that
+   * is served in a response, but only for a `credential`-kind connector. The
+   * values come from the connector's own stored account; the secret is read
+   * neither here nor anywhere a response is built. Every other kind is returned
+   * unchanged, with no extra account lookup.
+   */
+  private async withCredentialStatus<
+    T extends { connectorType: string; oauthAccountId: string | null },
+  >(
+    teamId: string,
+    workspaceId: string,
+    connector: T,
+  ): Promise<
+    T & { credentialConfigured?: boolean; credentialDisplayName?: string | null }
+  > {
+    if (this.safeManifestAuthKind(connector.connectorType) !== "credential") {
+      return connector;
+    }
+    const account = connector.oauthAccountId
+      ? await findOAuthAccountRecord({
+          teamId,
+          workspaceId,
+          accountId: connector.oauthAccountId,
+        })
+      : null;
+    return {
+      ...connector,
+      credentialConfigured: Boolean(account && account.status === "active"),
+      credentialDisplayName: account ? account.displayName : null,
+    };
   }
 
   private async requireConfigReady(
@@ -81,6 +156,7 @@ export class ConnectorService {
     userId: string;
     connectorType: string;
     configJson: Record<string, unknown>;
+    credential?: ConnectorCredentialInput;
   }): Promise<ConnectorSyncReadinessResult> {
     const { workspace } = await requireConnectorWorkspace({
       workspaceId: input.workspaceId,
@@ -88,7 +164,8 @@ export class ConnectorService {
       permission: "connector.manage",
     });
     const manifest = this.registry.getManifest(input.connectorType);
-    if (manifest.auth?.kind !== "none") {
+    const authKind = manifest.auth?.kind;
+    if (authKind !== "none" && authKind !== "credential") {
       throw new ConnectorError(
         400,
         "CONNECTOR_CHECK_UNSUPPORTED",
@@ -100,12 +177,27 @@ export class ConnectorService {
       value: input.configJson,
       label: "configJson",
     });
+    // A credential connector is checked against the entered credential; nothing
+    // is persisted. The credential JSON is handed to the adapter only, never
+    // stored or logged here.
+    let accessToken = "";
+    if (authKind === "credential") {
+      if (!input.credential) {
+        throw new ConnectorError(
+          400,
+          "CONNECTOR_CREDENTIAL_REQUIRED",
+          "This connector requires a username and secret",
+        );
+      }
+      accessToken = credentialAccessToken(input.credential);
+    }
     return this.evaluateConfigReadiness({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
       connectorType: input.connectorType,
       connectorId: "pending",
       configJson: input.configJson,
+      accessToken,
     });
   }
 
@@ -141,6 +233,7 @@ export class ConnectorService {
     configJson?: Record<string, unknown>;
     periodicIndexingEnabled?: boolean;
     indexingFrequencyMinutes?: number | null;
+    credential?: ConnectorCredentialInput;
   }) {
     const { workspace } = await requireConnectorWorkspace({
       workspaceId: input.workspaceId,
@@ -149,11 +242,19 @@ export class ConnectorService {
     });
     const manifest = this.registry.getManifest(input.connectorType);
     const isNone = manifest.auth?.kind === "none";
-    if (isNone && input.oauthAccountId != null) {
+    const isCredential = manifest.auth?.kind === "credential";
+    if ((isNone || isCredential) && input.oauthAccountId != null) {
       throw new ConnectorError(
         400,
         "CONNECTOR_OAUTH_ACCOUNT_NOT_ALLOWED",
         "This connector does not use an OAuth account",
+      );
+    }
+    if (isCredential && !input.credential) {
+      throw new ConnectorError(
+        400,
+        "CONNECTOR_CREDENTIAL_REQUIRED",
+        "This connector requires a username and secret",
       );
     }
     const configJson = input.configJson ?? {};
@@ -277,6 +378,62 @@ export class ConnectorService {
         configJson,
       });
     }
+
+    if (isCredential) {
+      // input.credential is guaranteed present by the early check above.
+      const credential = input.credential as ConnectorCredentialInput;
+      const adapter = this.registry.getAdapter(input.connectorType);
+      if (!adapter.credentialIdentity) {
+        throw new ConnectorError(
+          500,
+          "CONNECTOR_CREDENTIAL_IDENTITY_UNSUPPORTED",
+          `${manifest.displayName} does not support credential authorization`,
+          { connectorType: input.connectorType },
+        );
+      }
+      const providerAccountId = adapter.credentialIdentity(
+        configJson,
+        credential,
+      );
+      const existing = await findOAuthAccountByProviderAccountInWorkspace({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        connectorType: input.connectorType,
+        providerAccountId,
+      });
+      if (existing) {
+        throw new ConnectorError(
+          409,
+          "CONNECTOR_CREDENTIAL_ACCOUNT_EXISTS",
+          "A connector for this endpoint and user already exists in this workspace",
+        );
+      }
+      const accessTokenEncrypted = await encryptTeamSecret(
+        credentialAccessToken(credential),
+        workspace.organizationId,
+      );
+      const { connector } = await createCredentialConnectorRecord({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        connectorType: input.connectorType,
+        name: input.name,
+        configJson,
+        providerAccountId,
+        displayName: credential.username,
+        accessTokenEncrypted,
+        periodicIndexingEnabled,
+        indexingFrequencyMinutes: periodicIndexingEnabled ? frequency : null,
+        createdBy: input.userId,
+      });
+      return {
+        connector: await this.buildConnectorResponse(
+          workspace.organizationId,
+          workspace.id,
+          connector,
+        ),
+      };
+    }
+
     const connector = await createSourceConnectorRecord({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
@@ -290,15 +447,35 @@ export class ConnectorService {
     });
 
     return {
-      connector: {
-        ...((await findSourceConnectorRecord({
-          teamId: workspace.organizationId,
-          workspaceId: workspace.id,
-          connectorId: connector.id,
-        })) ?? connector),
-        scheduleStatus: await getConnectorScheduleStatus(connector.id),
-      },
+      connector: await this.buildConnectorResponse(
+        workspace.organizationId,
+        workspace.id,
+        connector,
+      ),
     };
+  }
+
+  /**
+   * Re-read a connector (so the response carries every stored column), attach
+   * its schedule status, and — for a `credential` connector only — its
+   * credential status. The secret is never read. Falls back to the record it
+   * was handed if the re-read finds nothing.
+   */
+  private async buildConnectorResponse(
+    teamId: string,
+    workspaceId: string,
+    connector: SourceConnectorRecord,
+  ) {
+    const current =
+      (await findSourceConnectorRecord({
+        teamId,
+        workspaceId,
+        connectorId: connector.id,
+      })) ?? connector;
+    return this.withCredentialStatus(teamId, workspaceId, {
+      ...current,
+      scheduleStatus: await getConnectorScheduleStatus(connector.id),
+    });
   }
 
   async listConnectors(input: {
@@ -321,10 +498,14 @@ export class ConnectorService {
       workspaceId: workspace.id,
     });
     return {
-      items: items.map((connector) => ({
-        ...connector,
-        scheduleStatus: schedules.get(connector.id) ?? null,
-      })),
+      items: await Promise.all(
+        items.map((connector) =>
+          this.withCredentialStatus(workspace.organizationId, workspace.id, {
+            ...connector,
+            scheduleStatus: schedules.get(connector.id) ?? null,
+          }),
+        ),
+      ),
     };
   }
 
@@ -484,14 +665,96 @@ export class ConnectorService {
       intervalMinutes: frequency ?? manifest.sync.defaultFrequencyMinutes,
     });
     return {
-      connector: {
-        ...((await findSourceConnectorRecord({
-          teamId: workspace.organizationId,
-          workspaceId: workspace.id,
-          connectorId: connector.id,
-        })) ?? connector),
-        scheduleStatus: await getConnectorScheduleStatus(connector.id),
-      },
+      connector: await this.buildConnectorResponse(
+        workspace.organizationId,
+        workspace.id,
+        connector,
+      ),
+    };
+  }
+
+  /**
+   * Replace a `credential` connector's stored secret in place — the "reconnect"
+   * path for credential connectors. Requires `connector.manage` (the same
+   * permission as editing the connector) and the connector's own workspace. The
+   * new `{ username, secret }` is encrypted and written to the connector's
+   * existing account row, which returns to `active` with any prior
+   * reauthorization requirement cleared. The secret is never returned, logged,
+   * or copied into configJson.
+   */
+  async rotateConnectorCredential(input: {
+    workspaceId: string;
+    userId: string;
+    connectorId: string;
+    credential: ConnectorCredentialInput;
+  }): Promise<ConnectorCredentialStatus> {
+    const { workspace } = await requireConnectorWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      permission: "connector.manage",
+    });
+    const connector = await findSourceConnectorRecord({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      connectorId: input.connectorId,
+    });
+    if (!connector) {
+      throw new ConnectorError(
+        404,
+        "CONNECTOR_NOT_FOUND",
+        "Connector not found",
+      );
+    }
+    const manifest = this.registry.getManifest(connector.connectorType);
+    if (manifest.auth?.kind !== "credential") {
+      throw new ConnectorError(
+        400,
+        "CONNECTOR_CREDENTIAL_UNSUPPORTED",
+        "This connector does not use a username and secret",
+      );
+    }
+    if (!connector.oauthAccountId) {
+      throw new ConnectorError(
+        409,
+        "CONNECTOR_CREDENTIAL_ACCOUNT_MISSING",
+        "This connector has no stored credential to replace",
+      );
+    }
+    const adapter = this.registry.getAdapter(connector.connectorType);
+    if (!adapter.credentialIdentity) {
+      throw new ConnectorError(
+        500,
+        "CONNECTOR_CREDENTIAL_IDENTITY_UNSUPPORTED",
+        `${manifest.displayName} does not support credential authorization`,
+        { connectorType: connector.connectorType },
+      );
+    }
+    const providerAccountId = adapter.credentialIdentity(
+      connector.configJson,
+      input.credential,
+    );
+    const accessTokenEncrypted = await encryptTeamSecret(
+      credentialAccessToken(input.credential),
+      workspace.organizationId,
+    );
+    const account = await updateOAuthAccountCredentialRecord({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      accountId: connector.oauthAccountId,
+      displayName: input.credential.username,
+      providerAccountId,
+      accessTokenEncrypted,
+    });
+    if (!account) {
+      throw new ConnectorError(
+        404,
+        "CONNECTOR_OAUTH_ACCOUNT_NOT_FOUND",
+        "Connector credential account not found",
+      );
+    }
+    return {
+      credentialConfigured: account.status === "active",
+      displayName: account.displayName,
     };
   }
 

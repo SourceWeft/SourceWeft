@@ -743,8 +743,13 @@ export class ConnectorOAuthService {
       // switched-off connector's accounts never occupy the oldest-first batch
       // and starve everyone else. The per-account CONNECTOR_ADAPTER_NOT_FOUND
       // handling below stays as a safety net for a connector switched off
-      // between this query and the lock.
-      connectorTypes: this.registry.listManifests().map((m) => m.type),
+      // between this query and the lock. `credential` connectors are excluded
+      // outright: their accounts never refresh (no refresh token, no expiry),
+      // so a username/secret must never be swept by the keep-alive pass.
+      connectorTypes: this.registry
+        .listManifests()
+        .filter((m) => m.auth?.kind !== "credential")
+        .map((m) => m.type),
     });
 
     const counts = {

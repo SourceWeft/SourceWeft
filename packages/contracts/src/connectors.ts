@@ -347,6 +347,12 @@ export const sourceConnectorSchema = z.object({
     .optional(),
   syncBlock: connectorSyncBlockSchema.nullable().optional(),
   lastError: z.string().nullable(),
+  // Present only for `credential`-kind connectors. `credentialConfigured` is
+  // whether an active stored credential account backs the connector;
+  // `credentialDisplayName` is that account's non-secret display name (the
+  // username). The secret itself is never exposed.
+  credentialConfigured: z.boolean().optional(),
+  credentialDisplayName: z.string().nullable().optional(),
   createdBy: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -1121,6 +1127,18 @@ export interface ConnectorAdapter {
   ): Promise<OAuthTokenSet>;
   /** Brokered auth only: revoke a previously brokered credential. */
   revokeAuthorization?(input: { accessToken: string }): Promise<void>;
+  /**
+   * Credential auth only: derive a stable, non-secret account identity from the
+   * connector's config and the entered credential (e.g.
+   * `sha256(origin + "\n" + username)`). Stored as the account's
+   * `providerAccountId` so the same endpoint and user cannot be attached twice
+   * in one workspace. Required for a `credential` connector; absent on every
+   * other kind. Must never embed the secret in its return value.
+   */
+  credentialIdentity?(
+    config: Record<string, unknown>,
+    credential: ConnectorCredentialInput,
+  ): string;
   checkSyncReadiness?(
     input: ConnectorDiscoverInput,
   ): Promise<ConnectorSyncReadinessResult>;
