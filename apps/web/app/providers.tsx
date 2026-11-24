@@ -14,6 +14,7 @@ import {
   type AuthLocaleMessages,
 } from "../lib/i18n/auth-locale";
 import { UiLocalizationProvider } from "@sourceweft/ui-web/components/ui/ui-localization";
+import { SkeletonPulseSync } from "@sourceweft/ui-web/components/ui/skeleton-pulse-sync";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
 import { Toaster } from "sonner";
@@ -276,6 +277,7 @@ export function Providers({
           <SessionRefreshSync />
           <AuthAnalyticsTracker />
           <MobileAppRuntime />
+          <SkeletonPulseSync />
           <GoogleOneTap />
           <UiLocalizationProvider messages={{ close: t("close") }}>
             <TooltipProvider>

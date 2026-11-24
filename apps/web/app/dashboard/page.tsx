@@ -34,6 +34,7 @@ import { useDashboardChatState } from "./_components/dashboard-chat-state";
 import { DashboardTeamSwitcher } from "./_components/dashboard-team-switcher";
 import {
   DashboardHomeOverviewPanelSkeleton,
+  DashboardHomeTeamSwitcherSkeleton,
   DashboardHomeWorkspaceRailSkeleton,
 } from "../_components/route-loading-skeleton";
 
@@ -537,27 +538,37 @@ export default function DashboardPage() {
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(
     null,
   );
+  // The organization whose workspaces are shown or loading. The chat state
+  // can hydrate more than once for the same organization (the auth session's
+  // organization arrives after the first bootstrap); those passes must not
+  // bring the skeleton back or fetch the list again.
+  const requestedOrganizationIdRef = useRef<string | null>(null);
 
   useEffect(() => {
+    if (dashboardState.isWorkspaceHydrating) {
+      return;
+    }
+    if (!resolvedOrganizationId) {
+      requestedOrganizationIdRef.current = null;
+      setWorkspaces([]);
+      setActiveWorkspaceId(null);
+      setLoading(false);
+      return;
+    }
+    if (requestedOrganizationIdRef.current === resolvedOrganizationId) {
+      return;
+    }
+    requestedOrganizationIdRef.current = resolvedOrganizationId;
+    const organizationId = resolvedOrganizationId;
+    const isCurrent = () =>
+      requestedOrganizationIdRef.current === organizationId;
+
     async function loadWorkspaces() {
-      if (!resolvedOrganizationId) {
-        if (dashboardState.isWorkspaceHydrating) {
-          setLoading(true);
-          return;
-        }
-
-        setWorkspaces([]);
-        setActiveWorkspaceId(null);
-        setLoading(false);
-        return;
-      }
-
       setLoading(true);
 
       try {
-        const workspaceResponse = await ensureDashboardWorkspace(
-          resolvedOrganizationId,
-        );
+        const workspaceResponse =
+          await ensureDashboardWorkspace(organizationId);
 
         const withPreviews = await Promise.all(
           workspaceResponse.items.map(async (workspace: Workspace) => {
@@ -630,10 +641,11 @@ export default function DashboardPage() {
           }),
         );
 
+        if (!isCurrent()) {
+          return;
+        }
         setWorkspaces(withPreviews);
-        const storedWorkspaceId = getStoredDashboardWorkspaceId(
-          resolvedOrganizationId,
-        );
+        const storedWorkspaceId = getStoredDashboardWorkspaceId(organizationId);
         const resolvedWorkspace =
           withPreviews.find(
             (workspace) => workspace.id === storedWorkspaceId,
@@ -645,9 +657,14 @@ export default function DashboardPage() {
           null;
 
         setActiveWorkspaceId(resolvedWorkspace?.id ?? null);
+        setLoading(false);
       } catch {
+        if (!isCurrent()) {
+          return;
+        }
+        // Let a later pass for this organization try again.
+        requestedOrganizationIdRef.current = null;
         toast.error(t("toasts.loadFailed"));
-      } finally {
         setLoading(false);
       }
     }
@@ -804,6 +821,7 @@ export default function DashboardPage() {
           <div className="flex min-w-0 items-center gap-2 md:gap-3">
             <DashboardTeamSwitcher
               className="max-w-[48vw]"
+              fallback={<DashboardHomeTeamSwitcherSkeleton />}
               onAddTeam={() => router.push("/dashboard/settings")}
               size="sm"
             />
@@ -900,9 +918,7 @@ export default function DashboardPage() {
                 </div>
                 <div>
                   <p className="text-base font-medium text-foreground">
-                    {hasSearchQuery
-                      ? t("empty.searchTitle")
-                      : t("empty.title")}
+                    {hasSearchQuery ? t("empty.searchTitle") : t("empty.title")}
                   </p>
                   <p className="mt-2 text-sm text-muted-foreground">
                     {hasSearchQuery
