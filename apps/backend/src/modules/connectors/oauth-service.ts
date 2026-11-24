@@ -439,9 +439,12 @@ export class ConnectorOAuthService {
     tokenSet: OAuthTokenSet;
   }) {
     const { tokenSet } = input;
-    // `none` connectors never store an authorization, so they declare no scopes.
+    // `none` and `credential` connectors have no OAuth scopes to declare.
     const manifestScopes =
-      input.manifest.auth.kind === "none" ? [] : input.manifest.auth.scopes;
+      input.manifest.auth.kind === "none" ||
+      input.manifest.auth.kind === "credential"
+        ? []
+        : input.manifest.auth.scopes;
     const scopes = normalizeScopes(tokenSet, manifestScopes);
     const displayName =
       tokenSet.displayName ??

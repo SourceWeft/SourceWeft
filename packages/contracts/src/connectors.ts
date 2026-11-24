@@ -121,10 +121,21 @@ const noneAuthManifestSchema = z.object({
   kind: z.literal("none"),
 });
 
+/**
+ * A connector authorized by a username and secret the member enters directly
+ * (e.g. WebDAV Basic auth), stored as an encrypted account. It has no OAuth
+ * exchange or refresh. `scheme` names how the credential is presented.
+ */
+const credentialAuthManifestSchema = z.object({
+  kind: z.literal("credential"),
+  scheme: z.literal("basic"),
+});
+
 const connectorAuthManifestSchema = z.discriminatedUnion("kind", [
   oauth2AuthManifestSchema,
   brokeredAuthManifestSchema,
   noneAuthManifestSchema,
+  credentialAuthManifestSchema,
 ]);
 
 export const connectorResourceSpecSchema = z.object({
@@ -456,6 +467,33 @@ export const listConnectorOAuthAccountsResponseSchema = z.object({
   items: z.array(connectorOAuthAccountSchema),
 });
 
+/**
+ * A username and secret entered for a `credential` connector. Trimming applies
+ * to the username only; the secret is kept exactly as typed. Neither value is
+ * ever returned by the API.
+ */
+export const connectorCredentialInputSchema = z.object({
+  username: z.string().trim().min(1).max(200),
+  secret: z.string().min(1).max(2000),
+});
+export type ConnectorCredentialInput = z.infer<
+  typeof connectorCredentialInputSchema
+>;
+
+export const rotateConnectorCredentialRequestSchema =
+  connectorCredentialInputSchema;
+export type RotateConnectorCredentialRequest = z.infer<
+  typeof rotateConnectorCredentialRequestSchema
+>;
+
+export const connectorCredentialStatusSchema = z.object({
+  credentialConfigured: z.boolean(),
+  displayName: z.string().nullable(),
+});
+export type ConnectorCredentialStatus = z.infer<
+  typeof connectorCredentialStatusSchema
+>;
+
 export const createConnectorRequestSchema = z.object({
   connectorType: z.string().trim().min(1),
   name: z.string().trim().min(1).max(200),
@@ -463,11 +501,13 @@ export const createConnectorRequestSchema = z.object({
   configJson: jsonObjectSchema.optional(),
   periodicIndexingEnabled: z.boolean().optional(),
   indexingFrequencyMinutes: z.number().int().positive().optional(),
+  credential: connectorCredentialInputSchema.optional(),
 });
 
 export const checkConnectorConfigRequestSchema = z.object({
   connectorType: z.string().trim().min(1),
   configJson: jsonObjectSchema,
+  credential: connectorCredentialInputSchema.optional(),
 });
 
 export const checkConnectorConfigResponseSchema = z.object({

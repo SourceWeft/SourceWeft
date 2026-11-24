@@ -164,3 +164,42 @@ test("ConnectorRegistry leaves a brokered adapter unconstrained", () => {
 
   assert.equal(registry.getManifest("brokered-fake").auth.kind, "brokered");
 });
+
+const credentialManifest: ConnectorManifest = {
+  ...manifest,
+  type: "webdavlike",
+  auth: { kind: "credential", scheme: "basic" },
+  actions: [],
+};
+
+test("ConnectorRegistry rejects a credential adapter that implements OAuth methods", () => {
+  const { refreshOAuthToken: _omitted, ...onlyExchange } = adapter;
+  assertManifestInvalid(
+    () =>
+      new ConnectorRegistry([
+        { ...onlyExchange, getManifest: () => credentialManifest },
+      ]),
+    /webdavlike.*'credential'.*exchangeOAuthCode/,
+  );
+  const { exchangeOAuthCode: _omitted2, ...onlyRefresh } = adapter;
+  assertManifestInvalid(
+    () =>
+      new ConnectorRegistry([
+        { ...onlyRefresh, getManifest: () => credentialManifest },
+      ]),
+    /webdavlike.*'credential'.*refreshOAuthToken/,
+  );
+});
+
+test("ConnectorRegistry registers a credential adapter without OAuth methods", () => {
+  const {
+    exchangeOAuthCode: _exchange,
+    refreshOAuthToken: _refresh,
+    ...noOAuth
+  } = adapter;
+  const registry = new ConnectorRegistry([
+    { ...noOAuth, getManifest: () => credentialManifest },
+  ]);
+
+  assert.equal(registry.getManifest("webdavlike").auth.kind, "credential");
+});
