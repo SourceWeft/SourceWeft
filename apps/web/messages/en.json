@@ -1755,7 +1755,15 @@
       "assistant": "Assistant",
       "formerMember": "A former member",
       "ticket": "Ticket: {title}",
-      "openConversation": "Open conversation"
+      "openConversation": "Open conversation",
+      "event": {
+        "created": "New ticket",
+        "ready": "Done",
+        "waiting": "Needs an answer",
+        "blocked": "Blocked",
+        "failed": "Failed",
+        "dropped": "Dropped"
+      }
     },
     "composer": {
       "label": "Message the assistant",

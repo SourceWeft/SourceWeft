@@ -27,6 +27,7 @@ import type {
   AssistantTriggerSource,
   AssistantTriggerStatus,
   FeedItemKind,
+  FeedTicketEvent,
   TicketStage,
 } from "@sourceweft/contracts/assistants";
 
@@ -160,6 +161,7 @@ export async function insertFeedItemRow(
     text: string;
     triggerId?: string | null;
     ticketId?: string | null;
+    ticketEvent?: FeedTicketEvent | null;
     replyToItemId?: string | null;
   },
 ): Promise<AssistantFeedItemRow> {
@@ -175,6 +177,7 @@ export async function insertFeedItemRow(
       text: input.text,
       triggerId: input.triggerId ?? null,
       ticketId: input.ticketId ?? null,
+      ticketEvent: input.ticketEvent ?? null,
       replyToItemId: input.replyToItemId ?? null,
     })
     .returning();

@@ -414,7 +414,8 @@ export function createRouterTools(
               workspaceId: ctx.workspaceId,
               assistantId: ctx.assistantId,
               kind: "ticket_update",
-              text: `New ticket: ${args.title}`,
+              ticketEvent: "created",
+              text: args.title,
               ticketId,
             });
           });

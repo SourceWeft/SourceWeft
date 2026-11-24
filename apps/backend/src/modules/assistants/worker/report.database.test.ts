@@ -99,7 +99,10 @@ test("report ready: the ticket goes idle, with one worker_report event and one f
   assert.equal(feed.length, 1);
   assert.equal(feed[0]!.kind, "ticket_update");
   assert.equal(feed[0]!.ticketId, ticket.id);
-  assert.match(feed[0]!.text, /Draft is in the doc\./);
+  // The status is the item's event, shown as a label; the title is in the
+  // item's header. The text is the report alone.
+  assert.equal(feed[0]!.ticketEvent, "ready");
+  assert.equal(feed[0]!.text, "Draft is in the doc.");
 
   // No question, no notification.
   assert.equal(f.notifications.length, 0);
@@ -152,7 +155,29 @@ test("report waiting with a question waits for a person and notifies the payer",
   const [trigger] = await f.triggerRows(assistant.id);
   assert.match(trigger!.text, /Which tone do you want/);
   const [feedItem] = await f.feedItemRows(assistant.id);
-  assert.match(feedItem!.text, /Which tone do you want/);
+  assert.equal(feedItem!.ticketEvent, "waiting");
+  assert.equal(
+    feedItem!.text,
+    "Two versions drafted.\n\nWhich tone do you want, formal or casual?",
+  );
+});
+
+test("citation markers are removed from the report everywhere it goes outside the conversation", async () => {
+  const { assistant, ticket, ctx } = await setupWorkingTicket();
+  const report = await reportTool(ctx);
+
+  const result = await report.invoke({
+    status: "ready",
+    summary: "The LTS is v26.13.1 [citation:c1]. Releases go yearly[citation:c2].",
+  });
+  assert.ok(!isWorkerToolErrorFn(result), JSON.stringify(result));
+
+  const clean = "The LTS is v26.13.1. Releases go yearly.";
+  assert.equal((await f.ticketRow(ticket.id))!.lastReportSummary, clean);
+  const [trigger] = await f.triggerRows(assistant.id);
+  assert.equal(trigger!.text, `ready: ${clean}`);
+  const [feedItem] = await f.feedItemRows(assistant.id);
+  assert.equal(feedItem!.text, clean);
 });
 
 test("a report from a run that is no longer the ticket's is refused as a tool error, writing nothing", async () => {

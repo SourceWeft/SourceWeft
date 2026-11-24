@@ -603,6 +603,13 @@
       "when": 1795408360135,
       "tag": "0085_assistants",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1795520123741,
+      "tag": "0086_assistant_feed_ticket_event",
+      "breakpoints": true
     }
   ]
 }

@@ -143,13 +143,12 @@ test("create_ticket writes the ticket, one decision per trigger, and one feed it
   );
 
   const feed = await f.feedItemRows(assistant.id);
-  assert.equal(
-    feed.filter(
-      (item) =>
-        item.kind === "ticket_update" && item.ticketId === result.ticketId,
-    ).length,
-    1,
+  const created = feed.filter(
+    (item) =>
+      item.kind === "ticket_update" && item.ticketId === result.ticketId,
   );
+  assert.equal(created.length, 1);
+  assert.equal(created[0]!.ticketEvent, "created");
 
   const trig1 = await f.triggerRow(t1.id);
   const trig2 = await f.triggerRow(t2.id);

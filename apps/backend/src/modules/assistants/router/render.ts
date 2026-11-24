@@ -13,6 +13,7 @@
 import type {
   AssistantTriggerSource,
   FeedItemKind,
+  FeedTicketEvent,
   TicketStage,
 } from "@sourceweft/contracts/assistants";
 import { ASSISTANT_LIMITS } from "../limits";
@@ -41,6 +42,9 @@ export type RenderFeedItem = {
   id: string;
   kind: FeedItemKind;
   text: string;
+  /** Set on a `ticket_update`: the ticket it is about and what happened. */
+  ticketId?: string | null;
+  ticketEvent?: FeedTicketEvent | null;
 };
 
 export type RenderRelatedTicket = {
@@ -88,6 +92,14 @@ export function renderTriggerLine(trigger: RenderTrigger): string {
   return `<assistant-trigger id=${trigger.id} source=${trigger.source} author=${trigger.author ?? ""} member=${member}${ticket}>${body}</assistant-trigger>`;
 }
 
+/** `kind`, then (for a ticket update) what happened and to which ticket —
+ * all system-controlled values (an enum, a uuid). */
+function feedItemLabel(item: RenderFeedItem): string {
+  const event = item.ticketEvent ? ` ${item.ticketEvent}` : "";
+  const ticket = item.ticketId ? ` ticket=${escapeTagText(item.ticketId)}` : "";
+  return `${item.kind}${event}${ticket}`;
+}
+
 function renderRelatedTicketLine(ticket: RenderRelatedTicket): string {
   const summary = ticket.lastReportSummary
     ? escapeTagText(
@@ -118,7 +130,7 @@ export function renderBatch(input: RenderBatchInput): string {
     lines.push("", "Recent feed / 最近动态:");
     for (const item of input.feedItems) {
       lines.push(
-        `- [${item.kind}] ${escapeTagText(oneLine(truncate(item.text, SUMMARY_LINE_MAX)))}`,
+        `- [${feedItemLabel(item)}] ${escapeTagText(oneLine(truncate(item.text, SUMMARY_LINE_MAX)))}`,
       );
     }
   }
@@ -175,6 +187,8 @@ export async function fetchRouterBatchContext(input: {
       id: row.id,
       kind: row.kind,
       text: row.text,
+      ticketId: row.ticketId,
+      ticketEvent: row.ticketEvent,
     })),
     relatedTickets: ticketRows.map((row) => ({
       id: row.id,

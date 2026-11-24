@@ -1755,7 +1755,15 @@
       "assistant": "助理",
       "formerMember": "已離開的成員",
       "ticket": "工單：{title}",
-      "openConversation": "開啟對話"
+      "openConversation": "開啟對話",
+      "event": {
+        "created": "新工單",
+        "ready": "已完成",
+        "waiting": "等待答覆",
+        "blocked": "受阻",
+        "failed": "失敗",
+        "dropped": "已放棄"
+      }
     },
     "composer": {
       "label": "給助理傳送訊息",

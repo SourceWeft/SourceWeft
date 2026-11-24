@@ -167,6 +167,23 @@ test("feed items render as a one-line-each summary section", () => {
   assert.match(output, /\[ticket_update\] Ticket moved/);
 });
 
+test("a ticket update's feed line names what happened and to which ticket", () => {
+  const output = renderBatch(
+    baseInput({
+      feedItems: [
+        {
+          id: "f-1",
+          kind: "ticket_update",
+          text: "Draft is in the doc.",
+          ticketId: "t-1",
+          ticketEvent: "ready",
+        },
+      ],
+    }),
+  );
+  assert.match(output, /- \[ticket_update ready ticket=t-1\] Draft is in the doc\./);
+});
+
 test("a feed item's text containing a forged tag is escaped, not reproduced raw", () => {
   const output = renderBatch(
     baseInput({

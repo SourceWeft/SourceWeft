@@ -130,6 +130,7 @@ function presentFeedItem(row: AssistantFeedItemRow): AssistantFeedItem {
     authorUserId: row.authorUserId ?? null,
     text: row.text,
     ticketId: row.ticketId ?? null,
+    ticketEvent: row.ticketEvent ?? null,
     replyToItemId: row.replyToItemId ?? null,
     createdAt: row.createdAt.toISOString(),
   };

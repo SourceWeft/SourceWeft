@@ -6,6 +6,7 @@ import {
   assistantTriggerSourceSchema,
   assistantTriggerStatusSchema,
   feedItemKindSchema,
+  feedTicketEventSchema,
   ticketBlockedReasonSchema,
   ticketOriginSchema,
   ticketOutcomeSchema,
@@ -16,6 +17,7 @@ import {
   type AssistantTriggerSource,
   type AssistantTriggerStatus,
   type FeedItemKind,
+  type FeedTicketEvent,
   type TicketBlockedReason,
   type TicketOrigin,
   type TicketOutcome,
@@ -308,6 +310,7 @@ export const assistantFeedItems = pgTable(
     text: text("text").notNull(),
     triggerId: text("trigger_id"),
     ticketId: text("ticket_id"),
+    ticketEvent: text("ticket_event").$type<FeedTicketEvent>(),
     replyToItemId: text("reply_to_item_id").references(
       (): AnyPgColumn => assistantFeedItems.id,
       { onDelete: "set null" },
@@ -330,6 +333,10 @@ export const assistantFeedItems = pgTable(
     check(
       "assistant_feed_items_kind_check",
       sql`${table.kind} in (${sqlEnumList(feedItemKindSchema.options)})`,
+    ),
+    check(
+      "assistant_feed_items_ticket_event_check",
+      sql`${table.ticketEvent} is null or ${table.ticketEvent} in (${sqlEnumList(feedTicketEventSchema.options)})`,
     ),
     check(
       "assistant_feed_items_text_length_check",
