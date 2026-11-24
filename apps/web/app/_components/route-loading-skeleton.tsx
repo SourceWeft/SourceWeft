@@ -8,7 +8,12 @@ import {
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { ChatHeaderSkeleton } from "./chat-header-skeleton";
 import { CatalogRouteSkeleton } from "./catalog-loading-skeleton";
-import { TraceListSkeletonRows } from "../dashboard/observability/trace-loading-skeleton";
+import {
+  TraceListHeaderSkeleton,
+  TraceListSkeletonRows,
+  TraceSkeletonBlock,
+  TraceSkeletonLine,
+} from "../dashboard/observability/trace-loading-skeleton";
 import { ScheduledTasksRouteSkeleton } from "../dashboard/scheduled/_components/scheduled-tasks-skeleton";
 import { AssistantRouteSkeleton } from "../dashboard/assistant/_components/assistant-skeleton";
 
@@ -662,14 +667,14 @@ function ObservabilityFilterSkeleton() {
   return (
     <aside className="hidden w-[260px] shrink-0 border-r border-border bg-card p-3 md:block">
       <div className="mb-4 flex items-center justify-between">
-        <SkeletonLine className="h-4 w-28" />
-        <SkeletonBlock className="h-8 w-16 rounded-md" />
+        <TraceSkeletonLine className="h-4 w-28" />
+        <TraceSkeletonBlock className="h-8 w-16 rounded-md" />
       </div>
       <div className="space-y-3">
         {Array.from({ length: 7 }).map((_, index) => (
           <div className="space-y-2" key={index}>
-            <SkeletonLine className="w-24" />
-            <SkeletonBlock className="h-9 rounded-lg" />
+            <TraceSkeletonLine className="w-24" />
+            <TraceSkeletonBlock className="h-9 rounded-lg" />
           </div>
         ))}
       </div>
@@ -683,19 +688,7 @@ function ObservabilitySkeletonContent() {
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <ObservabilityFilterSkeleton />
         <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card">
-          <div className="shrink-0 border-b border-border px-3 py-2">
-            <div className="flex min-h-8 flex-wrap items-center justify-between gap-2">
-              <div className="flex min-w-0 items-center gap-2">
-                <SkeletonBlock className="size-8 rounded-md md:hidden" />
-                <SkeletonLine className="h-4 w-32" />
-                <SkeletonBlock className="h-6 w-16 rounded-full" />
-              </div>
-              <div className="flex shrink-0 gap-2">
-                <SkeletonBlock className="h-8 w-24 rounded-md" />
-                <SkeletonBlock className="h-8 w-8 rounded-md" />
-              </div>
-            </div>
-          </div>
+          <TraceListHeaderSkeleton />
           <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
             <TraceListSkeletonRows allWorkspacesSelected={false} />
           </div>

@@ -138,6 +138,39 @@ async function click(element: HTMLElement) {
   await settle();
 }
 
+test("the first painted frame shows loading rows, not the empty state", async () => {
+  // A layout effect after the page runs before paint and before the page's
+  // own effects start the first request: what it sees is what a phone shows
+  // on the first frame of opening Observe.
+  let firstFrame = "";
+  let firstFrameSkeletons = 0;
+  function FirstFrameProbe() {
+    React.useLayoutEffect(() => {
+      firstFrame = document.body.textContent ?? "";
+      firstFrameSkeletons = document.querySelectorAll(
+        '[data-slot="skeleton"]',
+      ).length;
+    }, []);
+    return null;
+  }
+  const container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () =>
+    root?.render(
+      <>
+        <ObservabilityPage />
+        <FirstFrameProbe />
+      </>,
+    ),
+  );
+
+  expect(firstFrame).not.toContain("table.emptyNoTraces");
+  expect(firstFrameSkeletons).toBeGreaterThan(0);
+  await settle();
+  expect(shownTraces()).toEqual(["trace-a"]);
+});
+
 test("Next and Previous replace the list one page at a time", async () => {
   const container = document.createElement("div");
   document.body.append(container);
