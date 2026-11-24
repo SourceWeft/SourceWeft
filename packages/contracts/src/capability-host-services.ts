@@ -64,6 +64,12 @@ export type CreateConnectorAdapters = (input: {
   readonly env: CapabilityHostEnvironment;
   /** Absent on hosts that do not provide a public-internet-only fetch. */
   readonly publicFetch?: () => ConnectorPublicFetchScope;
+  /**
+   * Absent on hosts that do not provide a credentialed fetch. The scope reaches
+   * public HTTPS plus the deployment's allowed private origins, and refuses
+   * every cross-origin redirect so a stored credential stays on its origin.
+   */
+  readonly credentialedFetch?: () => ConnectorPublicFetchScope;
   readonly logger?: {
     warn?(message: string, meta?: Record<string, unknown>): void;
   };

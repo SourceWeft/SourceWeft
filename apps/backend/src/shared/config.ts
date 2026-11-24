@@ -823,6 +823,12 @@ export const config = {
     "LLM_ALLOWED_INTERNAL_ORIGINS",
     process.env.LLM_ALLOWED_INTERNAL_ORIGINS,
   ),
+  // Private WebDAV servers a connector may reach with a stored credential.
+  // Separate from the MCP and LLM lists so listing one never widens another.
+  webdavAllowedInternalOrigins: parseAllowedInternalOrigins(
+    "WEBDAV_ALLOWED_INTERNAL_ORIGINS",
+    process.env.WEBDAV_ALLOWED_INTERNAL_ORIGINS,
+  ),
   mcpOAuth: {
     // Callback our backend exposes for the MCP OAuth authorization-code flow. It
     // must be registered with any confidential (non-DCR) provider's OAuth app;

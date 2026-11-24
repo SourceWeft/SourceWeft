@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, test, vi } from "vitest";
 
 // Configuration cases supply their own env; reloading config must not re-read
@@ -27,6 +28,7 @@ beforeEach(() => {
 });
 const originalMcpOrigins = process.env.MCP_ALLOWED_INTERNAL_ORIGINS;
 const originalLlmOrigins = process.env.LLM_ALLOWED_INTERNAL_ORIGINS;
+const originalWebdavOrigins = process.env.WEBDAV_ALLOWED_INTERNAL_ORIGINS;
 const originalDocumentParseProvider = process.env.DOCUMENT_PARSE_PROVIDER;
 const interpreterEnvNames = [
   "SOURCEWEFT_AGENT_INTERPRETER_ENABLED",
@@ -52,6 +54,9 @@ afterEach(() => {
   if (originalDocumentParseProvider === undefined)
     delete process.env.DOCUMENT_PARSE_PROVIDER;
   else process.env.DOCUMENT_PARSE_PROVIDER = originalDocumentParseProvider;
+  if (originalWebdavOrigins === undefined)
+    delete process.env.WEBDAV_ALLOWED_INTERNAL_ORIGINS;
+  else process.env.WEBDAV_ALLOWED_INTERNAL_ORIGINS = originalWebdavOrigins;
   if (originalLlmOrigins === undefined)
     delete process.env.LLM_ALLOWED_INTERNAL_ORIGINS;
   else process.env.LLM_ALLOWED_INTERNAL_ORIGINS = originalLlmOrigins;
@@ -137,6 +142,57 @@ test("LLM origins default empty and remain separate from MCP permissions", async
   process.env.LLM_ALLOWED_INTERNAL_ORIGINS = '["http://model-service:8000/v1"]';
   vi.resetModules();
   await assert.rejects(import("./config"), /LLM_ALLOWED_INTERNAL_ORIGINS/);
+});
+
+test("WebDAV internal origins default empty, parse strictly and stay separate from MCP and LLM", async () => {
+  delete process.env.WEBDAV_ALLOWED_INTERNAL_ORIGINS;
+  process.env.MCP_ALLOWED_INTERNAL_ORIGINS = '["http://mcp.internal:8080"]';
+  vi.resetModules();
+  assert.deepEqual(
+    (await import("./config")).config.webdavAllowedInternalOrigins,
+    [],
+  );
+  process.env.WEBDAV_ALLOWED_INTERNAL_ORIGINS =
+    '["http://nas.internal:5005","https://dav.internal"]';
+  vi.resetModules();
+  const { config } = await import("./config");
+  assert.deepEqual(config.webdavAllowedInternalOrigins, [
+    "http://nas.internal:5005",
+    "https://dav.internal",
+  ]);
+  assert.deepEqual(config.mcpAllowedInternalOrigins, [
+    "http://mcp.internal:8080",
+  ]);
+  process.env.WEBDAV_ALLOWED_INTERNAL_ORIGINS = '["http://nas.internal/dav"]';
+  vi.resetModules();
+  await assert.rejects(import("./config"), /WEBDAV_ALLOWED_INTERNAL_ORIGINS/);
+  process.env.WEBDAV_ALLOWED_INTERNAL_ORIGINS = "not json";
+  vi.resetModules();
+  await assert.rejects(import("./config"), /WEBDAV_ALLOWED_INTERNAL_ORIGINS/);
+});
+
+test("Docker and backend examples agree on the WebDAV internal origins default", () => {
+  const backend = readFileSync(
+    new URL("../../.env.example", import.meta.url),
+    "utf8",
+  );
+  const docker = readFileSync(
+    new URL("../../../../docker/.env.example", import.meta.url),
+    "utf8",
+  );
+  const compose = readFileSync(
+    new URL("../../../../docker/docker-compose.yml", import.meta.url),
+    "utf8",
+  );
+  const line = /^WEBDAV_ALLOWED_INTERNAL_ORIGINS=\[\]$/m;
+  assert.match(backend, line, "apps/backend/.env.example");
+  assert.match(docker, line, "docker/.env.example");
+  assert.ok(
+    compose.includes(
+      'WEBDAV_ALLOWED_INTERNAL_ORIGINS: "${WEBDAV_ALLOWED_INTERNAL_ORIGINS:-[]}"',
+    ),
+    "docker-compose.yml",
+  );
 });
 
 test("agent interpreter is disabled by default with strict limits", async () => {
