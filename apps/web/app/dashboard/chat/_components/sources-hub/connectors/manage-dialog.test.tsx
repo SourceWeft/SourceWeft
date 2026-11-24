@@ -27,6 +27,7 @@ function baseProps(
 ) {
   const handlers = {
     onCancelConnector: vi.fn(),
+    onCheckCredential: vi.fn(),
     onCheckFeed: vi.fn(),
     onConnectConnector: vi.fn(),
     onCopyWebhook: vi.fn(),
@@ -34,6 +35,7 @@ function baseProps(
     onDisconnectConnector: vi.fn(),
     onOpenChange: vi.fn(),
     onOpenSettings: vi.fn(),
+    onSubmitCredential: vi.fn(),
     onSubmitFeed: vi.fn(),
     onSyncConnector: vi.fn(),
     onToggleConnectorStatus: vi.fn(),

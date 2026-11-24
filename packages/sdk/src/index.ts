@@ -37,6 +37,8 @@ export type {
   CapabilityToolOption,
   ListCapabilityCatalogResponse,
   ConnectorActivityItem,
+  ConnectorCredentialStatus,
+  RotateConnectorCredentialRequest,
   ConnectorSelectionBrowseResult,
   ConnectorSelectionDescribeItem,
   ConnectorSelectionDescribeResult,

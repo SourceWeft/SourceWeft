@@ -45,8 +45,21 @@ import type {
   ConnectorReadinessState,
   ConnectorWebhookConfig,
   ConnectorWebhookEventItem,
+  CredentialCheckResult,
   FeedCheckResult,
 } from "./types";
+
+/** A catalog type whose add flow is a username/app-password credential
+ * (WebDAV). Both the add card and the reconnect path branch on this. */
+function isCredentialConnectorType(connectorType: string): boolean {
+  return (
+    connectorCatalog.find((item) => item.id === connectorType)?.addMode ===
+    "credential"
+  );
+}
+
+/** The one credential connector type the web knows how to add and rotate. */
+const WEBDAV_CONNECTOR_TYPE = "webdav";
 
 const CONNECTOR_OAUTH_URL_PARAMS = [
   "connector_oauth",
@@ -324,6 +337,9 @@ export function useConnectors(input: {
     useState<ConnectorItem | null>(null);
   const [disconnectConnectorHardDelete, setDisconnectConnectorHardDelete] =
     useState(false);
+  // The credential connector whose rotate ("reconnect") dialog is open, or null.
+  const [rotateCredentialConnector, setRotateCredentialConnector] =
+    useState<ConnectorItem | null>(null);
   const [connectorWebhookEventsById, setConnectorWebhookEventsById] = useState<
     Record<string, ConnectorWebhookEventItem[]>
   >({});
@@ -1147,6 +1163,13 @@ export function useConnectors(input: {
 
   const handleReconnectConnector = useCallback(
     (connector: ConnectorItem) => {
+      // A credential connector (WebDAV) has no OAuth flow: reconnecting means
+      // replacing the stored username and app password, so open the rotate
+      // dialog instead of starting an authorization.
+      if (isCredentialConnectorType(connector.raw.connectorType)) {
+        setRotateCredentialConnector(connector);
+        return;
+      }
       const item = connectorCatalog.find(
         (candidate) => candidate.id === connector.raw.connectorType,
       );
@@ -1452,6 +1475,106 @@ export function useConnectors(input: {
     [displayLocale, handleSyncConnector, refreshConnectors, workspaceId, t],
   );
 
+  // Pre-create readiness check for a WebDAV endpoint and credential. Runs the
+  // adapter's check against the whole-endpoint root and stores nothing; the
+  // secret travels in the request body only and is never cached here.
+  const handleCheckCredential = useCallback(
+    async (input: {
+      endpoint: string;
+      username: string;
+      secret: string;
+    }): Promise<CredentialCheckResult> => {
+      if (!workspaceId) {
+        toast.error(t("toasts.connectors.noWorkspace"));
+        return { ready: false, reason: "no_workspace", message: "" };
+      }
+      const result = await connectorsClient.checkConfig(workspaceId, {
+        connectorType: WEBDAV_CONNECTOR_TYPE,
+        configJson: { endpoint: input.endpoint, roots: ["/"] },
+        credential: { username: input.username, secret: input.secret },
+      });
+      return {
+        ready: result.ready,
+        reason: result.reason ?? "",
+        message: result.message ?? "",
+      };
+    },
+    [workspaceId, t],
+  );
+
+  // Rejects on any create failure (duplicate, credential not allowed, invalid
+  // endpoint) so the add dialog stays open and shows the reason; a failed
+  // first-sync start does not reject because the connector exists by then.
+  const handleAddCredential = useCallback(
+    async (input: {
+      name: string;
+      endpoint: string;
+      username: string;
+      secret: string;
+      roots: string[];
+    }) => {
+      if (!workspaceId) {
+        const message = t("toasts.connectors.noWorkspace");
+        toast.error(message);
+        throw new Error(message);
+      }
+      const created = await connectorsClient.create(workspaceId, {
+        connectorType: WEBDAV_CONNECTOR_TYPE,
+        name: input.name,
+        configJson: { endpoint: input.endpoint, roots: input.roots },
+        credential: { username: input.username, secret: input.secret },
+        periodicIndexingEnabled: true,
+        indexingFrequencyMinutes: 360,
+      });
+      trackConnectorConnected({ connectorType: WEBDAV_CONNECTOR_TYPE });
+      await refreshConnectors();
+      toast.success(
+        t("toasts.connectors.connectedFallback", {
+          name: created.connector.name,
+        }),
+      );
+      await handleSyncConnector(
+        mapConnectorToUi(created.connector, t, displayLocale),
+      );
+    },
+    [displayLocale, handleSyncConnector, refreshConnectors, workspaceId, t],
+  );
+
+  // Replace a credential connector's stored username and app password in place
+  // (the reconnect path). Rejects on failure so the rotate dialog keeps the
+  // field and shows the reason; the secret is held only in that dialog.
+  const handleRotateCredential = useCallback(
+    async (
+      connector: ConnectorItem,
+      input: { username: string; secret: string },
+    ) => {
+      if (!workspaceId) {
+        const message = t("toasts.connectors.noWorkspace");
+        toast.error(message);
+        throw new Error(message);
+      }
+      await connectorsClient.rotateCredential(workspaceId, connector.id, {
+        username: input.username,
+        secret: input.secret,
+      });
+      setRotateCredentialConnector(null);
+      await refreshConnectors();
+      if (connectorSettingsConnectorId === connector.id) {
+        await refreshConnectorSettingsActivity(connector.id);
+      }
+      toast.success(
+        t("toasts.connectors.reconnected", { name: connector.name }),
+      );
+    },
+    [
+      connectorSettingsConnectorId,
+      refreshConnectorSettingsActivity,
+      refreshConnectors,
+      workspaceId,
+      t,
+    ],
+  );
+
   const handleToggleConnectorStatus = useCallback(
     async (connector: ConnectorItem) => {
       if (!workspaceId) return;
@@ -1614,6 +1737,11 @@ export function useConnectors(input: {
     handleSyncConnector,
     handleCheckFeed,
     handleAddFeed,
+    handleCheckCredential,
+    handleAddCredential,
+    rotateCredentialConnector,
+    setRotateCredentialConnector,
+    handleRotateCredential,
     handleToggleConnectorStatus,
     handleSaveConnectorSettings,
     handleConfirmDisconnectConnector,

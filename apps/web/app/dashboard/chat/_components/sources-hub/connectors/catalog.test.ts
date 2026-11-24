@@ -529,3 +529,87 @@ describe("rss catalog entry", () => {
     });
   }
 });
+
+describe("webdav catalog entry", () => {
+  const webdav = connectorCatalog.find((item) => item.id === "webdav")!;
+
+  test("is hidden until the backend registers the type", () => {
+    expect(
+      connectorCatalogForAvailableTypes(["notion", "rss"]).map((i) => i.id),
+    ).not.toContain("webdav");
+    expect(
+      connectorCatalogForAvailableTypes(["notion", "webdav"]).map((i) => i.id),
+    ).toContain("webdav");
+  });
+
+  test("is the add-only credential entry", () => {
+    expect(webdav).toMatchObject({
+      id: "webdav",
+      name: "WebDAV",
+      category: "Knowledge & Docs",
+      requiresBackendRegistration: true,
+      isIndexable: true,
+      supportsActions: false,
+      supportsPeriodicSync: true,
+      supportsWebhook: false,
+      addMode: "credential",
+    });
+    expect(webdav.icon).toBeDefined();
+    expect(webdav.postOAuthMode).toBeUndefined();
+  });
+
+  test("never shows as connected, however many connectors exist", () => {
+    const connectors = ["w1", "w2"].map((id) => ({
+      id,
+      name: `WebDAV ${id}`,
+      status: "active" as const,
+      meta: "",
+      raw: {
+        id,
+        connectorType: "webdav",
+        status: "active",
+        configJson: { endpoint: "https://dav.example.com", roots: ["/"] },
+        lastError: null,
+        lastIndexedAt: null,
+      } as unknown as SourceConnector,
+    }));
+    expect(getCatalogConnector(webdav, connectors)).toBeNull();
+  });
+
+  const WEBDAV_READINESS_REASONS = [
+    "reauth_required",
+    "blocked_endpoint",
+    "unreachable",
+    "config_invalid",
+    "path_forbidden",
+    "path_not_found",
+  ];
+
+  for (const catalogName of ["en", "zh-CN"] as const) {
+    const messages = (catalogName === "en" ? en : zhCN) as unknown as {
+      dashboardSourcesHub: {
+        connectors: {
+          webdav: {
+            dialog: Record<string, string>;
+            readiness: Record<string, string>;
+            rotate: Record<string, string>;
+            endpointLabel: string;
+            passwordLabel: string;
+          };
+        };
+      };
+    };
+
+    test(`${catalogName} has the WebDAV copy keys`, () => {
+      const { webdav: copy } = messages.dashboardSourcesHub.connectors;
+      expect(copy.endpointLabel?.trim()).toBeTruthy();
+      expect(copy.passwordLabel?.trim()).toBeTruthy();
+      expect(copy.dialog.check?.trim()).toBeTruthy();
+      expect(copy.dialog.add?.trim()).toBeTruthy();
+      expect(copy.rotate.save?.trim()).toBeTruthy();
+      for (const reason of WEBDAV_READINESS_REASONS) {
+        expect(copy.readiness[reason]?.trim(), reason).toBeTruthy();
+      }
+    });
+  }
+});

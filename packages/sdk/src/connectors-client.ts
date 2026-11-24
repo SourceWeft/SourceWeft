@@ -28,6 +28,8 @@ import type {
   ListConnectorSyncRunsResponse,
   ListWorkspaceConnectorSyncRunsRequest,
   ListWorkspaceConnectorSyncRunsResponse,
+  ConnectorCredentialStatus,
+  RotateConnectorCredentialRequest,
   StartConnectorOAuthRequest,
   StartConnectorOAuthResponse,
   TriggerConnectorSyncResponse,
@@ -189,6 +191,23 @@ export class ConnectorsClient {
   ) {
     return this.http.patch<UpdateConnectorResponse>(
       `/v1/workspaces/${encode(workspaceId)}/connectors/${encode(connectorId)}`,
+      input,
+    );
+  }
+
+  /**
+   * Replace a credential connector's stored username and app password in place
+   * (the "reconnect" path for `credential`-kind connectors). The secret travels
+   * in the request body only; the response exposes just the non-secret
+   * {@link ConnectorCredentialStatus}.
+   */
+  rotateCredential(
+    workspaceId: string,
+    connectorId: string,
+    input: RotateConnectorCredentialRequest,
+  ) {
+    return this.http.put<ConnectorCredentialStatus>(
+      `/v1/workspaces/${encode(workspaceId)}/connectors/${encode(connectorId)}/credential`,
       input,
     );
   }
