@@ -112,6 +112,27 @@ test("json parser extracts nested string content and chunks", async () => {
   assert.equal(result.content.includes("World"), true);
   assert.equal(result.chunks.length > 0, true);
 });
+test("registered JSON parser indexes keys, numbers, booleans and null", async () => {
+  const parser = getSourceParser("application/json");
+  assert.equal(parser?.id, "json");
+  const content = Buffer.from(
+    JSON.stringify({ "Home Page": 12, About: 3, enabled: true, owner: null }),
+  );
+  const result = await parser!.parse({
+    fileName: "pages.json",
+    mimeType: "application/json",
+    fileSize: content.byteLength,
+    content,
+    config: {
+      chunkSize: 512,
+      parserVersion: "v1",
+    },
+  });
+  assert.equal(
+    result.content,
+    '["Home Page"]: 12\nAbout: 3\nenabled: true\nowner: null',
+  );
+});
 test("image document parse uses vision markdown when vision succeeds", async () => {
   const restoreVisionParser =
     documentParseTestExports.setImageVisionParserForTest(async (input) => ({

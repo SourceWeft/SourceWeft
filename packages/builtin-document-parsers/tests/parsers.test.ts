@@ -57,21 +57,207 @@ test("csv parser converts rows into content and chunks", async () => {
   assert.equal(result.chunks.length > 0, true);
 });
 
-test("json parser extracts nested string content and chunks", async () => {
-  const result = await jsonSourceParser.parse({
-    fileName: "data.json",
-    mimeType: "application/json",
-    fileSize: 43,
-    content: Buffer.from(
-      JSON.stringify({ title: "Hello", body: { text: "World" } }),
-    ),
+function parseJson(fileName: string, mimeType: string, text: string) {
+  const content = Buffer.from(text);
+  return jsonSourceParser.parse({
+    fileName,
+    mimeType,
+    fileSize: content.byteLength,
+    content,
     config: { chunkSize: 512, parserVersion: "v1" },
   });
+}
+
+test("json parser extracts nested string content and chunks", async () => {
+  const result = await parseJson(
+    "data.json",
+    "application/json",
+    JSON.stringify({ title: "Hello", body: { text: "World" } }),
+  );
 
   assert.equal(result.metadata.mimeType, "application/json");
-  assert.equal(result.content.includes("Hello"), true);
-  assert.equal(result.content.includes("World"), true);
+  assert.equal(result.content, "title: Hello\nbody.text: World");
+  assert.equal(result.pages.length, 1);
   assert.equal(result.chunks.length > 0, true);
+});
+
+test("json parser keeps keys, numbers, booleans and null with their paths", async () => {
+  // The shape of the real file that lost everything but its names: page
+  // names mapped to numbers.
+  const result = await parseJson(
+    "pages.json",
+    "application/json",
+    JSON.stringify(
+      {
+        "Home Page": 12,
+        About: 3,
+        pricing: 0,
+        ratio: 1.5,
+        enabled: true,
+        archived: false,
+        owner: null,
+      },
+      null,
+      2,
+    ),
+  );
+
+  assert.equal(
+    result.content,
+    [
+      '["Home Page"]: 12',
+      "About: 3",
+      "pricing: 0",
+      "ratio: 1.5",
+      "enabled: true",
+      "archived: false",
+      "owner: null",
+    ].join("\n"),
+  );
+  assert.equal(
+    result.chunks.some((chunk) => chunk.text.includes("About: 3")),
+    true,
+  );
+});
+
+test("json parser indexes a package manifest's keys and versions", async () => {
+  const result = await parseJson(
+    "package.json",
+    "application/json",
+    JSON.stringify({
+      name: "demo",
+      private: true,
+      engines: { node: ">=22" },
+      dependencies: { react: "^19.0.0", "@scope/pkg": "1.2.3" },
+      files: ["dist", "README.md"],
+      keywords: [],
+      config: {},
+    }),
+  );
+
+  assert.deepEqual(result.content.split("\n"), [
+    "name: demo",
+    "private: true",
+    "engines.node: >=22",
+    "dependencies.react: ^19.0.0",
+    "dependencies.@scope/pkg: 1.2.3",
+    "files[0]: dist",
+    "files[1]: README.md",
+    "keywords: []",
+    "config: {}",
+  ]);
+});
+
+test("json parser walks arrays of objects and quotes keys that need it", async () => {
+  const result = await parseJson(
+    "response.json",
+    "application/json",
+    JSON.stringify([
+      { id: 1, "a.b": "dotted", "": "empty", tags: [["x"]] },
+      { id: 2, nested: { deep: { value: -4 } } },
+    ]),
+  );
+
+  assert.deepEqual(result.content.split("\n"), [
+    "[0].id: 1",
+    '[0]["a.b"]: dotted',
+    '[0][""]: empty',
+    "[0].tags[0][0]: x",
+    "[1].id: 2",
+    "[1].nested.deep.value: -4",
+  ]);
+});
+
+test("json parser keeps numbers exactly as written in the file", async () => {
+  const result = await parseJson(
+    "ids.json",
+    "application/json",
+    '{"id": 12345678901234567890, "price": 1.50, "big": 1e3}',
+  );
+
+  assert.deepEqual(result.content.split("\n"), [
+    "id: 12345678901234567890",
+    "price: 1.50",
+    "big: 1e3",
+  ]);
+});
+
+test("json parser indexes a top-level scalar and accepts a UTF-8 BOM", async () => {
+  const scalar = await parseJson("n.json", "application/json", "42");
+  assert.equal(scalar.content, "42");
+
+  const withBom = await parseJson(
+    "bom.json",
+    "application/json",
+    '\uFEFF{"key": "value"}',
+  );
+  assert.equal(withBom.content, "key: value");
+});
+
+test("json parser indexes nested values and rejects pathological nesting", async () => {
+  const nested = (depth: number) =>
+    `${'{"a":'.repeat(depth)}1${"}".repeat(depth)}`;
+
+  const deep = await parseJson("deep.json", "application/json", nested(1000));
+  assert.equal(deep.content, `${Array(1000).fill("a").join(".")}: 1`);
+
+  await assert.rejects(
+    () => parseJson("deeper.json", "application/json", nested(100_000)),
+    (error: unknown) => {
+      assert.ok(error instanceof ParserContentError);
+      assert.equal(error.statusCode, 400);
+      assert.equal(error.code, "JSON_TOO_DEEP");
+      return true;
+    },
+  );
+});
+
+for (const mimeType of ["application/jsonl", "application/x-ndjson"]) {
+  test(`json parser indexes ${mimeType} as one page per line`, async () => {
+    const result = await parseJson(
+      "events.jsonl",
+      mimeType,
+      '{"event":"signup","count":3}\n\n{"event":"login","ok":true}\r\n',
+    );
+
+    assert.equal(result.metadata.pageCount, 2);
+    assert.deepEqual(result.pages, [
+      { pageNumber: 1, content: "event: signup\ncount: 3" },
+      { pageNumber: 2, content: "event: login\nok: true" },
+    ]);
+    assert.equal(
+      result.content,
+      "event: signup\ncount: 3\n\nevent: login\nok: true",
+    );
+  });
+}
+
+test("json parser rejects invalid JSON with a content error that names no file content", async () => {
+  await assert.rejects(
+    () => parseJson("broken.json", "application/json", '{"secret": tru'),
+    (error: unknown) => {
+      assert.ok(error instanceof ParserContentError);
+      assert.equal(error.statusCode, 400);
+      assert.equal(error.code, "JSON_INVALID");
+      assert.equal(error.message, "File 'broken.json' is not valid JSON");
+      return true;
+    },
+  );
+
+  await assert.rejects(
+    () =>
+      parseJson(
+        "broken.jsonl",
+        "application/jsonl",
+        '{"ok":1}\n{"secret": tru\n',
+      ),
+    (error: unknown) => {
+      assert.ok(error instanceof ParserContentError);
+      assert.equal(error.code, "JSON_INVALID");
+      assert.equal(error.message, "Line 2 of 'broken.jsonl' is not valid JSON");
+      return true;
+    },
+  );
 });
 
 test("pdf2markdown extraction retains provider page totals even when blocks contain no text", () => {
