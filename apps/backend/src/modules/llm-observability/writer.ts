@@ -533,6 +533,10 @@ function generationMeasurementColumns(
           ...(observation.identity.providerRequestIds
             ? { providerRequestIds: observation.identity.providerRequestIds }
             : {}),
+          // The host an aggregator such as OpenRouter routed the call to.
+          ...(observation.identity.upstreamProvider
+            ? { upstreamProvider: observation.identity.upstreamProvider }
+            : {}),
         })
       : null,
   };

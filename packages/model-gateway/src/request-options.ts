@@ -7,20 +7,26 @@ import type {
 /** Values are resolved once for each target, including an explicit zero retry budget. */
 export function resolveRequestDefaults(
   config: Pick<ResolvedModelGatewayConfig, "timeoutMs" | "maxRetries">,
-  target: Pick<ResolvedRequestTarget, "timeoutMs" | "maxRetries">,
+  target: Pick<ResolvedRequestTarget, "timeoutMs" | "maxRetries"> & {
+    routeDecision?: Pick<ResolvedRequestTarget["routeDecision"], "attempt">;
+  },
   options?: RequestOptions,
 ): RequestOptions & { timeoutMs: number; maxRetries: number } {
+  const attempt = target.routeDecision?.attempt;
   return {
     ...options,
     timeoutMs: options?.timeoutMs ?? target.timeoutMs ?? config.timeoutMs,
     maxRetries: options?.maxRetries ?? target.maxRetries ?? config.maxRetries,
+    // Whether another target remains in this request's chain: a failure it
+    // can serve goes there instead of into a same-provider retry.
+    ...(attempt ? { failoverAvailable: attempt.index < attempt.of } : {}),
   };
 }
 
 /** A fresh timeout belongs to one target attempt, including its SDK retries. */
 export function resolveRequestOptions(
   config: Pick<ResolvedModelGatewayConfig, "timeoutMs" | "maxRetries">,
-  target: Pick<ResolvedRequestTarget, "timeoutMs" | "maxRetries">,
+  target: Parameters<typeof resolveRequestDefaults>[1],
   options?: RequestOptions,
 ) {
   const resolved = resolveRequestDefaults(config, target, options);

@@ -379,3 +379,65 @@ test("a call awaiting a provider receipt keeps its pending classification beside
   assert.equal(actual.providerCostStatus, "pending");
   assert.equal(actual.providerRequestId, "request-for-reconciliation");
 });
+
+test("a fallback call's row records its place in the failover chain and the upstream that served it", async () => {
+  const { traceId } = await writer.startTrace({
+    teamId,
+    workspaceId,
+    name: "Fallback chat",
+    strict: true,
+  });
+  const attempt = {
+    index: 2,
+    of: 2,
+    primaryProvider: "deepinfra",
+    failoverFrom: [
+      {
+        provider: "deepinfra",
+        providerModel: "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+        errorCode: "RATE_LIMIT",
+      },
+    ],
+  };
+  const { spanId } = await writer.startGeneration({
+    traceId,
+    teamId,
+    workspaceId,
+    operation: "chat.complete",
+    modelAlias: "chat-default",
+    provider: "openrouter",
+    providerModel: "deepseek/deepseek-v4.1-flash-1017",
+    routeDecision: {
+      alias: "chat-default",
+      mode: "GLOBAL",
+      strategy: "priority",
+      provider: "openrouter",
+      providerKind: "openrouter",
+      attempt,
+    },
+    strict: true,
+  });
+  await writer.endGeneration({
+    traceId,
+    spanId,
+    teamId,
+    workspaceId,
+    strict: true,
+    observation: observation({
+      identity: {
+        modelAlias: "chat-default",
+        provider: "openrouter",
+        requestedProviderModel: "deepseek/deepseek-v4.1-flash-1017",
+        upstreamProvider: "Sail Research",
+      },
+    }),
+  });
+
+  const actual = await row({ traceId, spanId, teamId, workspaceId });
+  assert.deepEqual(actual.routeDecisionJson?.attempt, attempt);
+  assert.equal(
+    (actual.normalizationJson as Record<string, unknown> | null)
+      ?.upstreamProvider,
+    "Sail Research",
+  );
+});
