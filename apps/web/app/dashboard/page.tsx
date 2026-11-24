@@ -521,6 +521,39 @@ function WorkspaceCard({
   );
 }
 
+/**
+ * The workspaces the chat bootstrap loaded for `organizationId`, when they
+ * still match the chat state's live list (same ids and names: nothing was
+ * created, deleted or renamed since). Otherwise null, and the caller asks the
+ * server.
+ */
+function workspacesFromBootstrap(
+  organizationId: string,
+  records: Workspace[],
+  live: Array<{ id: string; name: string }>,
+  activeWorkspaceId: string | null,
+): { active: Workspace | null; items: Workspace[] } | null {
+  if (records.length === 0 || records.length !== live.length) {
+    return null;
+  }
+  const liveNames = new Map(live.map((item) => [item.id, item.name]));
+  const current = records.every(
+    (record) =>
+      record.organizationId === organizationId &&
+      liveNames.get(record.id) === record.name,
+  );
+  if (!current) {
+    return null;
+  }
+  return {
+    active:
+      records.find((record) => record.id === activeWorkspaceId) ??
+      records[0] ??
+      null,
+    items: records,
+  };
+}
+
 export default function DashboardPage() {
   const t = useTranslations("dashboardHome");
   const router = useRouter();
@@ -543,6 +576,11 @@ export default function DashboardPage() {
   // organization arrives after the first bootstrap); those passes must not
   // bring the skeleton back or fetch the list again.
   const requestedOrganizationIdRef = useRef<string | null>(null);
+  const {
+    workspaceId: bootstrapWorkspaceId,
+    workspaceRecords,
+    workspaces: liveWorkspaces,
+  } = dashboardState;
 
   useEffect(() => {
     if (dashboardState.isWorkspaceHydrating) {
@@ -562,13 +600,20 @@ export default function DashboardPage() {
     const organizationId = resolvedOrganizationId;
     const isCurrent = () =>
       requestedOrganizationIdRef.current === organizationId;
+    // The chat bootstrap that just finished already listed these workspaces.
+    const bootstrapped = workspacesFromBootstrap(
+      organizationId,
+      workspaceRecords,
+      liveWorkspaces,
+      bootstrapWorkspaceId,
+    );
 
     async function loadWorkspaces() {
       setLoading(true);
 
       try {
         const workspaceResponse =
-          await ensureDashboardWorkspace(organizationId);
+          bootstrapped ?? (await ensureDashboardWorkspace(organizationId));
 
         const withPreviews = await Promise.all(
           workspaceResponse.items.map(async (workspace: Workspace) => {
@@ -670,7 +715,16 @@ export default function DashboardPage() {
     }
 
     void loadWorkspaces();
-  }, [dashboardState.isWorkspaceHydrating, resolvedOrganizationId, t]);
+    // The bootstrap's lists are inputs only for the first load of an
+    // organization; when they change later, the check above returns early.
+  }, [
+    bootstrapWorkspaceId,
+    dashboardState.isWorkspaceHydrating,
+    liveWorkspaces,
+    resolvedOrganizationId,
+    t,
+    workspaceRecords,
+  ]);
 
   const canCreateWorkspace = Boolean(resolvedOrganizationId);
   const workspaceCollection = workspaces;

@@ -192,3 +192,61 @@ test("a session organization other than the one bootstrapped bootstraps again", 
   expect(getChatBootstrap).toHaveBeenCalledTimes(2);
   expect(shownWorkspace()).toBe("ws-1");
 });
+
+function WorkspaceRecords() {
+  const { workspaceRecords } = useDashboardChatState();
+  return (
+    <output data-testid="workspace-records">
+      {JSON.stringify(workspaceRecords)}
+    </output>
+  );
+}
+
+test("keeps the bootstrap's full workspace records for pages that need them", async () => {
+  const records = WORKSPACES.map((workspace) => ({
+    ...workspace,
+    organizationId: "org-1",
+    slug: workspace.id,
+    createdBy: null,
+    createdAt: "2026-10-01T00:00:00.000Z",
+  }));
+  const respond = getChatBootstrap.getMockImplementation()!;
+  getChatBootstrap.mockImplementation(async (input) => ({
+    ...(await respond(input)),
+    workspaces: records,
+  }));
+  await mount(
+    withIntl(
+      <DashboardChatStateProvider>
+        <WorkspaceRecords />
+      </DashboardChatStateProvider>,
+    ),
+  );
+  await flush(4);
+
+  expect(
+    JSON.parse(
+      document.querySelector('[data-testid="workspace-records"]')
+        ?.textContent ?? "[]",
+    ),
+  ).toEqual(records);
+});
+
+test("a cold load asks for the last team's remembered workspace in its first request", async () => {
+  // The auth session has not said which team is active yet.
+  auth.activeOrg = null;
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ "org-1": "ws-2" }));
+  window.localStorage.setItem("sourceweft.dashboard.last-team.v1", "org-1");
+
+  expect(await loadDashboard()).toBe("ws-2");
+  expect(getChatBootstrap.mock.calls).toEqual([
+    [{ includeModelCatalog: false, workspaceId: "ws-2" }],
+  ]);
+});
+
+test("storing a workspace remembers its team as the last one used", async () => {
+  expect(await loadDashboard()).toBe("ws-1");
+  expect(window.localStorage.getItem("sourceweft.dashboard.last-team.v1")).toBe(
+    "org-1",
+  );
+});

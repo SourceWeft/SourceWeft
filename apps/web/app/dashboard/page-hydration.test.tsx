@@ -10,6 +10,9 @@ import DashboardPage from "./page";
 const chatState = vi.hoisted(() => ({
   organizationId: "org-1" as string | null,
   isWorkspaceHydrating: false,
+  workspaceId: null as string | null,
+  workspaces: [] as Array<{ id: string; name: string }>,
+  workspaceRecords: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock("next/navigation", () => ({
@@ -71,6 +74,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   chatState.organizationId = "org-1";
   chatState.isWorkspaceHydrating = false;
+  chatState.workspaceId = null;
+  chatState.workspaces = [];
+  chatState.workspaceRecords = [];
 });
 afterEach(unmountAll);
 
@@ -150,4 +156,47 @@ test("a response for an organization that is no longer current is dropped", asyn
   // Still org-2's workspace, not org-1's empty list.
   expect(workspaceShown()).toBe(true);
   expect(skeletonShown()).toBe(false);
+});
+
+function bootstrapped(organizationId: string, name = "Research") {
+  const record = {
+    id: `${organizationId}-ws`,
+    organizationId,
+    name,
+    slug: "research",
+    createdBy: null,
+    createdAt: "2026-10-01T00:00:00.000Z",
+  };
+  chatState.workspaceId = record.id;
+  chatState.workspaceRecords = [record];
+  chatState.workspaces = [{ id: record.id, name: record.name }];
+}
+
+test("uses the workspaces the chat bootstrap already loaded", async () => {
+  bootstrapped("org-1");
+  await mountWithIntl(<DashboardPage />);
+  await flush(4);
+
+  expect(loadWorkspaces).not.toHaveBeenCalled();
+  expect(workspaceShown()).toBe(true);
+  expect(skeletonShown()).toBe(false);
+});
+
+test("asks the server when the bootstrap's list is out of date", async () => {
+  bootstrapped("org-1");
+  // Renamed since the bootstrap.
+  chatState.workspaces = [{ id: "org-1-ws", name: "Renamed" }];
+  await mountWithIntl(<DashboardPage />);
+  await flush(4);
+
+  expect(loadWorkspaces).toHaveBeenCalledTimes(1);
+  expect(workspaceShown()).toBe(true);
+});
+
+test("asks the server when the bootstrap's list is for another organization", async () => {
+  bootstrapped("org-2");
+  await mountWithIntl(<DashboardPage />);
+  await flush(4);
+
+  expect(loadWorkspaces).toHaveBeenCalledWith("org-1");
 });

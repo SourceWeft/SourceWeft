@@ -16,6 +16,7 @@ import type {
   DashboardChatBootstrapCacheHints,
   ListThreadModelCatalogResponse,
   ThreadChatPreferences,
+  Workspace,
 } from "@sourceweft/contracts";
 import { authClient } from "../../../lib/auth-client";
 import { trackWorkspaceCreated } from "../../../lib/analytics-events";
@@ -23,7 +24,10 @@ import {
   ensureDashboardWorkspace,
   loadDashboardChatBootstrap,
 } from "../../../lib/dashboard-workspace-bootstrap";
-import { setStoredDashboardWorkspaceId } from "../../../lib/dashboard-workspace-context";
+import {
+  getLastDashboardTeamId,
+  setStoredDashboardWorkspaceId,
+} from "../../../lib/dashboard-workspace-context";
 import { contentClient, workspaceClient } from "../../../lib/sdk";
 import { retryOnceOnServiceUnavailable } from "./dashboard-chat-request-retry";
 import {
@@ -73,6 +77,12 @@ export type DashboardChatState = {
   workspaceId: string | null;
   workspaceName: string;
   workspaces: Array<{ id: string; name: string }>;
+  /**
+   * The full workspace records the last bootstrap loaded for
+   * `organizationId`. Not updated by later changes, so check them against
+   * `workspaces` before use.
+   */
+  workspaceRecords: Workspace[];
   activeChatId: string;
   threadTitle: string;
   sharedChats: ChatItem[];
@@ -240,6 +250,7 @@ export function DashboardChatStateProvider({
   const [workspaces, setWorkspaces] = useState<
     Array<{ id: string; name: string }>
   >([]);
+  const [workspaceRecords, setWorkspaceRecords] = useState<Workspace[]>([]);
 
   const [workTarget, setWorkTarget] = useState<
     import("@sourceweft/contracts").ThreadExecutionTarget | null
@@ -363,6 +374,7 @@ export function DashboardChatStateProvider({
 
       if (!active) {
         setWorkspaces([]);
+        setWorkspaceRecords([]);
         setWorkspaceId(null);
         setWorkspaceName(t("workspaceFallback"));
         setPrivateChats([]);
@@ -378,6 +390,7 @@ export function DashboardChatStateProvider({
       setWorkspaces(
         resolvedItems.map((item) => ({ id: item.id, name: item.name })),
       );
+      setWorkspaceRecords(resolvedItems);
       setWorkspaceId(active.id);
       setWorkspaceName(active.name);
       setStoredDashboardWorkspaceId(targetOrganizationId, active.id);
@@ -457,9 +470,14 @@ export function DashboardChatStateProvider({
     const generation = ++hydrateGenerationRef.current;
     const isCurrent = () => hydrateGenerationRef.current === generation;
     const { activeOrg, orgs } = sessionRef.current;
-    // Without an active organization the server uses the personal one.
+    // The session's organization is often not loaded yet on a cold start;
+    // the team used last in this browser is then the best guess. Without
+    // either, the server uses the personal one.
     const organizationIdHint =
-      activeOrg?.id ?? (orgs ?? []).find(isPersonalOrganization)?.id ?? null;
+      activeOrg?.id ??
+      getLastDashboardTeamId() ??
+      (orgs ?? []).find(isPersonalOrganization)?.id ??
+      null;
     bootstrapTargetRef.current = {
       organizationId: activeOrg?.id ?? null,
       settled: false,
@@ -489,6 +507,7 @@ export function DashboardChatStateProvider({
         setWorkspaceId(null);
         setWorkspaceName(t("workspaceFallback"));
         setWorkspaces([]);
+        setWorkspaceRecords([]);
         setPrivateChats([]);
         setPrivateChatsCursor(null);
         setHasMorePrivateChats(false);
@@ -527,6 +546,7 @@ export function DashboardChatStateProvider({
         setWorkspaces(
           result.workspaces.map((item) => ({ id: item.id, name: item.name })),
         );
+        setWorkspaceRecords(result.workspaces);
         setWorkspaceId(result.activeWorkspace.id);
         setWorkspaceName(result.activeWorkspace.name);
         setStoredDashboardWorkspaceId(
@@ -1447,6 +1467,7 @@ export function DashboardChatStateProvider({
       workspaceId,
       workspaceName,
       workspaces,
+      workspaceRecords,
       activeChatId,
       threadTitle,
       sharedChats,
@@ -1501,6 +1522,7 @@ export function DashboardChatStateProvider({
       workspaceId,
       workspaceName,
       workspaces,
+      workspaceRecords,
       activeChatId,
       threadTitle,
       sharedChats,
