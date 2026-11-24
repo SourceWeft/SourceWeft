@@ -19,6 +19,7 @@ import {
 import { MARKET_MCP_TOOL_SOURCE_OWNER_SUBMITTED } from "@sourceweft/market-contracts";
 import type { MarketMcpProductGroup } from "@sourceweft/market-sdk";
 
+import { fitSeoTitle } from "../../../../lib/seo-title";
 import { buildTranslatedAlternates } from "../../../../lib/i18n/metadata";
 import { mcpOverviewLocale } from "../../../../lib/mcp-ai-overview";
 import {
@@ -219,7 +220,11 @@ export async function generateMetadata({
       getTranslations({ locale: pageLocale, namespace: "mcp.template" }),
     ]);
     const name = result.item.name;
-    const title = t("metaTitle", { name });
+    const title = fitSeoTitle(
+      (shown) => t("metaTitle", { name: shown }),
+      name,
+      result.item.identifier,
+    );
     // A translated page describes itself with its own overview; any other
     // page with an overview is, or canonicalizes to, the English one and
     // keeps its template. Without an AI overview (#367 W4), the description
