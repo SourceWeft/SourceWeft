@@ -24,7 +24,10 @@ import {
   ensureDashboardWorkspace,
   loadDashboardChatBootstrap,
 } from "../../../lib/dashboard-workspace-bootstrap";
-import { setStoredDashboardWorkspaceId } from "../../../lib/dashboard-workspace-context";
+import {
+  getLastDashboardTeamId,
+  setStoredDashboardWorkspaceId,
+} from "../../../lib/dashboard-workspace-context";
 import { contentClient, workspaceClient } from "../../../lib/sdk";
 import { retryOnceOnServiceUnavailable } from "./dashboard-chat-request-retry";
 import {
@@ -467,9 +470,14 @@ export function DashboardChatStateProvider({
     const generation = ++hydrateGenerationRef.current;
     const isCurrent = () => hydrateGenerationRef.current === generation;
     const { activeOrg, orgs } = sessionRef.current;
-    // Without an active organization the server uses the personal one.
+    // The session's organization is often not loaded yet on a cold start;
+    // the team used last in this browser is then the best guess. Without
+    // either, the server uses the personal one.
     const organizationIdHint =
-      activeOrg?.id ?? (orgs ?? []).find(isPersonalOrganization)?.id ?? null;
+      activeOrg?.id ??
+      getLastDashboardTeamId() ??
+      (orgs ?? []).find(isPersonalOrganization)?.id ??
+      null;
     bootstrapTargetRef.current = {
       organizationId: activeOrg?.id ?? null,
       settled: false,

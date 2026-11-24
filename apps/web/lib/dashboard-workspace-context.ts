@@ -1,4 +1,8 @@
 const STORAGE_KEY = "sourceweft.dashboard.workspace-context.v1";
+// The team whose workspace was stored last. A cold load reads it before the
+// auth session has said which team is active, so its first bootstrap can
+// already ask for the remembered workspace.
+const LAST_TEAM_KEY = "sourceweft.dashboard.last-team.v1";
 
 type StoredWorkspaceContext = Record<string, string>;
 
@@ -61,4 +65,20 @@ export function setStoredDashboardWorkspaceId(
     ...readContext(),
     [teamId]: workspaceId,
   });
+  try {
+    window.localStorage.setItem(LAST_TEAM_KEY, teamId);
+  } catch {
+    // Storage can be unavailable in private browsing or restricted contexts.
+  }
+}
+
+export function getLastDashboardTeamId(): string | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  try {
+    return window.localStorage.getItem(LAST_TEAM_KEY) || null;
+  } catch {
+    return null;
+  }
 }

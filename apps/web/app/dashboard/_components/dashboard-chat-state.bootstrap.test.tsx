@@ -231,3 +231,22 @@ test("keeps the bootstrap's full workspace records for pages that need them", as
     ),
   ).toEqual(records);
 });
+
+test("a cold load asks for the last team's remembered workspace in its first request", async () => {
+  // The auth session has not said which team is active yet.
+  auth.activeOrg = null;
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ "org-1": "ws-2" }));
+  window.localStorage.setItem("sourceweft.dashboard.last-team.v1", "org-1");
+
+  expect(await loadDashboard()).toBe("ws-2");
+  expect(getChatBootstrap.mock.calls).toEqual([
+    [{ includeModelCatalog: false, workspaceId: "ws-2" }],
+  ]);
+});
+
+test("storing a workspace remembers its team as the last one used", async () => {
+  expect(await loadDashboard()).toBe("ws-1");
+  expect(window.localStorage.getItem("sourceweft.dashboard.last-team.v1")).toBe(
+    "org-1",
+  );
+});
