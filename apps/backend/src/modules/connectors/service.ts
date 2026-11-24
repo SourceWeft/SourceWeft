@@ -165,6 +165,16 @@ export class ConnectorService {
     });
     const manifest = this.registry.getManifest(input.connectorType);
     const authKind = manifest.auth?.kind;
+    // A credential belongs only to a credential connector; reject (never ignore)
+    // one sent for any other kind, before the unsupported-check branch so an
+    // oauth2 request carrying a credential is rejected for the right reason.
+    if (authKind !== "credential" && input.credential != null) {
+      throw new ConnectorError(
+        400,
+        "CONNECTOR_CREDENTIAL_NOT_ALLOWED",
+        "This connector does not accept a username and secret",
+      );
+    }
     if (authKind !== "none" && authKind !== "credential") {
       throw new ConnectorError(
         400,
@@ -248,6 +258,15 @@ export class ConnectorService {
         400,
         "CONNECTOR_OAUTH_ACCOUNT_NOT_ALLOWED",
         "This connector does not use an OAuth account",
+      );
+    }
+    // A credential belongs only to a credential connector; a none or oauth2
+    // request that carries one is a client error, not a field to ignore.
+    if (!isCredential && input.credential != null) {
+      throw new ConnectorError(
+        400,
+        "CONNECTOR_CREDENTIAL_NOT_ALLOWED",
+        "This connector does not accept a username and secret",
       );
     }
     if (isCredential && !input.credential) {

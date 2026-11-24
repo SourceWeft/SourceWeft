@@ -114,6 +114,24 @@ function noneAdapter(): ConnectorAdapter {
   } as unknown as ConnectorAdapter;
 }
 
+function oauth2Adapter(): ConnectorAdapter {
+  const m = manifest("oauth-test", {
+    kind: "oauth2",
+    authorizationUrl: "https://example.com/auth",
+    tokenUrl: "https://example.com/token",
+    scopes: [],
+  });
+  return {
+    getManifest: () => m,
+    exchangeOAuthCode: vi.fn(),
+    refreshOAuthToken: vi.fn(),
+    checkSyncReadiness,
+    async *discover() {},
+    extract: async ({ item }: { item: unknown }) => ({ item }),
+    executeAction: async () => ({ result: {} }),
+  } as unknown as ConnectorAdapter;
+}
+
 function service(...adapters: ConnectorAdapter[]) {
   return new ConnectorService(
     new ConnectorRegistry(adapters.length ? adapters : [credentialAdapter()]),
@@ -397,6 +415,110 @@ describe("rotateConnectorCredential", () => {
     const error = await rejection(rotate(service(noneAdapter())));
     assert.equal(error.statusCode, 400);
     assert.equal(error.code, "CONNECTOR_CREDENTIAL_UNSUPPORTED");
+  });
+});
+
+describe("a credential sent to a non-credential connector is rejected", () => {
+  const credential = { username: USERNAME, secret: SECRET };
+
+  test("create rejects a credential for a none connector and persists nothing", async () => {
+    const error = await rejection(
+      service(noneAdapter()).createConnector({
+        workspaceId: "workspace",
+        userId: "user",
+        connectorType: "public-feed",
+        name: "Feed",
+        configJson: CONFIG,
+        credential,
+      }),
+    );
+    assert.equal(error.statusCode, 400);
+    assert.equal(error.code, "CONNECTOR_CREDENTIAL_NOT_ALLOWED");
+    assert.equal(mocks.createSourceConnectorRecord.mock.calls.length, 0);
+    assert.equal(mocks.createCredentialConnectorRecord.mock.calls.length, 0);
+    assert.equal(mocks.encryptTeamSecret.mock.calls.length, 0);
+  });
+
+  test("create rejects a credential for an oauth2 connector and persists nothing", async () => {
+    const error = await rejection(
+      service(oauth2Adapter()).createConnector({
+        workspaceId: "workspace",
+        userId: "user",
+        connectorType: "oauth-test",
+        name: "OAuth",
+        configJson: CONFIG,
+        credential,
+      }),
+    );
+    assert.equal(error.statusCode, 400);
+    assert.equal(error.code, "CONNECTOR_CREDENTIAL_NOT_ALLOWED");
+    assert.equal(mocks.createSourceConnectorRecord.mock.calls.length, 0);
+    assert.equal(mocks.createCredentialConnectorRecord.mock.calls.length, 0);
+    assert.equal(mocks.encryptTeamSecret.mock.calls.length, 0);
+  });
+
+  test("check rejects a credential for a none connector and runs nothing", async () => {
+    const error = await rejection(
+      service(noneAdapter()).checkConfigReadiness({
+        workspaceId: "workspace",
+        userId: "user",
+        connectorType: "public-feed",
+        configJson: CONFIG,
+        credential,
+      }),
+    );
+    assert.equal(error.statusCode, 400);
+    assert.equal(error.code, "CONNECTOR_CREDENTIAL_NOT_ALLOWED");
+    assert.equal(checkSyncReadiness.mock.calls.length, 0);
+  });
+
+  test("check rejects a credential for an oauth2 connector and runs nothing", async () => {
+    const error = await rejection(
+      service(oauth2Adapter()).checkConfigReadiness({
+        workspaceId: "workspace",
+        userId: "user",
+        connectorType: "oauth-test",
+        configJson: CONFIG,
+        credential,
+      }),
+    );
+    assert.equal(error.statusCode, 400);
+    assert.equal(error.code, "CONNECTOR_CREDENTIAL_NOT_ALLOWED");
+    assert.equal(checkSyncReadiness.mock.calls.length, 0);
+  });
+
+  test("none/oauth2 rejection paths never log the secret", async () => {
+    const info = vi.spyOn(logger, "info");
+    const warn = vi.spyOn(logger, "warn");
+    const error = vi.spyOn(logger, "error");
+    const debug = vi.spyOn(logger, "debug");
+
+    await rejection(
+      service(noneAdapter()).createConnector({
+        workspaceId: "workspace",
+        userId: "user",
+        connectorType: "public-feed",
+        name: "Feed",
+        configJson: CONFIG,
+        credential,
+      }),
+    );
+    await rejection(
+      service(oauth2Adapter()).checkConfigReadiness({
+        workspaceId: "workspace",
+        userId: "user",
+        connectorType: "oauth-test",
+        configJson: CONFIG,
+        credential,
+      }),
+    );
+
+    assert.ok(!loggedText(info, warn, error, debug).includes(SECRET));
+
+    info.mockRestore();
+    warn.mockRestore();
+    error.mockRestore();
+    debug.mockRestore();
   });
 });
 
