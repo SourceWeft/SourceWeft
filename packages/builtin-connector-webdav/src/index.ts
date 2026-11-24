@@ -5,6 +5,18 @@ export {
 } from "./contribution";
 export { builtinWebDavConnectorCapabilityManifest } from "./manifest";
 export { toBackendWebDavManifest } from "./backend-manifest";
+export {
+  createWebdavAdapter,
+  WebDavAdapterError,
+  type WebDavAdapterInput,
+} from "./adapter";
+export {
+  discoverWebDavPages,
+  DEFAULT_DISCOVERY_LIMITS,
+  type DiscoveryLimits,
+  type DiscoveryOptions,
+} from "./discovery";
+export { webDavCredentialIdentity, parseStoredCredential } from "./identity";
 export { WebDavError, type WebDavErrorCode } from "./errors";
 export { parseEndpoint, redactEndpoint } from "./endpoint";
 export {

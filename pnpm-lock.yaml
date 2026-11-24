@@ -1286,6 +1286,9 @@ importers:
 
   packages/builtin-connector-webdav:
     dependencies:
+      '@sourceweft/builtin-document-parsers':
+        specifier: workspace:*
+        version: link:../builtin-document-parsers
       '@sourceweft/capability-contracts':
         specifier: workspace:*
         version: link:../capability-contracts

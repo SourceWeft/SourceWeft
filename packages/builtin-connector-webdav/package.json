@@ -12,6 +12,7 @@
     "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
+    "@sourceweft/builtin-document-parsers": "workspace:*",
     "@sourceweft/capability-contracts": "workspace:*",
     "@sourceweft/contracts": "workspace:*",
     "fast-xml-parser": "5.7.3"

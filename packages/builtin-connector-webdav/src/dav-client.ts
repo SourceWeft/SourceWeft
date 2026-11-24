@@ -256,6 +256,10 @@ export function createDavClient(input: CreateDavClientInput): DavClient {
               ...options.headers,
             },
             ...(options.body === undefined ? {} : { body: options.body }),
+            // Defence in depth: the credentialed scope already refuses a
+            // cross-origin redirect, and a 3xx that still reaches here is a bad
+            // response, never followed.
+            redirect: "manual",
             signal,
           }),
           signal,
