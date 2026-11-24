@@ -3426,6 +3426,46 @@
           "addFailed": "Failed to add the feed."
         }
       },
+      "webdav": {
+        "endpointLabel": "Server URL",
+        "usernameLabel": "Username",
+        "passwordLabel": "App password",
+        "nameLabel": "Name (optional)",
+        "foldersLabel": "Folders to index",
+        "foldersHint": "One folder path per line. Leave the default to index the whole server.",
+        "dialog": {
+          "title": "Connect a WebDAV server",
+          "description": "Enter your WebDAV server address and an app password. SourceWeft checks the connection first, then indexes the folders you choose and keeps them in sync.",
+          "check": "Test connection",
+          "checking": "Testing...",
+          "connected": "Connection verified",
+          "add": "Add connection",
+          "invalidEndpoint": "Enter an http:// or https:// server URL without a username, password or query string.",
+          "invalidUsername": "Enter a username without a colon.",
+          "passwordRequired": "Enter the app password.",
+          "invalidRoots": "Enter valid folder paths, one per line. Paths cannot contain \"..\".",
+          "rootsLimit": "Choose at most 20 folders.",
+          "checkFailed": "Could not reach this server. Try again.",
+          "nameConflict": "A connector with this name already exists in this workspace. Change the name, or use the existing one.",
+          "accountConflict": "A connector for this server and username already exists in this workspace.",
+          "credentialNotAllowed": "This server address is not allowed by this deployment.",
+          "addFailed": "Failed to add the connection."
+        },
+        "readiness": {
+          "reauth_required": "The server rejected the username or app password. Check them and try again.",
+          "blocked_endpoint": "This server address is not allowed by this deployment.",
+          "unreachable": "The server could not be reached. Check the address and try again.",
+          "config_invalid": "The server address is not valid.",
+          "path_forbidden": "The account is not allowed to read one of the chosen folders.",
+          "path_not_found": "One of the chosen folders was not found on the server."
+        },
+        "rotate": {
+          "title": "Reconnect WebDAV",
+          "description": "Enter the username and app password for {name}. The new credentials replace the stored ones.",
+          "save": "Reconnect",
+          "failed": "Could not update the credentials. Try again."
+        }
+      },
       "gmail": {
         "modeTitle": "Choose how to use Gmail",
         "modeDescription": "Choose a starting mode before connecting. You can change it later in connector settings.",
@@ -3570,6 +3610,20 @@
               "description": "Open a folder to look inside, then tick the files and folders to index.",
               "root": "Dropbox",
               "note": "Folders sync up to 1,000 files in total",
+              "emptyContainer": "This folder is empty."
+            }
+          },
+          "webdav": {
+            "itemsTitle": "Folders",
+            "itemsDescription": "Choose the WebDAV folders to index. Everything inside a chosen folder is kept in sync on the connector's schedule.",
+            "choose": "Choose folders",
+            "empty": "Nothing selected yet. Choose folders to index them.",
+            "kinds": {
+              "folder": "Folders"
+            },
+            "browser": {
+              "description": "Open a folder to look inside, then tick the folders to index.",
+              "root": "Server root",
               "emptyContainer": "This folder is empty."
             }
           },
