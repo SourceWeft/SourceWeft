@@ -101,7 +101,8 @@ test.each(["result", "error"])(
       setSelectedTraceKey: ignore,
       setSelectedNode: ignore,
       setDrawerOpen: ignore,
-      setNextCursor: ignore,
+      setTracePaging: ignore,
+      INITIAL_TRACE_PAGING: null,
       setLoadingMoreObservations: ignore,
     };
     const oldRequest = executeCallback(loadScript, {

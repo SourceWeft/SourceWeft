@@ -4339,7 +4339,9 @@
       "sessionPrefix": "工作階段：{value}",
       "emptyNoTraces": "找不到追蹤。",
       "emptyNoMatch": "沒有符合目前搜尋條件的追蹤。",
-      "loadOlder": "載入更早的追蹤",
+      "previousPage": "上一頁",
+      "nextPage": "下一頁",
+      "pageNumber": "第 {page} 頁",
       "columns": {
         "timestamp": "時間戳記",
         "name": "名稱",

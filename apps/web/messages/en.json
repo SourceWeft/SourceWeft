@@ -4339,7 +4339,9 @@
       "sessionPrefix": "Session: {value}",
       "emptyNoTraces": "No traces found.",
       "emptyNoMatch": "No traces match the current search.",
-      "loadOlder": "Load older traces",
+      "previousPage": "Previous",
+      "nextPage": "Next",
+      "pageNumber": "Page {page}",
       "columns": {
         "timestamp": "Timestamp",
         "name": "Name",
