@@ -42,6 +42,16 @@ export interface AssistantPorts {
   }): Promise<void>;
   notify(input: AssistantNotifyInput): Promise<unknown>;
   audit(entry: TeamAuditEntry): Promise<void>;
+  /**
+   * The ids of a workspace's top-level sources (selecting a folder brings
+   * its contents). Every source in a workspace is shared with all of its
+   * members, so a ticket conversation, which every member can open, may
+   * read them all.
+   */
+  workspaceSourceIds(input: {
+    teamId: string;
+    workspaceId: string;
+  }): Promise<string[]>;
 }
 
 /** The production wiring. Loaded lazily, as agent-tasks/ports.ts does. */
@@ -106,5 +116,16 @@ export const assistantPorts: AssistantPorts = {
   async audit(entry) {
     const { teamAuditService } = await import("../team-audit");
     await teamAuditService.record(entry);
+  },
+
+  async workspaceSourceIds(input) {
+    const { listSourceRecords } = await import("../sources");
+    const { items } = await listSourceRecords({
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+      parentSourceId: null,
+      includeContent: false,
+    });
+    return items.map((source) => source.id);
   },
 };

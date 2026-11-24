@@ -685,6 +685,14 @@ async function dispatchTicket(
       content,
       creditCap: remainingCredits,
       hostContext: { assistantId: assistant.id, ticketId: ticket.id },
+      // The worker reads the workspace's sources. Only a conversation that
+      // was never seeded takes them, so a ticket keeps the selection its
+      // first run got (and one created before this reads them from its
+      // next run).
+      sourceIds: await ports.workspaceSourceIds({
+        teamId: assistant.teamId,
+        workspaceId: assistant.workspaceId,
+      }),
     });
     runId = started.run.id;
   } catch (error) {

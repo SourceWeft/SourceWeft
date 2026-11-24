@@ -140,6 +140,42 @@ async function assistantRow(s: Setup) {
 
 // ── Worker dispatch: slots ──────────────────────────────────────────────
 
+test("a ticket run is started with the workspace's top-level sources; a folder's contents come with the folder", async () => {
+  const s = await setup();
+  const now = new Date();
+  const [workspace] = await f.schema.db
+    .select()
+    .from(f.schema.workspaces)
+    .where(eq(f.schema.workspaces.id, s.workspaceId));
+  const teamId = workspace!.organizationId;
+  const folder = randomUUID();
+  const doc = randomUUID();
+  await f.schema.db.insert(f.schema.sources).values([
+    {
+      id: folder,
+      teamId,
+      workspaceId: s.workspaceId,
+      sourceType: "directory",
+      title: "Handbook",
+    },
+    {
+      id: randomUUID(),
+      teamId,
+      workspaceId: s.workspaceId,
+      parentSourceId: folder,
+      title: "Chapter 1",
+    },
+    { id: doc, teamId, workspaceId: s.workspaceId, title: "Node.js LTS" },
+  ]);
+  await queuedTicket(s, { payer: s.a, at: minutesAgo(now, 5), title: "One" });
+
+  await tick(now, f.ports);
+
+  const [start] = startsOf("assistant_ticket", s.workspaceId);
+  assert.ok(start);
+  assert.deepEqual([...(start.sourceIds ?? [])].sort(), [doc, folder].sort());
+});
+
 test("three queued tickets and two slots: the first tick starts two; the third takes the reserved slot only for a member's input", async () => {
   const s = await setup();
   const now = new Date();
