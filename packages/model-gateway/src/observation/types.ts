@@ -28,6 +28,11 @@ export interface ModelCallIdentity {
   routerName?: string;
   fallbackModel?: string;
   fallbackLevel?: number;
+  /**
+   * The upstream host an aggregator routed the call to (OpenRouter's response
+   * `provider`, e.g. "Sail Research"), when the provider reports one.
+   */
+  upstreamProvider?: string;
 }
 
 export interface ModelCallCost {
@@ -94,6 +99,8 @@ export interface ProviderResponseContext {
    * longer carries one.
    */
   capturedUsage?: Record<string, unknown>;
+  /** `ProviderResponseCapture.upstreamProvider`, read off the stream. */
+  capturedUpstreamProvider?: string;
   sdkUsage?: unknown;
   responseMetadata?: Record<string, unknown>;
   responseHeaders?: Headers;

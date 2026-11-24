@@ -973,6 +973,7 @@ test("chat.complete emits generation observation events", async () => {
     strategy: "priority",
     provider: "openai",
     providerKind: "openai",
+    attempt: { index: 1, of: 1, primaryProvider: "openai" },
   });
   // Observation attributes are a strict whitelist over request metadata.
   // profileAlias is forwarded because a host observe sink needs it (with
@@ -1427,6 +1428,7 @@ test("chat.stream passes through LangChain chunks and emits metadata", async () 
           strategy: "priority",
           provider: "anthropic",
           providerKind: "anthropic",
+          attempt: { index: 1, of: 1, primaryProvider: "anthropic" },
         },
         traceId: undefined,
       },

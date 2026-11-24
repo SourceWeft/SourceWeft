@@ -514,3 +514,39 @@ test("OrcaRouter receipt adapter returns settled model, usage, and cost", async 
   });
   assert.equal(receipt?.settledCostUsd, 0.0124);
 });
+
+test("OpenRouter records the upstream that served the call", () => {
+  const observe = (context: {
+    rawResponse?: unknown;
+    capturedUpstreamProvider?: string;
+  }) =>
+    normalizeModelCallObservation({
+      modelAlias: "chat-default",
+      context: { target: target("openrouter"), modality: "chat", ...context },
+    }).identity.upstreamProvider;
+
+  // A non-streamed message keeps the raw body LangChain was asked to include.
+  assert.equal(
+    observe({
+      rawResponse: {
+        content: "hi",
+        additional_kwargs: {
+          __raw_response: {
+            provider: "Sail Research",
+            usage: { prompt_tokens: 1, completion_tokens: 1, cost: 0.000001 },
+          },
+        },
+      },
+    }),
+    "Sail Research",
+  );
+  // A stream's upstream is read off the wire.
+  assert.equal(
+    observe({
+      rawResponse: { content: "hi" },
+      capturedUpstreamProvider: "Cohere",
+    }),
+    "Cohere",
+  );
+  assert.equal(observe({ rawResponse: { content: "hi" } }), undefined);
+});

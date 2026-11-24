@@ -67,7 +67,43 @@ function normalizeOpenRouterByokCost(
   };
 }
 
+/**
+ * The upstream OpenRouter routed the call to: the response's top-level
+ * `provider`, from the raw body LangChain keeps on a non-streamed message or
+ * from the stream (`capturedUpstreamProvider`).
+ */
+function upstreamProviderOf(context: ProviderResponseContext) {
+  const message = isRecord(context.rawResponse) ? context.rawResponse : {};
+  const kwargs = isRecord(message.additional_kwargs)
+    ? message.additional_kwargs
+    : {};
+  for (const raw of [kwargs.__raw_response, message.__raw_response, message]) {
+    if (
+      isRecord(raw) &&
+      typeof raw.provider === "string" &&
+      raw.provider.trim().length > 0
+    ) {
+      return raw.provider.trim();
+    }
+  }
+  return context.capturedUpstreamProvider;
+}
+
 function normalizeOpenRouterResponse(
+  context: ProviderResponseContext,
+): ModelCallObservationPatch | undefined {
+  const upstreamProvider = upstreamProviderOf(context);
+  const costPatch = normalizeOpenRouterCost(context);
+  if (!upstreamProvider) {
+    return costPatch;
+  }
+  return {
+    ...costPatch,
+    identity: { ...costPatch?.identity, upstreamProvider },
+  };
+}
+
+function normalizeOpenRouterCost(
   context: ProviderResponseContext,
 ): ModelCallObservationPatch | undefined {
   const usage = context.rawUsage;
