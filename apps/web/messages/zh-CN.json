@@ -3463,7 +3463,8 @@
         "connectedAutoCreate": "已存在授权但没有活跃的连接器。重新连接以创建连接器。",
         "connectedConfigure": "OAuth 已连接。配置此连接器以启用同步。",
         "available": "可通过 {name} OAuth 进行连接。",
-        "availableAddFeed": "添加公开 RSS 或 Atom 订阅源的网址。"
+        "availableAddFeed": "添加公开 RSS 或 Atom 订阅源的网址。",
+        "availableLoginFlow": "在浏览器中登录 {name} 以进行连接。"
       },
       "syncBlock": {
         "pagesLimit": "页数额度已用完。上次同步索引了 {count} 条内容后暂停，额度恢复后会自动继续同步。",
@@ -3547,6 +3548,50 @@
           "description": "请输入 {name} 的用户名和应用专用密码。新凭据将替换已保存的凭据。",
           "save": "重新连接",
           "failed": "无法更新凭据，请重试。"
+        }
+      },
+      "nextcloud": {
+        "serverLabel": "服务器网址",
+        "serverHint": "你的 Nextcloud 地址，例如 https://cloud.example.com。",
+        "nameLabel": "名称（可选）",
+        "foldersLabel": "要索引的文件夹",
+        "foldersHint": "每行填写一个文件夹路径。保留默认值即可索引你的整个账户。",
+        "dialog": {
+          "title": "通过 Nextcloud 连接",
+          "description": "在新标签页中登录你的 Nextcloud 并授权访问。SourceWeft 不会看到你的密码。",
+          "connect": "通过 Nextcloud 连接",
+          "connecting": "正在打开 Nextcloud…",
+          "autoSync": "自动同步",
+          "autoSyncHint": "定期检查新增和变更的文件。默认关闭；你随时可以手动同步。",
+          "waitingTitle": "正在等待授权",
+          "waitingDescription": "请在打开的 Nextcloud 标签页中批准登录。此对话框会自动更新。",
+          "openAgain": "重新打开 Nextcloud",
+          "tryAgain": "重试",
+          "invalidServer": "请输入以 http:// 或 https:// 开头的服务器网址，且不要包含用户名、密码或查询字符串。",
+          "invalidRoots": "请每行填写一个有效的文件夹路径，路径不能包含“..”。",
+          "rootsLimit": "最多只能选择 20 个文件夹。"
+        },
+        "reconnect": {
+          "title": "重新连接 Nextcloud",
+          "description": "请重新登录 {name} 以恢复访问。需要使用相同的服务器和账户。"
+        },
+        "errors": {
+          "unreachable": "无法连接到 Nextcloud 服务器。请检查地址后重试。",
+          "notNextcloud": "此服务器看起来不是支持浏览器登录的 Nextcloud。",
+          "invalidResponse": "Nextcloud 登录响应无效，请重试。",
+          "blockedAddress": "此部署不允许该服务器地址。",
+          "notSupported": "此连接器不支持通过浏览器登录。",
+          "tooManyFlows": "已有太多登录正在进行。请先完成或取消一个，然后重试。",
+          "reconnectMismatch": "此次登录与你要重新连接的连接器不匹配。请使用相同的服务器和账户。",
+          "alreadyConnected": "此工作区中已存在使用该 Nextcloud 账户的连接器。",
+          "notAllowed": "此部署不允许该服务器地址。",
+          "notReady": "SourceWeft 无法确认对此 Nextcloud 的访问权限。请检查你的权限后重试。",
+          "permissionLost": "该账户已无访问权限。请重新连接后重试。",
+          "pathNotFound": "在服务器上未找到所选的某个文件夹。",
+          "pathForbidden": "该账户无权读取所选的某个文件夹。",
+          "expired": "登录授权已过期。请重新开始。",
+          "timedOut": "未在规定时间内完成登录授权。请重新开始。",
+          "failed": "无法完成连接，请重试。"
         }
       },
       "gmail": {
