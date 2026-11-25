@@ -214,10 +214,13 @@ url: {{dashboardUrl}}
   class="muted"
   style="margin: 0 0 18px; color: #6b7280; font-size: 13px; line-height: 22px"
 >
-  {{#if communityUrl}}<a href="{{communityUrl}}" style="color: #374151"
+  {{#if communityUrl}}<a
+    href="{{communityUrl}}"
+    style="color: #374151; margin-right: 12px"
     >Community</a
-  >{{/if}} {{#if githubUrl}}&middot;
-  <a href="{{githubUrl}}" style="color: #374151">GitHub</a>{{/if}}
+  >{{/if}}{{#if githubUrl}}<a href="{{githubUrl}}" style="color: #374151"
+    >GitHub</a
+  >{{/if}}
 </p>
 <p style="margin: 0; color: #374151; font-size: 15px; line-height: 26px">
   First step: add a source you know well, then hand off your first task.

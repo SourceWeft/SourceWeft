@@ -246,4 +246,30 @@ describe("user mail usability", () => {
     assert.match(rendered.html, /代理程式/);
     assert.match(rendered.html, /排程任務/);
   });
+
+  test("welcome footer links render independently without a dangling separator", () => {
+    for (const locale of ["en", "zh-CN", "zh-TW"]) {
+      const onlyGithub = renderMailTemplate(
+        "auth.welcome",
+        { ...welcome, githubUrl: variables.githubUrl },
+        locale,
+      );
+      assert.ok(onlyGithub.text.includes(variables.githubUrl));
+      // layout.html's own footer always contains a literal "&middot;"
+      // (siteName &middot; baseUrlLabel), so a bare /&middot;/ match would
+      // always be true regardless of the welcome body. Narrow the check to
+      // a middot directly attached to the GitHub link, which is what a
+      // dangling separator (no community link before it) would produce.
+      assert.doesNotMatch(onlyGithub.html, /&middot;\s*<a[^>]*>\s*GitHub/);
+      assert.doesNotMatch(onlyGithub.text, /·\s*GitHub/);
+
+      const onlyCommunity = renderMailTemplate(
+        "auth.welcome",
+        { ...welcome, communityUrl: variables.communityUrl },
+        locale,
+      );
+      assert.ok(onlyCommunity.text.includes(variables.communityUrl));
+      assert.doesNotMatch(onlyCommunity.html, /href=""/);
+    }
+  });
 });
