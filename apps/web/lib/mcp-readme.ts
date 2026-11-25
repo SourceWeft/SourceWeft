@@ -86,3 +86,52 @@ export function isLongMcpReadme(markdown: string | undefined) {
     markdown.split("\n").length >= LONG_README_LINES
   );
 }
+
+/**
+ * The most README source a public MCP page renders. The text is written into
+ * the page twice (as HTML and again in the data the page hydrates from), so a
+ * 130 KB README made a 1.8 MB page. The part past this is one click away at
+ * the pinned commit.
+ */
+export const MCP_README_RENDER_LIMIT = 40_000;
+
+/**
+ * The README cut to its first {@link MCP_README_RENDER_LIMIT} characters, at
+ * the end of a paragraph and never inside a code fence; unchanged when it is
+ * already short enough.
+ */
+export function limitMcpReadme(markdown: string): {
+  markdown: string;
+  truncated: boolean;
+} {
+  if (markdown.length <= MCP_README_RENDER_LIMIT) {
+    return { markdown, truncated: false };
+  }
+  const head = markdown.slice(0, MCP_README_RENDER_LIMIT);
+  // A paragraph break at or before the limit that is outside a code fence.
+  let fence: string | null = null;
+  let offset = 0;
+  let cut = 0;
+  let previousBlank = false;
+  for (const line of head.split("\n")) {
+    const outside = fence === null;
+    const marker = /^\s{0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    if (marker) {
+      if (fence === null) fence = marker;
+      else if (marker[0] === fence[0] && marker.length >= fence.length) {
+        fence = null;
+      }
+    }
+    if (outside && previousBlank && line.trim() !== "" && offset > 0) {
+      cut = offset;
+    }
+    previousBlank = line.trim() === "";
+    offset += line.length + 1;
+  }
+  return {
+    markdown: markdown
+      .slice(0, cut > 0 ? cut : MCP_README_RENDER_LIMIT)
+      .trimEnd(),
+    truncated: true,
+  };
+}

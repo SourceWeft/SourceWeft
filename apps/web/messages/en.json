@@ -686,6 +686,7 @@
       "imagePlaceholder": "Image",
       "notFound": "This repository has no README.",
       "tooLarge": "The README is too large to show here — <link>open it on GitHub</link>.",
+      "truncated": "The README is long, so this page shows its first part — <link>read the rest on GitHub</link>.",
       "showMore": "Show full README",
       "showLess": "Show less",
       "source": "Source: <link>{path}</link>",

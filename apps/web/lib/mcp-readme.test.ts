@@ -8,6 +8,8 @@ import {
 import {
   hasMcpReadmeToShow,
   isLongMcpReadme,
+  limitMcpReadme,
+  MCP_README_RENDER_LIMIT,
   mcpReadmeBaseUrl,
   mcpReadmeFallbackLink,
   readMcpReadme,
@@ -164,5 +166,29 @@ describe("isLongMcpReadme", () => {
     ).toBe(false);
     expect(isLongMcpReadme("")).toBe(false);
     expect(isLongMcpReadme(undefined)).toBe(false);
+  });
+});
+
+describe("limitMcpReadme", () => {
+  it("leaves a README within the limit as it is", () => {
+    const markdown = "# T\n\nshort";
+    expect(limitMcpReadme(markdown)).toEqual({ markdown, truncated: false });
+  });
+
+  it("cuts a long README at a paragraph end", () => {
+    const paragraph = `${"word ".repeat(200)}\n\n`;
+    const markdown = paragraph.repeat(100);
+    const result = limitMcpReadme(markdown);
+    expect(result.truncated).toBe(true);
+    expect(result.markdown.length).toBeLessThanOrEqual(MCP_README_RENDER_LIMIT);
+    expect(result.markdown.endsWith("word")).toBe(true);
+  });
+
+  it("never cuts inside a code fence", () => {
+    const intro = `${"intro ".repeat(100)}\n\n`;
+    const fenced = `\`\`\`bash\n${"echo x\n\n".repeat(8000)}\`\`\`\n\n`;
+    const result = limitMcpReadme(`${intro}${fenced}tail`);
+    expect(result.truncated).toBe(true);
+    expect(result.markdown).toBe(intro.trimEnd());
   });
 });

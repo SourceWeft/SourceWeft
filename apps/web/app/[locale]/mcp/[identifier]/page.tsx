@@ -46,6 +46,7 @@ import { McpAiOverviewView } from "../../../_components/market/mcp-ai-overview-v
 import {
   McpReadmeRepositoryLink,
   McpReadmeSection,
+  McpReadmeTruncatedNote,
   McpReadmeSourceLine,
 } from "../../../_components/market/mcp-readme-section";
 import { JsonLd } from "../../../_components/seo/json-ld";
@@ -66,6 +67,7 @@ import {
 import {
   hasMcpReadmeToShow,
   isLongMcpReadme,
+  limitMcpReadme,
 } from "../../../../lib/mcp-readme";
 import {
   mcpAuthExplanation,
@@ -434,7 +436,15 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
     !aiOverview && manifest.description && manifest.description !== item.summary
       ? manifest.description
       : null;
-  const shownReadme = hasMcpReadmeToShow(readme) ? readme : null;
+  const readmeToShow = hasMcpReadmeToShow(readme) ? readme : null;
+  const limitedReadme =
+    readmeToShow?.status === "ok" && readmeToShow.markdown
+      ? limitMcpReadme(readmeToShow.markdown)
+      : null;
+  const shownReadme =
+    readmeToShow && limitedReadme?.truncated
+      ? { ...readmeToShow, markdown: limitedReadme.markdown }
+      : readmeToShow;
   const primaryCategory = mcpPrimaryCategory(item.categories);
   const installHref = authState.isSignedIn
     ? `/dashboard/mcp?mcp=${encodeURIComponent(item.identifier)}`
@@ -1010,6 +1020,9 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                     >
                       <McpReadmeSection {...shownReadme} />
                     </McpReadmeCollapse>
+                    {limitedReadme?.truncated ? (
+                      <McpReadmeTruncatedNote readme={shownReadme} />
+                    ) : null}
                     <McpReadmeSourceLine readme={shownReadme} />
                     <McpReadmeRepositoryLink readme={shownReadme} />
                   </div>

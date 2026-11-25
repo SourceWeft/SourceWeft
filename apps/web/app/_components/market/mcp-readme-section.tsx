@@ -41,6 +41,7 @@ export function McpReadmeSection({
   if (status === "ok" && markdown) {
     return (
       <UntrustedMarkdown
+        compactCode
         baseUrl={mcpReadmeBaseUrl(source)}
         imagePlaceholder={t("imagePlaceholder")}
         mode="readme"
@@ -154,3 +155,33 @@ export function McpReadmeRepositoryLink({
 const messageClassName = "text-sm leading-6 text-zinc-600 dark:text-zinc-400";
 const linkClassName =
   "font-medium text-zinc-950 underline underline-offset-4 dark:text-white";
+
+/**
+ * Says the README above stops short (limitMcpReadme) and links the whole file
+ * at the pinned commit. Nothing when that file has no safe address.
+ */
+export function McpReadmeTruncatedNote({
+  readme,
+}: {
+  readme: MarketMcpReadme;
+}) {
+  const t = useTranslations("mcp.readme");
+  const link = untrustedMarkdownLink(readme.source?.blobUrl);
+  if (link.kind !== "external") return null;
+  return (
+    <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+      {t.rich("truncated", {
+        link: (chunks: ReactNode) => (
+          <a
+            className={linkClassName}
+            href={link.href}
+            rel={link.rel}
+            target={link.target}
+          >
+            {chunks}
+          </a>
+        ),
+      })}
+    </p>
+  );
+}

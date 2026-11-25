@@ -686,6 +686,7 @@
       "imagePlaceholder": "图片",
       "notFound": "该仓库没有 README。",
       "tooLarge": "README 过大，无法在此显示，请<link>在 GitHub 上查看</link>。",
+      "truncated": "README 较长，此页只显示开头部分，请<link>在 GitHub 上阅读其余内容</link>。",
       "showMore": "展开完整 README",
       "showLess": "收起",
       "source": "来源：<link>{path}</link>",
