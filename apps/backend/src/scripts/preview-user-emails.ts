@@ -1,6 +1,7 @@
 import { copyFileSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { renderMailTemplate } from "../modules/mail/templates";
+import { composeWelcomeMailVariables } from "../modules/onboarding/welcome-mail-variables";
 
 // Generates local examples only. No provider is imported and no email is sent.
 const output = resolve(
@@ -34,25 +35,32 @@ const entries: {
   subject: string;
   filename: string;
 }[] = [];
-for (const locale of ["zh-CN", "zh-TW", "en"]) {
+for (const locale of ["zh-CN", "zh-TW", "en"] as const) {
   for (const id of ids) {
-    const rendered = renderMailTemplate(
-      id,
-      {
-        baseUrl: "https://sourceweft.example",
-        imageUrl: "./icon-512.png",
-        url: "https://sourceweft.example/preview-action?token=example",
-        dashboardUrl: "https://sourceweft.example/dashboard",
-        docsUrl: "https://sourceweft.example/docs",
-        discordUrl: "https://discord.gg/KNqTGh2qrk",
-        greeting: locale === "en" ? "Hi Alex," : "Alex，你好！",
-        otp: "028491",
-        inviterLabel: "Alex",
-        organizationName: locale === "en" ? "Research team" : "研究团队",
-        workspaceName: locale === "en" ? "Product research" : "产品研究",
-      },
-      locale,
-    );
+    const sharedVariables = {
+      baseUrl: "https://sourceweft.example",
+      imageUrl: "./icon-512.png",
+      url: "https://sourceweft.example/preview-action?token=example",
+      dashboardUrl: "https://sourceweft.example/dashboard",
+      otp: "028491",
+      inviterLabel: "Alex",
+      organizationName: locale === "en" ? "Research team" : "研究团队",
+      workspaceName: locale === "en" ? "Product research" : "产品研究",
+    };
+    const variables =
+      id === "auth.welcome"
+        ? {
+            ...sharedVariables,
+            ...composeWelcomeMailVariables({
+              name: "Alex",
+              locale,
+              webBaseUrl: "https://sourceweft.example",
+              freeAllowance: { credits: 3000, pages: 300 },
+            }),
+            imageUrl: "./icon-512.png",
+          }
+        : sharedVariables;
+    const rendered = renderMailTemplate(id, variables, locale);
     const filename = `${id}.${locale}.html`;
     writeFileSync(resolve(output, filename), rendered.html);
     writeFileSync(
