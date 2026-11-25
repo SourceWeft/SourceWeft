@@ -288,6 +288,122 @@ test("browse and describe dispatch under the nextcloud.* action prefix", async (
   assert.equal(describe.items[0]!.exists, true);
 });
 
+// --- within-scan duplicate identity -----------------------------------------
+
+test("the same fileid under two folders yields one item (first by walk order wins)", async () => {
+  const { adapter, harness } = adapterFor({
+    "/": { self: { fileId: "10" }, folders: ["A", "B"] },
+    "/A/": {
+      files: {
+        "doc.pdf": {
+          size: 1,
+          etag: '"x"',
+          fileId: "500",
+          permissions: "RGDNVW",
+        },
+      },
+    },
+    "/B/": {
+      files: {
+        "copy.pdf": {
+          size: 1,
+          etag: '"x"',
+          fileId: "500",
+          permissions: "RGDNVW",
+        },
+      },
+    },
+  });
+  const pages = await collect(adapter.discoverPages!(discoverInput(["/"])));
+  const items = pages.flatMap((p) => p.items);
+  assert.equal(items.length, 1);
+  assert.equal(items[0]!.externalId, "nc:500");
+  // A/ is walked before B/, so its path is the one that is kept.
+  assert.equal(items[0]!.metadata.path, "/A/doc.pdf");
+  const last = pages[pages.length - 1]!;
+  assert.equal(last.complete, true);
+  // A duplicate never marks the scan incomplete.
+  assert.equal(last.reconcileMissing, true);
+  // Exactly one fixed-message warning carrying only a count.
+  const dupWarnings = harness.warnings.filter(
+    (w) => w.message === "webdav_scan_duplicate_items",
+  );
+  assert.equal(dupWarnings.length, 1);
+  assert.equal(dupWarnings[0]!.meta?.count, 1);
+});
+
+test("overlapping roots emit a shared fileid only once", async () => {
+  const { adapter } = adapterFor({
+    "/A/": {
+      files: {
+        "doc.pdf": {
+          size: 1,
+          etag: '"x"',
+          fileId: "600",
+          permissions: "RGDNVW",
+        },
+      },
+    },
+    "/B/": {
+      files: {
+        "copy.pdf": {
+          size: 1,
+          etag: '"x"',
+          fileId: "600",
+          permissions: "RGDNVW",
+        },
+      },
+    },
+  });
+  const items = await discoverItems(adapter, discoverInput(["/A/", "/B/"]));
+  assert.deepEqual(
+    items.map((i) => i.externalId),
+    ["nc:600"],
+  );
+  assert.equal(items[0]!.metadata.path, "/A/doc.pdf");
+});
+
+test("a server echoing one fileid on two hrefs in a listing yields one item", async () => {
+  const { adapter } = adapterFor({
+    "/": {
+      self: { fileId: "10" },
+      files: {
+        "a.pdf": { size: 1, etag: '"x"', fileId: "500", permissions: "RGDNVW" },
+        "b.pdf": { size: 1, etag: '"x"', fileId: "500", permissions: "RGDNVW" },
+      },
+    },
+  });
+  const pages = await collect(adapter.discoverPages!(discoverInput(["/"])));
+  const items = pages.flatMap((p) => p.items);
+  assert.equal(items.length, 1);
+  assert.equal(items[0]!.externalId, "nc:500");
+  assert.equal(items[0]!.metadata.path, "/a.pdf");
+  assert.equal(pages[pages.length - 1]!.reconcileMissing, true);
+});
+
+test("a readable file with no oc:fileid is skipped but the scan still reconciles (R3)", async () => {
+  const { adapter } = adapterFor({
+    "/": {
+      self: { fileId: "10" },
+      files: {
+        "ided.txt": {
+          size: 1,
+          etag: '"i"',
+          fileId: "7",
+          permissions: "RGDNVW",
+        },
+        "noid.txt": { size: 1, etag: '"n"', permissions: "RGDNVW" },
+      },
+    },
+  });
+  const pages = await collect(adapter.discoverPages!(discoverInput(["/"])));
+  const ids = pages.flatMap((p) => p.items).map((i) => i.externalId);
+  assert.deepEqual(ids, ["nc:7"]);
+  const last = pages[pages.length - 1]!;
+  assert.equal(last.complete, true);
+  assert.equal(last.reconcileMissing, true);
+});
+
 // --- sub-folder install -----------------------------------------------------
 
 test("a sub-folder install builds endpoints and canonical links under the base path", async () => {

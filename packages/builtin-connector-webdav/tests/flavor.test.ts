@@ -144,6 +144,8 @@ test("webdavFlavor item identity is the decoded path, the request URL and {path,
     endpoint: new URL(ENDPOINT),
     relativePath: "/Docs/a b.txt",
   });
+  // The plain WebDAV flavor always assigns a (path-based) identity.
+  assert.ok(identity);
   assert.equal(identity.externalId, "/Docs/a b.txt");
   assert.equal(
     identity.externalUri,

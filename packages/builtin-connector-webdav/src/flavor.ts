@@ -51,11 +51,15 @@ export type WebDavFlavor = {
   /** Extra PROPFIND property elements to request during discovery and
    * readiness (e.g. `oc:fileid`). Empty for plain WebDAV. */
   extraProps: readonly string[];
-  /** Derive the item id, canonical URI and metadata for one discovered entry. */
+  /** Derive the item id, canonical URI and metadata for one discovered entry,
+   * or `null` when the flavor cannot assign a stable identity to it (e.g. a
+   * Nextcloud file the server returned no file id for). A `null` result skips
+   * the file without making the scan incomplete, exactly like an unreadable
+   * one. The plain WebDAV flavor's identity is path-based and never null. */
   itemIdentity(
     entry: DavEntry,
     ctx: WebDavItemIdentityContext,
-  ): WebDavItemIdentity;
+  ): WebDavItemIdentity | null;
   /** Whether a discovered file should be indexed. A false result skips the file
    * without making the scan incomplete. */
   isReadable(entry: DavEntry): boolean;

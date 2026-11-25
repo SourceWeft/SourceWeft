@@ -46,17 +46,19 @@ export const nextcloudFlavor: WebDavFlavor = {
 
   itemIdentity(entry: DavEntry, ctx) {
     const fileId = typeof entry.fileId === "string" ? entry.fileId : null;
+    // A real Nextcloud file always carries a file id (readiness guarantees the
+    // server returns them). A file with none has no stable identity, so it is
+    // skipped (null) rather than indexed under a path id: that avoids mixing the
+    // `nc:<id>` and path id spaces and the delete+add churn a file would cause
+    // if it later gained an id (R3).
+    if (fileId === null) return null;
     const permissions =
       typeof entry.permissions === "string" ? entry.permissions : null;
     const ownerId = typeof entry.ownerId === "string" ? entry.ownerId : null;
-    // A real Nextcloud file always has a file id (readiness guarantees the
-    // server returns them); the path fallback only guards the anomalous file
-    // that lacks one, so two such files never collide on a literal `nc:null`.
-    const externalId = fileId !== null ? `nc:${fileId}` : ctx.relativePath;
-    const externalUri =
-      fileId !== null && ctx.server
-        ? canonicalFileUrl(ctx.server, fileId)
-        : toRequestUrl(ctx.endpoint, ctx.relativePath);
+    const externalId = `nc:${fileId}`;
+    const externalUri = ctx.server
+      ? canonicalFileUrl(ctx.server, fileId)
+      : toRequestUrl(ctx.endpoint, ctx.relativePath);
     return {
       externalId,
       externalUri,

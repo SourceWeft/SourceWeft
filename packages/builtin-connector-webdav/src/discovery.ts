@@ -94,23 +94,27 @@ function contentHashOf(entry: DavEntry): string | null {
   return createHash("sha256").update(`${size}|${modified}`).digest("hex");
 }
 
-/** One discovered file as a `ConnectorItem`. The item id, URI and metadata come
- * from the flavor (for plain WebDAV: the decoded path, the rebuilt request URL
- * and `{ path, etag }`); the title, type, size, timestamp and content hash are
- * derived from the decoded path and the entry the same way for every flavor. */
+/** One discovered file as a `ConnectorItem`, or `null` when the flavor assigns
+ * it no stable identity (e.g. a Nextcloud file with no file id), in which case
+ * the caller skips it like an unreadable file. The item id, URI and metadata
+ * come from the flavor (for plain WebDAV: the decoded path, the rebuilt request
+ * URL and `{ path, etag }`); the title, type, size, timestamp and content hash
+ * are derived from the decoded path and the entry the same way for every
+ * flavor. */
 function toItem(
   flavor: WebDavFlavor,
   endpoint: URL,
   server: string | undefined,
   relativePath: string,
   entry: DavEntry,
-): ConnectorItem {
+): ConnectorItem | null {
   const name = lastSegment(relativePath);
   const identity = flavor.itemIdentity(entry, {
     endpoint,
     server,
     relativePath,
   });
+  if (identity === null) return null;
   return {
     externalId: identity.externalId,
     externalUri: identity.externalUri,
@@ -165,6 +169,13 @@ export async function* discoverWebDavPages(
     }
   }
 
+  // Every item externalId emitted so far in this scan (across pages and roots).
+  // A flavor whose identity is not path-based (Nextcloud: `nc:<fileId>`) can
+  // reach the same id by two in-scope paths — an internal share or an external
+  // mount listed twice, or a hostile server echoing one file id on two hrefs —
+  // and must still emit that item only once.
+  const emittedIds = new Set<string>();
+  let duplicateItems = 0;
   let entryCount = 0;
   let incomplete = false;
   let outOfScope = 0;
@@ -263,10 +274,22 @@ export async function* discoverWebDavPages(
           queue.push({ path: childPath, depth: childDepth });
         }
       } else if (flavor.isReadable(entry)) {
-        items.push(toItem(flavor, endpoint, server, relativePath, entry));
+        const item = toItem(flavor, endpoint, server, relativePath, entry);
+        if (item !== null) {
+          if (emittedIds.has(item.externalId)) {
+            // The same identity reached by a second in-scope path: emit it once
+            // (first by walk order wins). A duplicate is expected for shared or
+            // mounted subtrees, so it does not make the scan incomplete.
+            duplicateItems += 1;
+          } else {
+            emittedIds.add(item.externalId);
+            items.push(item);
+          }
+        }
       }
-      // A file the flavor reports as unreadable is simply not indexed. It was
-      // listed and is in scope, so it does not make the scan incomplete.
+      // A file the flavor reports as unreadable, or assigns no stable identity
+      // to, is simply not indexed. It was listed and is in scope, so it does not
+      // make the scan incomplete.
     }
 
     if (!capped) {
@@ -301,6 +324,12 @@ export async function* discoverWebDavPages(
     // Common and not itself fatal (servers that echo parents/siblings): a
     // fixed-message warning with only a count.
     logger?.warn?.("webdav_scan_out_of_scope_entries", { count: outOfScope });
+  }
+  if (duplicateItems > 0) {
+    // In-scope paths that resolved to an already-emitted identity: one
+    // fixed-message warning with only a count, never per item. Not fatal and
+    // never marks the scan incomplete.
+    logger?.warn?.("webdav_scan_duplicate_items", { count: duplicateItems });
   }
   if (droppedResponses > 0) {
     logger?.warn?.("webdav_scan_dropped_responses", {

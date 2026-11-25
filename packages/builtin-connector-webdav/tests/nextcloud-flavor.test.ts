@@ -25,12 +25,15 @@ const entry = (over: Partial<DavEntry> = {}): DavEntry => ({
 const identityFor = (
   over: Partial<DavEntry>,
   server: string | undefined = SERVER,
-) =>
-  nextcloudFlavor.itemIdentity(entry(over), {
+) => {
+  const identity = nextcloudFlavor.itemIdentity(entry(over), {
     endpoint: new URL(ENDPOINT),
     server,
     relativePath: "/Docs/report.pdf",
   });
+  assert.ok(identity, "expected an identity");
+  return identity;
+};
 
 // --- static shape -----------------------------------------------------------
 
@@ -82,6 +85,8 @@ test("itemIdentity is stable across a rename or move (same fileId, new path)", (
     server: SERVER,
     relativePath: "/Archive/new-name.pdf",
   });
+  assert.ok(first);
+  assert.ok(moved);
   assert.equal(first.externalId, moved.externalId);
   assert.equal(first.externalId, "nc:77");
   assert.equal(first.metadata.path, "/Docs/old-name.pdf");
@@ -94,6 +99,7 @@ test("the canonical link keeps a server base path and strips a trailing slash", 
     server: "https://host.example/nextcloud/",
     relativePath: "/Docs/report.pdf",
   });
+  assert.ok(identity);
   assert.equal(
     identity.externalUri,
     "https://host.example/nextcloud/index.php/f/9",
@@ -112,10 +118,20 @@ test("a share (permission flag S) is flagged in metadata", () => {
   assert.equal(identityFor({ fileId: "1" }).metadata.shared, false);
 });
 
-test("a file without a usable fileId falls back to a path-based identity", () => {
-  const identity = identityFor({ fileId: null });
-  assert.equal(identity.externalId, "/Docs/report.pdf");
-  assert.equal(identity.metadata.fileId, null);
+test("a file with no usable fileId is skipped (itemIdentity returns null) (R3)", () => {
+  const ctx = {
+    endpoint: new URL(ENDPOINT),
+    server: SERVER,
+    relativePath: "/Docs/report.pdf",
+  };
+  // Absent, empty-and-therefore-null, and present-but-invalid file ids all
+  // yield no identity, so discovery skips the file rather than indexing it
+  // under a path id.
+  assert.equal(nextcloudFlavor.itemIdentity(entry({}), ctx), null);
+  assert.equal(
+    nextcloudFlavor.itemIdentity(entry({ fileId: null }), ctx),
+    null,
+  );
 });
 
 // --- readability (oc:permissions read flag) ---------------------------------
