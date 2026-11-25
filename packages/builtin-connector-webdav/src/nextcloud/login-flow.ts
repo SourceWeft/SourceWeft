@@ -191,6 +191,11 @@ export function createNextcloudCredentialFlow(
       } catch {
         throw new NextcloudLoginFlowError("NEXTCLOUD_LOGIN_FLOW_INVALID");
       }
+      // Defence in depth: `start` already checked the poll endpoint's origin, but
+      // re-verify it against the pending server here (the pending blob could have
+      // been tampered with) so a credential-free poll request still never leaves
+      // the server's own origin.
+      requireSameOrigin(pollEndpoint, server);
       const scope = credentialedFetch();
       try {
         const { status, text } = await nextcloudRequest(

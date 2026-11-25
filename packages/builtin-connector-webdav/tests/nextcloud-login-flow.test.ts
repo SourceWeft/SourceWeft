@@ -349,11 +349,23 @@ test("poll rejects an authorized server on another origin", async () => {
   );
 });
 
-test("poll fails invalid when the OCS user id is missing or malformed", async () => {
+test("poll fails invalid when the OCS user id is missing or not a single clean segment", async () => {
+  // `..`/`.`/`/`/`\\`/edge-whitespace would escape the per-user files root once
+  // encoded into the endpoint (encodeURIComponent leaves `.` untouched), so each
+  // is rejected before any endpoint is built.
+  for (const id of [".", "..", "a/b", "a\\b", " x", "x "]) {
+    const { flow } = flowFor({
+      ocs: { body: JSON.stringify({ ocs: { data: { id } } }) },
+    });
+    const started = await flow.start({ serverUrl: SERVER, config: {} });
+    await rejectsWithCode(
+      flow.poll({ pending: started.pending }),
+      "NEXTCLOUD_LOGIN_FLOW_INVALID",
+    );
+  }
   for (const body of [
     JSON.stringify({ ocs: { data: { id: "" } } }),
     JSON.stringify({ ocs: { data: {} } }),
-    JSON.stringify({ ocs: { data: { id: "a/b" } } }),
     "not json",
   ]) {
     const { flow } = flowFor({ ocs: { body } });
@@ -363,6 +375,50 @@ test("poll fails invalid when the OCS user id is missing or malformed", async ()
       "NEXTCLOUD_LOGIN_FLOW_INVALID",
     );
   }
+});
+
+test("poll accepts a dotted or percent-bearing id and keeps the endpoint under the files root", async () => {
+  // Every accepted id resolves to a path strictly under the user's files root.
+  for (const id of ["%2e%2e", "a.b", "al ice", "alicé"]) {
+    const { flow } = flowFor({ userId: id });
+    const started = await flow.start({ serverUrl: SERVER, config: {} });
+    const result = await flow.poll({ pending: started.pending });
+    assert.equal(result.status, "authorized");
+    if (result.status !== "authorized") continue;
+    assert.equal(result.config.userId, id);
+    const pathname = new URL(result.config.endpoint as string).pathname;
+    assert.ok(
+      pathname.startsWith("/remote.php/dav/files/"),
+      `id "${id}" escaped the files root: ${pathname}`,
+    );
+  }
+  // `%2e%2e` is double-encoded, so it can never decode back into `..`.
+  const { flow } = flowFor({ userId: "%2e%2e" });
+  const started = await flow.start({ serverUrl: SERVER, config: {} });
+  const authorized = await flow.poll({ pending: started.pending });
+  assert.equal(authorized.status, "authorized");
+  if (authorized.status === "authorized") {
+    assert.equal(
+      authorized.config.endpoint,
+      `${SERVER}/remote.php/dav/files/%252e%252e/`,
+    );
+  }
+});
+
+test("poll re-rejects a poll endpoint on another origin without sending it", async () => {
+  const { flow, calls } = flowFor();
+  await rejectsWithCode(
+    flow.poll({
+      pending: {
+        pollEndpoint: "https://evil.example.com/poll",
+        pollToken: POLL_TOKEN,
+        server: SERVER,
+      },
+    }),
+    "NEXTCLOUD_LOGIN_FLOW_INVALID",
+  );
+  // The origin recheck runs before the scope opens, so nothing is sent.
+  assert.equal(calls.length, 0);
 });
 
 test("poll is unreachable when the OCS endpoint returns 5xx", async () => {

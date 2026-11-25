@@ -186,6 +186,23 @@ test("nextcloudEndpoint strips a trailing slash from the server", () => {
   );
 });
 
+test("nextcloudEndpoint throws for a user id that is not a single path segment", () => {
+  for (const bad of ["", ".", "..", "a/b", "a\\b"]) {
+    assert.throws(() => nextcloudEndpoint("https://host.example", bad));
+  }
+  // A dotted or percent-bearing id is a valid single segment and is encoded so
+  // it cannot resolve above the files root.
+  assert.equal(
+    nextcloudEndpoint("https://host.example", "%2e%2e"),
+    "https://host.example/remote.php/dav/files/%252e%252e/",
+  );
+  assert.ok(
+    new URL(
+      nextcloudEndpoint("https://host.example", "%2e%2e"),
+    ).pathname.startsWith("/remote.php/dav/files/"),
+  );
+});
+
 // --- contribution and backend manifest --------------------------------------
 
 test("the nextcloud contribution is a basic-credential connector with its own actions", () => {

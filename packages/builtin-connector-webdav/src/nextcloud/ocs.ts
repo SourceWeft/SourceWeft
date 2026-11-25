@@ -239,8 +239,15 @@ export function basicAuth(username: string, secret: string): string {
   )}`;
 }
 
-/** Rejects a files user id that is empty, over-long, or carries a path separator
- * or a control character (it is encoded as a single DAV path segment). */
+/**
+ * Rejects any files user id that is not a single clean DAV path segment, so the
+ * id cannot escape the per-user files root once it is encoded into the endpoint.
+ * `encodeURIComponent` does NOT encode `.`, so a `.`/`..` id would survive and a
+ * later `new URL()` resolution would collapse `…/files/../` to outside the root.
+ * Rejected: empty, over-long, `.`/`..`, a path separator (`/` or `\`), a control
+ * character, or surrounding whitespace. A literal `%` is fine — it is re-encoded
+ * (`%2e%2e` → `%252e%252e`), so it cannot decode back into a traversal.
+ */
 function sanitizeUserId(value: unknown): string {
   if (
     typeof value !== "string" ||
@@ -249,7 +256,12 @@ function sanitizeUserId(value: unknown): string {
   ) {
     throw new NextcloudLoginFlowError("NEXTCLOUD_LOGIN_FLOW_INVALID");
   }
-  if (/[\u0000-\u001F\u007F/]/.test(value)) {
+  if (
+    value === "." ||
+    value === ".." ||
+    value !== value.trim() ||
+    /[\u0000-\u001F\u007F/\\]/.test(value)
+  ) {
     throw new NextcloudLoginFlowError("NEXTCLOUD_LOGIN_FLOW_INVALID");
   }
   return value;
