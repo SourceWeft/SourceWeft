@@ -8,6 +8,7 @@ const service = vi.hoisted(() => ({
   enable: vi.fn(),
   update: vi.fn(),
   listFeed: vi.fn(),
+  listDecisions: vi.fn(),
   postMessage: vi.fn(),
   listTickets: vi.fn(),
   closeTicket: vi.fn(),
@@ -88,6 +89,7 @@ const ROUTES: Array<[string, string, unknown?]> = [
   ["POST", "", undefined],
   ["PATCH", "", { version: 1, action: "pause" }],
   ["GET", "/feed"],
+  ["GET", "/decisions"],
   ["POST", "/messages", { text: "hi", idempotencyKey: "key-1" }],
   ["GET", "/tickets"],
   ["POST", "/tickets/ticket_1/close", { idempotencyKey: "key-2" }],
@@ -106,6 +108,7 @@ beforeEach(() => {
   service.enable.mockResolvedValue(assistantEntity);
   service.update.mockResolvedValue({ assistant: assistantEntity });
   service.listFeed.mockResolvedValue({ items: [feedItem], nextCursor: null });
+  service.listDecisions.mockResolvedValue({ items: [], nextCursor: null });
   service.postMessage.mockResolvedValue({ item: feedItem, created: true });
   service.listTickets.mockResolvedValue({ tickets: [ticketEntity] });
   service.closeTicket.mockResolvedValue({ ticket: ticketEntity });
@@ -187,6 +190,18 @@ test("GET /assistant/feed parses before/limit from the query", async () => {
     { before: "item_5", limit: 10 },
   ]);
   assert.equal((await app().request(`${BASE}/feed?limit=0`)).status, 400);
+});
+
+test("GET /assistant/decisions parses before/limit/action and rejects an unknown action", async () => {
+  await app().request(`${BASE}/decisions?before=d_5&limit=10&action=ignore`);
+  assert.deepEqual(service.listDecisions.mock.calls[0]!.slice(1), [
+    { before: "d_5", limit: 10, action: "ignore" },
+  ]);
+  assert.equal(
+    (await app().request(`${BASE}/decisions?action=bogus`)).status,
+    400,
+  );
+  assert.equal((await app().request(`${BASE}/decisions?limit=0`)).status, 400);
 });
 
 test("postMessage answers 201 when new and 200 on replay", async () => {

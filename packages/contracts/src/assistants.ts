@@ -161,6 +161,23 @@ export const assistantFeedItemSchema = z.object({
 });
 export type AssistantFeedItem = z.infer<typeof assistantFeedItemSchema>;
 
+/** One judgement of the router: the event, what it decided, and why. */
+export const assistantDecisionItemSchema = z.object({
+  id: z.string(),
+  action: assistantDecisionActionSchema,
+  reason: z.string().nullable(),
+  createdAt: z.string(),
+  trigger: z.object({
+    id: z.string(),
+    sourceKind: assistantTriggerSourceSchema,
+    authorUserId: z.string().nullable(),
+    /** The event's text, cut short: the decisions list is a log, not a reader. */
+    text: z.string(),
+  }),
+  ticket: z.object({ id: z.string(), title: z.string() }).nullable(),
+});
+export type AssistantDecisionItem = z.infer<typeof assistantDecisionItemSchema>;
+
 // ── Requests ─────────────────────────────────────────────────────────────
 
 export const postAssistantMessageRequestSchema = z
@@ -219,4 +236,12 @@ export const assistantFeedItemResponseSchema = z.object({
 });
 export type AssistantFeedItemResponse = z.infer<
   typeof assistantFeedItemResponseSchema
+>;
+
+export const assistantDecisionsResponseSchema = z.object({
+  items: z.array(assistantDecisionItemSchema),
+  nextCursor: z.string().nullable(),
+});
+export type AssistantDecisionsResponse = z.infer<
+  typeof assistantDecisionsResponseSchema
 >;

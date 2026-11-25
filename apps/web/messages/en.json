@@ -1732,6 +1732,7 @@
       "loadError": "Could not load the assistant.",
       "feedHeading": "Activity",
       "ticketsHeading": "Tickets",
+      "toggleTickets": "Show or hide tickets",
       "steward": "Steward: {name}"
     },
     "status": {
@@ -1802,6 +1803,20 @@
         "credit_cap": "Stopped: it reached its credit cap.",
         "insufficient_credits": "Stopped: the requester is out of credits.",
         "repeated_failure": "Stopped after repeated failed runs."
+      },
+      "showDetails": "Details",
+      "hideDetails": "Hide details",
+      "origin": {
+        "explicit": "Asked for by a member",
+        "inferred": "Picked up by the assistant"
+      },
+      "detail": {
+        "goal": "Goal",
+        "origin": "Origin",
+        "creditCap": "Credit cap",
+        "failures": "Failed runs in a row",
+        "created": "Created",
+        "ended": "Ended"
       }
     },
     "menu": {
@@ -1840,6 +1855,61 @@
       "router": "This is the assistant's work log. It runs on its own and does not take messages here.",
       "ticket": "This conversation belongs to an assistant ticket and does not take messages here.",
       "open": "Talk to the assistant"
+    },
+    "welcome": {
+      "title": "What should the assistant work on?",
+      "suggestions": {
+        "changes": "Summarize what changed in our sources this week.",
+        "questions": "What are the open questions across our sources?",
+        "briefing": "Draft a briefing from our latest sources.",
+        "outdated": "Find sources that look outdated or contradict each other."
+      },
+      "steps": {
+        "ask": {
+          "title": "Ask in plain words",
+          "body": "Anyone who can write in this workspace can post a request."
+        },
+        "ticket": {
+          "title": "Each request becomes a ticket",
+          "body": "It runs on its own and is paid for by whoever asked."
+        },
+        "report": {
+          "title": "The report comes back here",
+          "body": "Open the conversation behind a ticket to see the work."
+        }
+      }
+    },
+    "summary": {
+      "waiting": "{count, plural, one {# ticket is waiting for you} other {# tickets are waiting for you}}",
+      "blocked": "{count, plural, one {# ticket is blocked} other {# tickets are blocked}}",
+      "paused": "The assistant is paused."
+    },
+    "sections": {
+      "label": "Assistant sections",
+      "chat": "Conversation",
+      "decisions": "Decisions"
+    },
+    "decisions": {
+      "empty": "No decisions yet. Each request the assistant judges shows up here with its reason.",
+      "loadError": "Could not load the decisions.",
+      "loadOlder": "Load earlier decisions",
+      "why": "Why: {reason}",
+      "ticket": "Ticket: {title}",
+      "filter": {
+        "all": "All",
+        "create_ticket": "New tickets",
+        "route_to_ticket": "Passed on",
+        "ignore": "Ignored"
+      },
+      "action": {
+        "create_ticket": "Opened a ticket",
+        "route_to_ticket": "Passed to a ticket",
+        "ignore": "Ignored"
+      },
+      "source": {
+        "member_message": "A member's message",
+        "worker_report": "A ticket's report"
+      }
     }
   },
   "dashboardChat": {

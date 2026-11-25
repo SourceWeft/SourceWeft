@@ -15,7 +15,13 @@ vi.mock("next/link", () => ({
 }));
 
 import { TicketList } from "./ticket-list";
-import { buttons, click, mountWithIntl, unmountAll } from "@/test/react";
+import {
+  button,
+  buttons,
+  click,
+  mountWithIntl,
+  unmountAll,
+} from "@/test/react";
 
 const retry = vi.fn();
 const close = vi.fn();
@@ -169,4 +175,45 @@ test("only the ticket's payer is offered Retry; another member with write access
   ) as HTMLElement;
   expect(buttons("Retry", waiting)).toHaveLength(0);
   expect(buttons("Close", waiting)).toHaveLength(1);
+});
+
+test("a group folds and unfolds from its header", async () => {
+  const { container } = await mountWithIntl(
+    <TicketList
+      workspaceId="ws_1"
+      tickets={[ticket()]}
+      members={[]}
+      canWrite
+      viewerId="u1"
+    />,
+  );
+  const header = container.querySelector(
+    "[data-group] button[aria-expanded]",
+  ) as HTMLElement;
+  expect(container.querySelector("[data-ticket-id]")).not.toBeNull();
+  await click(header);
+  expect(header.getAttribute("aria-expanded")).toBe("false");
+  expect(container.querySelector("[data-ticket-id]")).toBeNull();
+  await click(header);
+  expect(container.querySelector("[data-ticket-id]")).not.toBeNull();
+});
+
+test("a ticket's details open on request and show its goal, origin and cap", async () => {
+  const { container } = await mountWithIntl(
+    <TicketList
+      workspaceId="ws_1"
+      tickets={[ticket({ consecutiveFailures: 2 })]}
+      members={[]}
+      canWrite
+      viewerId="u1"
+    />,
+  );
+  expect(container.textContent).not.toContain("Make CI green");
+  await click(button("Details", container));
+  expect(container.textContent).toContain("Make CI green");
+  expect(container.textContent).toContain("Asked for by a member");
+  expect(container.textContent).toContain("500");
+  expect(container.textContent).toContain("Failed runs in a row");
+  await click(button("Hide details", container));
+  expect(container.textContent).not.toContain("Make CI green");
 });

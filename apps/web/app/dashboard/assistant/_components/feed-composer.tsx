@@ -25,8 +25,14 @@ import { useAssistantAction } from "./use-assistant-actions";
 export function FeedComposer({
   workspaceId,
   disabledReason = null,
+  seed = null,
 }: {
   workspaceId: string | null;
+  /**
+   * Text to put in the box, such as a suggestion the reader picked. Each new
+   * `id` replaces the draft and moves focus to the box.
+   */
+  seed?: { id: number; text: string } | null;
   /** Why this viewer cannot send right now (a paused assistant, say). */
   disabledReason?: string | null;
 }) {
@@ -43,6 +49,12 @@ export function FeedComposer({
     // Only known in the browser; the server render keeps the default.
     if (/Mac|iPhone|iPad/.test(navigator.userAgent)) setShortcut("⌘+Enter");
   }, []);
+
+  React.useEffect(() => {
+    if (!seed) return;
+    setDraft(seed.text);
+    field.current?.focus();
+  }, [seed]);
 
   React.useLayoutEffect(() => {
     // Grows with the draft up to a cap, then scrolls inside.

@@ -18,6 +18,7 @@ import {
   mountWithIntl,
   typeInto,
   unmountAll,
+  withIntl,
 } from "@/test/react";
 
 const postMessage = vi.fn();
@@ -135,4 +136,22 @@ test("text typed while a send is in flight is kept as the next message", async (
 
   expect(postMessage).toHaveBeenCalledTimes(1);
   expect(field(container).value).toBe("First request\nAnd a follow-up");
+});
+
+test("a seed fills the box and focuses it, and a new seed replaces what was typed", async () => {
+  const { container, render } = await mountWithIntl(
+    <FeedComposer workspaceId="ws_1" seed={{ id: 1, text: "First idea" }} />,
+  );
+  await flush(2);
+  expect(field(container).value).toBe("First idea");
+  expect(document.activeElement).toBe(field(container));
+
+  await write(container, "Edited by hand");
+  await render(
+    withIntl(
+      <FeedComposer workspaceId="ws_1" seed={{ id: 2, text: "Second idea" }} />,
+    ),
+  );
+  await flush(2);
+  expect(field(container).value).toBe("Second idea");
 });

@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { db } from "@sourceweft/db";
 import type {
   Assistant,
+  AssistantDecisionAction,
+  AssistantDecisionsResponse,
   AssistantFeedItem,
   AssistantStatus,
   AssistantStatusReason,
@@ -28,6 +30,7 @@ import {
   insertAssistantRow,
   insertFeedItemRow,
   insertTriggerRow,
+  listDecisionRows,
   listFeedItemRows,
   listTicketRows,
   resetTicketFailuresRow,
@@ -45,6 +48,8 @@ type Caller = { workspaceId: string; userId: string };
 type Access = { teamId: string; canWrite: boolean; isContainerAdmin: boolean };
 
 const DEFAULT_FEED_PAGE = 50;
+const DEFAULT_DECISION_PAGE = 30;
+const DECISION_TEXT_MAX = 200;
 
 function notFound() {
   return new AssistantError(404, "ASSISTANT_NOT_FOUND", "Assistant not found");
@@ -529,6 +534,48 @@ export class AssistantService {
     const page = rows.slice(0, limit);
     return {
       items: page.map(presentFeedItem),
+      nextCursor: rows.length > limit ? page[page.length - 1]!.id : null,
+    };
+  }
+
+  async listDecisions(
+    caller: Caller,
+    input: {
+      before?: string;
+      limit?: number;
+      action?: AssistantDecisionAction;
+    } = {},
+  ): Promise<AssistantDecisionsResponse> {
+    const access = await this.requireAccess(caller);
+    const assistant = await this.requireAssistant(caller, access);
+    const limit = input.limit ?? DEFAULT_DECISION_PAGE;
+    const rows = await listDecisionRows({
+      assistantId: assistant.id,
+      action: input.action,
+      before: input.before,
+      limit: limit + 1,
+    });
+    const page = rows.slice(0, limit);
+    return {
+      items: page.map((row) => ({
+        id: row.id,
+        action: row.action,
+        reason: row.reason ?? null,
+        createdAt: row.createdAt.toISOString(),
+        trigger: {
+          id: row.triggerId,
+          sourceKind: row.triggerSourceKind,
+          authorUserId: row.triggerAuthorUserId ?? null,
+          text:
+            row.triggerText.length > DECISION_TEXT_MAX
+              ? `${row.triggerText.slice(0, DECISION_TEXT_MAX)}…`
+              : row.triggerText,
+        },
+        ticket:
+          row.ticketId && row.ticketTitle !== null
+            ? { id: row.ticketId, title: row.ticketTitle }
+            : null,
+      })),
       nextCursor: rows.length > limit ? page[page.length - 1]!.id : null,
     };
   }

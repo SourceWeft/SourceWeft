@@ -1,4 +1,6 @@
 import type {
+  AssistantDecisionAction,
+  AssistantDecisionsResponse,
   AssistantFeedItemResponse,
   AssistantFeedResponse,
   AssistantResponse,
@@ -52,6 +54,25 @@ export class AssistantClient {
     const query = search.size ? `?${search.toString()}` : "";
     return this.http.get<AssistantFeedResponse>(
       `${this.base(workspaceId)}/feed${query}`,
+    );
+  }
+
+  /** The router's decisions, newest-first page before `before`. */
+  listDecisions(
+    workspaceId: string,
+    input: {
+      before?: string;
+      limit?: number;
+      action?: AssistantDecisionAction;
+    } = {},
+  ) {
+    const search = new URLSearchParams();
+    if (input.before) search.set("before", input.before);
+    if (input.limit !== undefined) search.set("limit", String(input.limit));
+    if (input.action) search.set("action", input.action);
+    const query = search.size ? `?${search.toString()}` : "";
+    return this.http.get<AssistantDecisionsResponse>(
+      `${this.base(workspaceId)}/decisions${query}`,
     );
   }
 

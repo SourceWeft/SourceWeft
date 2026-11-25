@@ -53,6 +53,11 @@ type NavItem = {
   more?: boolean;
   /** The drawer is the conversation list itself, so Chat is rail-only. */
   railOnly?: boolean;
+  /**
+   * On the desktop rail as a destination of its own, while the drawer (a
+   * phone) keeps it under More. Needs `more`.
+   */
+  railPrimary?: boolean;
 };
 
 const navMain: NavItem[] = [
@@ -70,6 +75,22 @@ const navMain: NavItem[] = [
     railOnly: true,
   },
   {
+    labelKey: "nav.assistant",
+    href: "/dashboard/assistant",
+    icon: ConciergeBell,
+    match: (p) => p.startsWith("/dashboard/assistant"),
+    more: true,
+    railPrimary: true,
+  },
+  {
+    labelKey: "nav.scheduled",
+    href: "/dashboard/scheduled",
+    icon: CalendarClock,
+    match: (p) => p.startsWith("/dashboard/scheduled"),
+    more: true,
+    railPrimary: true,
+  },
+  {
     labelKey: "nav.skills",
     href: "/dashboard/skills",
     icon: SkillIcon,
@@ -82,20 +103,6 @@ const navMain: NavItem[] = [
     match: (p) => p.startsWith("/dashboard/mcp"),
   },
   {
-    labelKey: "nav.scheduled",
-    href: "/dashboard/scheduled",
-    icon: CalendarClock,
-    match: (p) => p.startsWith("/dashboard/scheduled"),
-    more: true,
-  },
-  {
-    labelKey: "nav.assistant",
-    href: "/dashboard/assistant",
-    icon: ConciergeBell,
-    match: (p) => p.startsWith("/dashboard/assistant"),
-    more: true,
-  },
-  {
     labelKey: "nav.observability",
     href: "/dashboard/observability",
     icon: Activity,
@@ -103,9 +110,10 @@ const navMain: NavItem[] = [
     more: true,
   },
 ];
-const primaryNav = navMain.filter((item) => !item.more);
-const drawerNav = primaryNav.filter((item) => !item.railOnly);
+const primaryNav = navMain.filter((item) => !item.more || item.railPrimary);
+const drawerNav = navMain.filter((item) => !item.more && !item.railOnly);
 const moreNav = navMain.filter((item) => item.more);
+const railMoreNav = moreNav.filter((item) => !item.railPrimary);
 
 function NavigationLink({
   active,
@@ -414,9 +422,14 @@ export function DashboardSidebar() {
   const moreActive =
     moreNav.some((item) => item.match(pathname)) ||
     pathname.startsWith(MARKET_ADMIN_HREF);
-  const renderMoreItems = () => (
+  // On the rail, destinations that already have their own icon are not
+  // repeated in the menu.
+  const railMoreActive =
+    railMoreNav.some((item) => item.match(pathname)) ||
+    pathname.startsWith(MARKET_ADMIN_HREF);
+  const renderMoreItems = (items: readonly NavItem[] = moreNav) => (
     <>
-      {moreNav.map((item) => (
+      {items.map((item) => (
         <DropdownMenuItem key={item.href} asChild>
           <Link
             href={item.href}
@@ -552,7 +565,7 @@ export function DashboardSidebar() {
               size="icon-sm"
               className={cn(
                 "size-9 text-muted-foreground",
-                moreActive && "bg-sidebar-accent text-foreground",
+                railMoreActive && "bg-sidebar-accent text-foreground",
               )}
               aria-label={t("nav.more")}
               title={t("nav.more")}
@@ -561,7 +574,7 @@ export function DashboardSidebar() {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent side="right" align="start" className="w-52">
-            {renderMoreItems()}
+            {renderMoreItems(railMoreNav)}
           </DropdownMenuContent>
         </DropdownMenu>
       </nav>

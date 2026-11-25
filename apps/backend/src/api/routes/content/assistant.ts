@@ -1,6 +1,7 @@
 import type { Context, Hono } from "hono";
 import { z } from "zod";
 import {
+  assistantDecisionActionSchema,
   postAssistantMessageRequestSchema,
   ticketActionRequestSchema,
   ticketStageSchema,
@@ -50,6 +51,12 @@ const listFeedQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional(),
 });
 
+const listDecisionsQuerySchema = z.object({
+  before: z.string().trim().min(1).max(256).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+  action: assistantDecisionActionSchema.optional(),
+});
+
 const listTicketsQuerySchema = z.object({
   stage: ticketStageSchema.optional(),
 });
@@ -80,6 +87,19 @@ export function registerAssistantRoutes(app: Hono) {
       limit: c.req.query("limit"),
     });
     return ApiResponse.success(c, await assistantService.listFeed(who, input));
+  });
+
+  app.get("/assistant/decisions", async (c) => {
+    const who = await caller(c);
+    const input = parse(listDecisionsQuerySchema, {
+      before: c.req.query("before"),
+      limit: c.req.query("limit"),
+      action: c.req.query("action"),
+    });
+    return ApiResponse.success(
+      c,
+      await assistantService.listDecisions(who, input),
+    );
   });
 
   app.post("/assistant/messages", async (c) => {
