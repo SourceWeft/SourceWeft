@@ -86,6 +86,30 @@ function hostOf(value: string) {
   }
 }
 
+/**
+ * Re-validate a URL before it is ever handed to `window.open`. The login URL
+ * comes from the member's own Nextcloud server and the SDK does not runtime-check
+ * the response, so the contract's http(s) refine is enforced only server-side: a
+ * malicious server could return `javascript:` or `data:`. Accept only http/https
+ * with no embedded userinfo and return the normalised href; reject anything else.
+ */
+function parseHttpUrl(value: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  if (
+    (url.protocol !== "https:" && url.protocol !== "http:") ||
+    url.username !== "" ||
+    url.password !== ""
+  ) {
+    return null;
+  }
+  return url.href;
+}
+
 /** Fixed-message mapping for every documented flow failure; every branch is a
  * static localized string and never echoes any input. */
 function loginFlowErrorText(
@@ -182,8 +206,14 @@ function LoginFlowBody({
     }
   }
 
-  function openLogin(url: string) {
-    window.open(url, "_blank", "noopener,noreferrer");
+  // Open the login URL only after re-validating it as an http(s) URL; returns
+  // the normalised href that was opened, or null when the URL was refused (and
+  // nothing was opened).
+  function openLogin(url: string): string | null {
+    const safe = parseHttpUrl(url);
+    if (!safe) return null;
+    window.open(safe, "_blank", "noopener,noreferrer");
+    return safe;
   }
 
   function scheduleNextPoll() {
@@ -246,9 +276,17 @@ function LoginFlowBody({
     // Open the provider login in the click handler's own continuation, right
     // after the start response, so a popup blocker is less likely to refuse it;
     // the waiting state also shows a visible "open again" link as the fallback.
-    openLogin(started.loginUrl);
-    loginUrlRef.current = started.loginUrl;
-    setLoginUrl(started.loginUrl);
+    // The URL is re-validated here (not just server-side): a non-http(s) loginUrl
+    // is never opened — abort the flow and best-effort cancel it on the backend.
+    const safeLoginUrl = openLogin(started.loginUrl);
+    if (!safeLoginUrl) {
+      if (started.flowId) void onCancel(started.flowId);
+      setPhase("failed");
+      setErrorText(t("connectors.nextcloud.errors.failed"));
+      return;
+    }
+    loginUrlRef.current = safeLoginUrl;
+    setLoginUrl(safeLoginUrl);
     flowIdRef.current = started.flowId;
     startedAtRef.current = Date.now();
     activeRef.current = true;
@@ -460,7 +498,16 @@ function LoginFlowBody({
           <div className="flex items-center justify-between gap-2">
             {loginUrl ? (
               <Button
-                onClick={() => openLogin(loginUrl)}
+                onClick={() => {
+                  // Defensive: `loginUrl` is already a validated href, but
+                  // re-validate so nothing but an http(s) URL ever reaches the
+                  // browser.
+                  if (!openLogin(loginUrl)) {
+                    stopPolling();
+                    setPhase("failed");
+                    setErrorText(t("connectors.nextcloud.errors.failed"));
+                  }
+                }}
                 type="button"
                 variant="outline"
               >

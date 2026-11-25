@@ -158,6 +158,33 @@ test("the waiting state offers an 'open again' fallback that reopens the same UR
   );
 });
 
+test.each([
+  ["javascript:alert(1)"],
+  ["data:text/html,x"],
+  ["ftp://cloud.example.com/login"],
+  [""],
+  ["https://user:pw@cloud.example.com/login"],
+])(
+  "a %s loginUrl is never opened, aborts the flow and cancels it",
+  async (badUrl) => {
+    const onStart = vi
+      .fn()
+      .mockResolvedValue({ flowId: FLOW_ID, loginUrl: badUrl });
+    const { onCancel } = await mountDialog({ onStart });
+    await connect();
+
+    expect(openSpy).not.toHaveBeenCalled();
+    // Best-effort cancel of the server-side flow, and a generic failure shown.
+    expect(onCancel).toHaveBeenCalledWith(FLOW_ID);
+    expect(bodyText()).toContain("could not be completed");
+    expect(bodyText()).not.toContain("Waiting for approval");
+    // The refused URL is never rendered as an href anywhere.
+    if (badUrl) {
+      expect(document.querySelector(`[href="${badUrl}"]`)).toBeNull();
+    }
+  },
+);
+
 test("a connected poll calls onConnected with the connector and closes", async () => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
   const onPoll = vi.fn().mockResolvedValue(connectedResult("nc-9"));
