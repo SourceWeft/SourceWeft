@@ -11,6 +11,18 @@ export type DavEntry = {
   lastModified: Date | null;
   contentLength: number | null;
   contentType: string | null;
+  /**
+   * owncloud/Nextcloud `oc:` properties (namespace `http://owncloud.org/ns`),
+   * present on the entry only when the server returned the corresponding
+   * element — so a plain WebDAV entry carries none of them and keeps its
+   * historical shape. When the element was returned but empty the value is
+   * `null`; consumers that need a uniform "null when absent" read it through a
+   * `?? null` (see the flavor's item identity). Filled only when a flavor asks
+   * for them via `propfind`'s `extraProps`.
+   */
+  fileId?: string | null;
+  permissions?: string | null;
+  ownerId?: string | null;
 };
 
 /**
@@ -164,14 +176,22 @@ export function parseMultistatus(
     seen.add(href);
     const props = propertiesOf(response);
     const resourcetype = props["resourcetype"];
-    entries.push({
+    const entry: DavEntry = {
       href,
       isCollection: isNode(resourcetype) && "collection" in resourcetype,
       etag: text(props["getetag"]),
       lastModified: dateOf(props["getlastmodified"]),
       contentLength: contentLengthOf(props["getcontentlength"]),
       contentType: text(props["getcontenttype"]),
-    });
+    };
+    // The `oc:` namespace prefix is stripped by the parser, so an `oc:fileid`
+    // element reads back as the `fileid` key. A key is added only when the
+    // server actually returned the element (so a plain WebDAV entry is
+    // untouched); a present-but-empty element reads as null.
+    if ("fileid" in props) entry.fileId = text(props["fileid"]);
+    if ("permissions" in props) entry.permissions = text(props["permissions"]);
+    if ("owner-id" in props) entry.ownerId = text(props["owner-id"]);
+    entries.push(entry);
   }
   return entries;
 }

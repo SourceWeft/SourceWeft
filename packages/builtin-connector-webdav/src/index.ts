@@ -12,6 +12,12 @@ export {
   type WebDavAdapterInput,
 } from "./adapter";
 export {
+  webdavFlavor,
+  type WebDavFlavor,
+  type WebDavItemIdentity,
+  type WebDavItemIdentityContext,
+} from "./flavor";
+export {
   discoverWebDavPages,
   DEFAULT_DISCOVERY_LIMITS,
   type DiscoveryLimits,

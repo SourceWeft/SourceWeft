@@ -16,11 +16,20 @@ export type FileSpec = {
   lastModified?: string;
   contentType?: string;
   body?: string;
+  /** Nextcloud/owncloud `oc:` properties (namespace http://owncloud.org/ns),
+   * emitted on the file's PROPFIND response only when defined. Existing WebDAV
+   * tests set none of these, so their responses are unchanged. */
+  fileId?: string;
+  permissions?: string;
+  ownerId?: string;
 };
 
 export type CollectionSpec = {
   folders?: string[];
   files?: Record<string, FileSpec>;
+  /** `oc:` properties emitted on this collection's own (self) PROPFIND entry,
+   * used to exercise a readiness `requireProps` check against a depth-0 listing. */
+  self?: { fileId?: string; permissions?: string; ownerId?: string };
 };
 
 export type FakeDavSpec = {
@@ -58,11 +67,36 @@ function hrefFor(
   return `${endpoint.pathname}${segments.join("/")}${trailing}`;
 }
 
-function collectionResponse(endpoint: URL, relPath: string): string {
+function ocProps(spec: {
+  fileId?: string;
+  permissions?: string;
+  ownerId?: string;
+}): string {
+  const props: string[] = [];
+  if (spec.fileId !== undefined) {
+    props.push(`<oc:fileid>${escapeXml(spec.fileId)}</oc:fileid>`);
+  }
+  if (spec.permissions !== undefined) {
+    props.push(
+      `<oc:permissions>${escapeXml(spec.permissions)}</oc:permissions>`,
+    );
+  }
+  if (spec.ownerId !== undefined) {
+    props.push(`<oc:owner-id>${escapeXml(spec.ownerId)}</oc:owner-id>`);
+  }
+  return props.join("");
+}
+
+function collectionResponse(
+  endpoint: URL,
+  relPath: string,
+  self?: { fileId?: string; permissions?: string; ownerId?: string },
+): string {
   const href = hrefFor(endpoint, relPath, true);
   return (
     `<d:response><d:href>${href}</d:href><d:propstat><d:prop>` +
     `<d:resourcetype><d:collection/></d:resourcetype>` +
+    (self ? ocProps(self) : "") +
     `</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>`
   );
 }
@@ -90,9 +124,11 @@ function fileResponse(
       `<d:getcontenttype>${escapeXml(file.contentType)}</d:getcontenttype>`,
     );
   }
+  const oc = ocProps(file);
   return (
     `<d:response><d:href>${href}</d:href><d:propstat><d:prop>` +
     props.join("") +
+    oc +
     `</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>`
   );
 }
@@ -109,7 +145,7 @@ function rawCollectionResponse(href: string): string {
 function multistatus(responses: string[]): string {
   return (
     `<?xml version="1.0" encoding="utf-8"?>` +
-    `<d:multistatus xmlns:d="DAV:">${responses.join("")}</d:multistatus>`
+    `<d:multistatus xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">${responses.join("")}</d:multistatus>`
   );
 }
 
@@ -161,7 +197,7 @@ export function buildFakeDav(spec: FakeDavSpec): typeof fetch {
       const depth = new Headers(init?.headers).get("depth") ?? "0";
       const responses = spec.omitSelf?.[key]
         ? []
-        : [collectionResponse(endpoint, canonicalPath)];
+        : [collectionResponse(endpoint, canonicalPath, collection.self)];
       if (depth === "1") {
         for (const folder of collection.folders ?? []) {
           responses.push(collectionResponse(endpoint, `${key}${folder}`));

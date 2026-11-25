@@ -16,7 +16,6 @@ import {
 } from "@sourceweft/contracts";
 import type { ConnectorPublicFetchScope } from "@sourceweft/contracts/capability-host-services";
 import { isConnectorIndexableFile } from "@sourceweft/builtin-document-parsers/file-types";
-import { toBackendWebDavManifest } from "./backend-manifest";
 import {
   createDavClient,
   type DavClient,
@@ -30,6 +29,7 @@ import {
 } from "./discovery";
 import { parseEndpoint } from "./endpoint";
 import { WebDavError } from "./errors";
+import { webdavFlavor, type WebDavFlavor } from "./flavor";
 import { parseStoredCredential, webDavCredentialIdentity } from "./identity";
 import { MAX_ROOTS } from "./limits";
 import {
@@ -46,6 +46,11 @@ export type WebDavAdapterInput = {
    * operation and closed when it finishes. */
   credentialedFetch: () => ConnectorPublicFetchScope;
   logger?: { warn?(message: string, meta?: Record<string, unknown>): void };
+  /** The connector flavor: capability id, action/error prefixes, manifest,
+   * extra PROPFIND properties, item identity, readability and the readiness
+   * property check. Defaults to the plain WebDAV flavor, reproducing today's
+   * behaviour exactly. */
+  flavor?: WebDavFlavor;
   /** Test seams. */
   limits?: Partial<DiscoveryLimits>;
   now?: () => number;
@@ -87,35 +92,6 @@ export class WebDavAdapterError extends Error {
     this.statusCode = statusCode;
     this.code = code;
   }
-}
-
-function reauthError(): WebDavAdapterError {
-  return new WebDavAdapterError(
-    422,
-    "WEBDAV_REAUTH_REQUIRED",
-    CREDENTIAL_NOT_READY_MESSAGE,
-  );
-}
-
-function invalidRequestError(): WebDavAdapterError {
-  return new WebDavAdapterError(
-    400,
-    "WEBDAV_INVALID_REQUEST",
-    "The WebDAV action request is not valid.",
-  );
-}
-
-/**
- * Remaps an operation error for the platform: a 401 from the WebDAV layer
- * becomes the reconnect condition; everything else (403, 404, blocked origin,
- * unreachable, bad response, an invalid path or endpoint) keeps its own fixed
- * code and non-401 status. Always throws.
- */
-function mapOperationError(error: unknown): never {
-  if (error instanceof WebDavError && error.code === "WEBDAV_UNAUTHORIZED") {
-    throw reauthError();
-  }
-  throw error;
 }
 
 /** A not-ready readiness result for a WebDAV-layer error, or null when the
@@ -203,36 +179,6 @@ const stripTrailingSlash = (path: string): string =>
 const asCollectionPath = (path: string): string =>
   path.endsWith("/") ? path : `${path}/`;
 
-/** Validates a browse `containerId` and returns it as a collection path
- * (trailing slash). Absent or null means the endpoint root. */
-function parseBrowseContainer(request: Record<string, unknown>): string {
-  const raw = request.containerId;
-  if (raw === undefined || raw === null) return "/";
-  if (typeof raw !== "string") throw invalidRequestError();
-  let normalized: string;
-  try {
-    normalized = normalizePath(raw);
-  } catch {
-    throw invalidRequestError();
-  }
-  return asCollectionPath(normalized);
-}
-
-/** Validates the `describe` request and returns the requested paths verbatim
- * (each a string the platform's pattern already constrained). */
-function parseDescribeIds(request: Record<string, unknown>): string[] {
-  const raw = request.ids;
-  if (!Array.isArray(raw) || raw.length < 1 || raw.length > MAX_ROOTS) {
-    throw invalidRequestError();
-  }
-  const ids: string[] = [];
-  for (const id of raw) {
-    if (typeof id !== "string") throw invalidRequestError();
-    ids.push(id);
-  }
-  return ids;
-}
-
 function folderEntry(externalId: string): ConnectorSelectionEntry {
   return {
     id: externalId,
@@ -267,11 +213,73 @@ export function createWebdavAdapter(
   adapterInput: WebDavAdapterInput,
 ): ConnectorAdapter {
   const { credentialedFetch, logger } = adapterInput;
+  const flavor = adapterInput.flavor ?? webdavFlavor;
   const now = adapterInput.now ?? Date.now;
   const limits: DiscoveryLimits = {
     ...DEFAULT_DISCOVERY_LIMITS,
     ...adapterInput.limits,
   };
+
+  /** The reconnect condition, with the flavor's error prefix. The platform
+   * still recognises the `_REAUTH_REQUIRED` suffix. */
+  function reauthError(): WebDavAdapterError {
+    return new WebDavAdapterError(
+      422,
+      `${flavor.errorPrefix}_REAUTH_REQUIRED`,
+      CREDENTIAL_NOT_READY_MESSAGE,
+    );
+  }
+
+  function invalidRequestError(): WebDavAdapterError {
+    return new WebDavAdapterError(
+      400,
+      `${flavor.errorPrefix}_INVALID_REQUEST`,
+      "The WebDAV action request is not valid.",
+    );
+  }
+
+  /**
+   * Remaps an operation error for the platform: a 401 from the WebDAV layer
+   * becomes the reconnect condition; everything else (403, 404, blocked origin,
+   * unreachable, bad response, an invalid path or endpoint) keeps its own fixed
+   * code and non-401 status. Always throws.
+   */
+  function mapOperationError(error: unknown): never {
+    if (error instanceof WebDavError && error.code === "WEBDAV_UNAUTHORIZED") {
+      throw reauthError();
+    }
+    throw error;
+  }
+
+  /** Validates a browse `containerId` and returns it as a collection path
+   * (trailing slash). Absent or null means the endpoint root. */
+  function parseBrowseContainer(request: Record<string, unknown>): string {
+    const raw = request.containerId;
+    if (raw === undefined || raw === null) return "/";
+    if (typeof raw !== "string") throw invalidRequestError();
+    let normalized: string;
+    try {
+      normalized = normalizePath(raw);
+    } catch {
+      throw invalidRequestError();
+    }
+    return asCollectionPath(normalized);
+  }
+
+  /** Validates the `describe` request and returns the requested paths verbatim
+   * (each a string the platform's pattern already constrained). */
+  function parseDescribeIds(request: Record<string, unknown>): string[] {
+    const raw = request.ids;
+    if (!Array.isArray(raw) || raw.length < 1 || raw.length > MAX_ROOTS) {
+      throw invalidRequestError();
+    }
+    const ids: string[] = [];
+    for (const id of raw) {
+      if (typeof id !== "string") throw invalidRequestError();
+      ids.push(id);
+    }
+    return ids;
+  }
 
   /** Resolves the stored credential and endpoint, mapping a rejected or
    * malformed credential to the reconnect condition. */
@@ -302,10 +310,16 @@ export function createWebdavAdapter(
         endpoint,
         credential,
       });
+      const server =
+        typeof input.config.server === "string"
+          ? input.config.server
+          : undefined;
       yield* discoverWebDavPages({
         client,
         endpoint,
         roots,
+        flavor,
+        server,
         limits,
         now,
         logger,
@@ -441,8 +455,8 @@ export function createWebdavAdapter(
   }
 
   return {
-    capabilityId: "sourceweft/webdav",
-    getManifest: toBackendWebDavManifest,
+    capabilityId: flavor.capabilityId,
+    getManifest: flavor.getManifest,
 
     credentialIdentity(
       config: Record<string, unknown>,
@@ -465,7 +479,20 @@ export function createWebdavAdapter(
             credential,
           });
           for (const root of roots) {
-            await client.propfind(root, 0);
+            const entries = await client.propfind(root, 0, {
+              extraProps: flavor.extraProps,
+            });
+            // Readiness-only: a flavor may require that the server returned the
+            // properties it depends on (e.g. a Nextcloud file id). This never
+            // runs during discovery.
+            const missing = flavor.requireProps?.(entries);
+            if (missing != null) {
+              return {
+                ready: false,
+                reason: "config_invalid",
+                message: missing,
+              };
+            }
           }
           return { ready: true, metadata: { rootCount: roots.length } };
         } finally {
@@ -558,15 +585,15 @@ export function createWebdavAdapter(
     async executeAction(
       input: ConnectorActionInput,
     ): Promise<ConnectorActionResult> {
-      if (input.actionType === "webdav.browse") {
+      if (input.actionType === `${flavor.actionPrefix}.browse`) {
         return { result: await browseAction(input) };
       }
-      if (input.actionType === "webdav.describe") {
+      if (input.actionType === `${flavor.actionPrefix}.describe`) {
         return { result: await describeAction(input) };
       }
       throw new WebDavAdapterError(
         400,
-        "WEBDAV_UNSUPPORTED_ACTION",
+        `${flavor.errorPrefix}_UNSUPPORTED_ACTION`,
         "Unsupported WebDAV action",
       );
     },

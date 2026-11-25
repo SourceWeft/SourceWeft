@@ -130,6 +130,48 @@ test("a named resource with only a bare status (no propstat) is counted as dropp
   assert.equal(stats.dropped, 1);
 });
 
+test("reads oc:fileid, oc:permissions and oc:owner-id when present", () => {
+  const xml =
+    `<d:multistatus xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">` +
+    `<d:response><d:href>/f.txt</d:href><d:propstat><d:prop>` +
+    `<d:resourcetype/><d:getetag>"e"</d:getetag>` +
+    `<oc:fileid>12345</oc:fileid><oc:permissions>RGDNVW</oc:permissions>` +
+    `<oc:owner-id>alice</oc:owner-id>` +
+    `</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>` +
+    `</d:multistatus>`;
+  const [entry] = parseMultistatus(xml);
+  assert.equal(entry?.fileId, "12345");
+  assert.equal(entry?.permissions, "RGDNVW");
+  assert.equal(entry?.ownerId, "alice");
+});
+
+test("the oc: fields are absent (not present) on a plain WebDAV entry", () => {
+  const xml =
+    `<d:multistatus xmlns:d="DAV:">` +
+    `<d:response><d:href>/f.txt</d:href><d:propstat><d:prop>` +
+    `<d:resourcetype/><d:getetag>"e"</d:getetag>` +
+    `</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>` +
+    `</d:multistatus>`;
+  const [entry] = parseMultistatus(xml);
+  assert.ok(entry);
+  assert.equal("fileId" in entry, false);
+  assert.equal("permissions" in entry, false);
+  assert.equal("ownerId" in entry, false);
+});
+
+test("an oc:fileid element that is present but empty reads as null", () => {
+  const xml =
+    `<d:multistatus xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">` +
+    `<d:response><d:href>/f.txt</d:href><d:propstat><d:prop>` +
+    `<d:resourcetype/><oc:fileid/>` +
+    `</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>` +
+    `</d:multistatus>`;
+  const [entry] = parseMultistatus(xml);
+  assert.ok(entry);
+  assert.equal("fileId" in entry, true);
+  assert.equal(entry.fileId, null);
+});
+
 test("malformed XML, wrong root and HTML fail with a fixed error", () => {
   for (const xml of [
     fixture("malformed.xml"),
