@@ -29,7 +29,11 @@ vi.mock("next-intl/server", async () => {
   };
 });
 
-import { McpToolRows } from "./mcp-display";
+import {
+  clipToolDescription,
+  McpToolRows,
+  TOOL_DESCRIPTION_LIMIT,
+} from "./mcp-display";
 
 /** Awaits the async server components in a tree, as the server would. */
 async function resolveServerTree(node: ReactNode): Promise<ReactNode> {
@@ -96,9 +100,9 @@ describe("McpToolRows", () => {
     // Not the schema's own keys.
     expect(html).not.toContain(">properties<");
     expect(html).toContain("Takes no parameters.");
-    expect(html).toContain(">field_11<");
-    expect(html).not.toContain(">field_12<");
-    expect(html).toContain("+3 more");
+    expect(html).toContain(">field_7<");
+    expect(html).not.toContain(">field_8<");
+    expect(html).toContain("+7 more");
   });
 
   it("shows a risk only when the tool has a known one", async () => {
@@ -108,8 +112,8 @@ describe("McpToolRows", () => {
   });
 
   it.each([
-    ["zh-CN", "输入参数", "必填", "无需输入参数。", "另有 3 个"],
-    ["zh-TW", "輸入參數", "必填", "無需輸入參數。", "另有 3 個"],
+    ["zh-CN", "输入参数", "必填", "无需输入参数。", "另有 7 个"],
+    ["zh-TW", "輸入參數", "必填", "無需輸入參數。", "另有 7 個"],
   ])("localizes the parameter labels in %s", async (locale, ...labels) => {
     const html = await render(locale);
     for (const label of labels) expect(html).toContain(label);
@@ -129,7 +133,9 @@ describe("McpToolRows", () => {
   it("explains an empty list by why it is empty", async () => {
     const authRequired = await empty({ kind: "authRequired" });
     expect(authRequired).toContain('data-tools-status="authRequired"');
-    expect(authRequired).toContain("could not read its tools without an account");
+    expect(authRequired).toContain(
+      "could not read its tools without an account",
+    );
     expect(authRequired).not.toMatch(/may show tools|will show|reveal/i);
     expect(await empty({ kind: "credentialRequired" })).toContain(
       "such as an API key",
@@ -149,5 +155,19 @@ describe("McpToolRows", () => {
 
   it("falls back to 'not read yet' without a status", async () => {
     expect(await empty(undefined)).toContain('data-tools-status="unindexed"');
+  });
+});
+
+describe("clipToolDescription", () => {
+  it("leaves a short description as it is", () => {
+    expect(clipToolDescription("  Search the index. ")).toBe(
+      "Search the index.",
+    );
+  });
+
+  it("cuts a long one at a word with an ellipsis", () => {
+    const clipped = clipToolDescription("lorem ipsum ".repeat(200));
+    expect(clipped.length).toBeLessThanOrEqual(TOOL_DESCRIPTION_LIMIT + 1);
+    expect(clipped.endsWith("ipsum…") || clipped.endsWith("lorem…")).toBe(true);
   });
 });

@@ -686,6 +686,7 @@
       "imagePlaceholder": "圖片",
       "notFound": "該儲存庫沒有 README。",
       "tooLarge": "README 過大，無法在此顯示，請<link>在 GitHub 上檢視</link>。",
+      "truncated": "README 較長，此頁只顯示開頭部分，請<link>在 GitHub 上閱讀其餘內容</link>。",
       "showMore": "展開完整 README",
       "showLess": "收起",
       "source": "來源：<link>{path}</link>",

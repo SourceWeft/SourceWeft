@@ -29,7 +29,10 @@ import type {
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { mcpCardText } from "../../../../lib/mcp-ai-overview";
 import { mcpAuthMethod } from "../../../../lib/mcp-auth-method";
-import { mcpGithubAccount, mcpPublisherDomain } from "../../../../lib/mcp-facts";
+import {
+  mcpGithubAccount,
+  mcpPublisherDomain,
+} from "../../../../lib/mcp-facts";
 import {
   mcpToolsStatus,
   type McpToolsStatus,
@@ -347,7 +350,10 @@ export async function McpMarketCard({
   const tStatus = await getTranslations("mcp.toolsStatus");
   const tValidation = await getTranslations("mcp.toolsValidation");
   const trusted = Boolean(item.official || item.verified);
-  const primaryCategory = mcpPrimaryCategory(item.categories, highlightCategory);
+  const primaryCategory = mcpPrimaryCategory(
+    item.categories,
+    highlightCategory,
+  );
   // Without an AI summary, the template sentence (#367 W4) stands in for a
   // registry summary no longer than it. A list item has no endpoint.
   const cardText = mcpCardText(
@@ -556,7 +562,10 @@ export async function McpDirectorySection({
 export function mcpToolsStatusText(
   status: McpToolsStatus,
   tStatus: (key: string, values?: Record<string, string | number>) => string,
-  tValidation: (key: string, values?: Record<string, string | number>) => string,
+  tValidation: (
+    key: string,
+    values?: Record<string, string | number>,
+  ) => string,
 ) {
   switch (status.kind) {
     case "listed":
@@ -648,7 +657,7 @@ export async function McpToolRows({
           </div>
           {tool.description ? (
             <p className="mt-3 whitespace-pre-line break-words text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-              {tool.description}
+              {clipToolDescription(tool.description)}
             </p>
           ) : null}
           <McpToolParameterList inputSchema={tool.inputSchema} />
@@ -658,6 +667,22 @@ export async function McpToolRows({
   );
 }
 
+/**
+ * Tool descriptions are written for a model and some run past 2,000
+ * characters; a server with 40 tools then adds 60 KB of text to the page, and
+ * the same again in the page's data. The page lists the first part: what the
+ * tool does and when to use it comes first.
+ */
+export const TOOL_DESCRIPTION_LIMIT = 400;
+
+export function clipToolDescription(description: string) {
+  const text = description.trim();
+  if (text.length <= TOOL_DESCRIPTION_LIMIT) return text;
+  const cut = text.slice(0, TOOL_DESCRIPTION_LIMIT);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > TOOL_DESCRIPTION_LIMIT * 0.6 ? cut.slice(0, space) : cut).trimEnd()}…`;
+}
+
 function toolTitle(tool: MarketMcpToolManifest) {
   const annotated = tool.annotations?.title;
   const title =
@@ -665,7 +690,7 @@ function toolTitle(tool: MarketMcpToolManifest) {
   return title && title !== tool.name ? title : null;
 }
 
-const SHOWN_TOOL_PARAMETERS = 12;
+const SHOWN_TOOL_PARAMETERS = 8;
 
 async function McpToolParameterList({
   inputSchema,
@@ -683,13 +708,10 @@ async function McpToolParameterList({
   }
   const hidden = parameters.length - SHOWN_TOOL_PARAMETERS;
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-500">
+    <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-500 [&>code]:rounded [&>code]:border [&>code]:border-zinc-200 [&>code]:bg-zinc-50 [&>code]:px-1.5 [&>code]:py-0.5 [&>code]:font-mono [&>code]:text-zinc-700 dark:[&>code]:border-white/10 dark:[&>code]:bg-white/[0.04] dark:[&>code]:text-zinc-300">
       <span>{t("tools.parameters")}</span>
       {parameters.slice(0, SHOWN_TOOL_PARAMETERS).map((parameter) => (
-        <code
-          className="rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 font-mono text-zinc-700 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-300"
-          key={parameter.name}
-        >
+        <code key={parameter.name}>
           {parameter.name}
           {parameter.required ? (
             <span className="ml-1 font-sans text-zinc-500">

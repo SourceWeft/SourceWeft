@@ -357,3 +357,50 @@ describe("isolateSkillMarkerTags", () => {
     expect(isolateSkillMarkerTags(source)).toBe(source);
   });
 });
+
+describe("compactCode", () => {
+  const markdown = [
+    "Use `npx x` to start.",
+    "",
+    "```bash",
+    "npm i -g x",
+    "npx x --help",
+    "```",
+    "",
+    "| a | b |",
+    "| - | - |",
+    "| `c` | [d](https://example.com/) |",
+  ].join("\n");
+
+  function renderCompact(source: string) {
+    return renderToStaticMarkup(
+      <UntrustedMarkdown compactCode imagePlaceholder="Image" mode="readme">
+        {source}
+      </UntrustedMarkdown>,
+    );
+  }
+
+  it("keeps the code, its language and the table text", () => {
+    const html = renderCompact(markdown);
+    expect(html).toContain("npm i -g x\nnpx x --help");
+    expect(html).toContain('data-language="bash"');
+    expect(html).toContain("<code>npx x</code>");
+    expect(html).toContain("<th>a</th>");
+    expect(html).toContain('<a href="https://example.com/"');
+  });
+
+  it("drops the per-line, per-cell and per-link markup", () => {
+    const compact = renderCompact(markdown);
+    const full = renderReadme(markdown);
+    expect(compact).not.toContain("code-block-copy-button");
+    expect(compact).not.toContain("before:content-[counter(line)]");
+    expect(compact).not.toContain('data-streamdown="table-cell"');
+    expect(compact.length).toBeLessThan(full.length / 2);
+  });
+
+  it("scales with the text, not with the number of lines", () => {
+    const lines = Array.from({ length: 300 }, (_, i) => `line ${i}`);
+    const html = renderCompact(["```", ...lines, "```"].join("\n"));
+    expect(html.length).toBeLessThan(lines.join("\n").length + 1000);
+  });
+});

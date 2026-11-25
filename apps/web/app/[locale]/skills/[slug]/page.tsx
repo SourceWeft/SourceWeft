@@ -920,6 +920,7 @@ export default async function PublicSkillDetailPage({
                 skillMd ? (
                   <article className={`${panelClassName} min-w-0 sm:p-7`}>
                     <UntrustedMarkdown
+                      compactCode
                       imagePlaceholder={t("detail.imagePlaceholder")}
                       mode="skill"
                     >

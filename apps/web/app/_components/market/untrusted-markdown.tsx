@@ -1,6 +1,12 @@
 "use client";
 
-import { useMemo, type ComponentProps, type ComponentType } from "react";
+import {
+  isValidElement,
+  useMemo,
+  type ComponentProps,
+  type ComponentType,
+  type ReactNode,
+} from "react";
 import { code } from "@streamdown/code";
 import {
   defaultRehypePlugins,
@@ -10,6 +16,8 @@ import {
   type ExtraProps,
   type StreamdownProps,
 } from "streamdown";
+
+import { cn } from "@sourceweft/ui-web/lib/utils";
 
 import {
   untrustedMarkdownLink,
@@ -377,7 +385,83 @@ const headings: Pick<Components, "h1" | "h2" | "h3" | "h4" | "h5" | "h6"> = {
   h6: heading("p", "text-sm"),
 };
 
-function untrustedMarkdownComponents(imagePlaceholder: string): Components {
+/** The source text of a fenced block as Streamdown hands it to `code`. */
+function codeBlockText(children: ReactNode): string {
+  if (typeof children === "string") return children;
+  if (Array.isArray(children)) return children.map(codeBlockText).join("");
+  if (isValidElement<{ children?: ReactNode }>(children)) {
+    return codeBlockText(children.props.children);
+  }
+  return "";
+}
+
+/**
+ * A fenced block as plain `<pre><code>`. Streamdown's own block wraps every
+ * line in two spans and every block in a header, a copy button and an icon:
+ * about 600 bytes of markup per line of code, which made a README of 30 KB of
+ * code a 480 KB HTML page. Both the text and its language stay, in the HTML a
+ * crawler reads; only the colouring and the copy button go.
+ */
+function CompactCode({
+  children,
+  className,
+  ...props
+}: ComponentProps<"code"> & ExtraProps) {
+  if (!("data-block" in props)) {
+    return <code>{children}</code>;
+  }
+  const language = /language-([^\s]+)/.exec(className ?? "")?.[1];
+  return (
+    <pre
+      className="my-4 w-full overflow-x-auto rounded-md border border-border bg-muted/40 p-3 font-mono text-xs leading-5"
+      data-language={language}
+      data-streamdown="code-block"
+    >
+      <code className={className}>
+        {codeBlockText(children).replace(/\n$/, "")}
+      </code>
+    </pre>
+  );
+}
+
+/**
+ * Tables and links without a class on every cell and anchor: the container
+ * styles them (`compactClassName`). A README table of 200 cells carried 30 KB
+ * of repeated class names.
+ */
+const compactComponents: Components = {
+  a: ({ children, href }) => {
+    const link = untrustedMarkdownLink(href);
+    if (link.kind === "external") {
+      return (
+        <a href={link.href} rel={link.rel} target={link.target}>
+          {children}
+        </a>
+      );
+    }
+    if (link.kind === "anchor") return <a href={link.href}>{children}</a>;
+    return <span>{children}</span>;
+  },
+  code: CompactCode,
+  table: ({ children }) => (
+    <div className="my-4 overflow-x-auto">
+      <table>{children}</table>
+    </div>
+  ),
+  tbody: ({ children }) => <tbody>{children}</tbody>,
+  td: ({ children }) => <td>{children}</td>,
+  th: ({ children }) => <th>{children}</th>,
+  thead: ({ children }) => <thead>{children}</thead>,
+  tr: ({ children }) => <tr>{children}</tr>,
+};
+
+const compactClassName =
+  "[&_a]:font-medium [&_a]:underline [&_a]:underline-offset-4 [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-muted [&_:not(pre)>code]:px-1.5 [&_:not(pre)>code]:py-0.5 [&_:not(pre)>code]:font-mono [&_table]:w-full [&_table]:text-sm [&_th]:border-b [&_th]:border-border [&_th]:bg-muted/80 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold [&_td]:border-b [&_td]:border-border [&_td]:px-3 [&_td]:py-2";
+
+function untrustedMarkdownComponents(
+  imagePlaceholder: string,
+  compactCode: boolean,
+): Components {
   return {
     ...headings,
     a: ({ children, href }) => {
@@ -426,6 +510,7 @@ function untrustedMarkdownComponents(imagePlaceholder: string): Components {
         <span>[{label}]</span>
       );
     },
+    ...(compactCode ? compactComponents : {}),
   };
 }
 
@@ -442,6 +527,11 @@ function untrustedMarkdownComponents(imagePlaceholder: string): Components {
  */
 export type UntrustedMarkdownProps = {
   children: string;
+  /**
+   * Public pages: fenced code as plain `<pre><code>` (no per-line markup,
+   * colouring or copy button), so the page stays small for crawlers.
+   */
+  compactCode?: boolean;
   /** The localized word shown for an image that is not loaded, e.g. "Image". */
   imagePlaceholder: string;
 } & (
@@ -460,12 +550,13 @@ export type UntrustedMarkdownProps = {
 export function UntrustedMarkdown({
   baseUrl,
   children,
+  compactCode = false,
   imagePlaceholder,
   mode,
 }: UntrustedMarkdownProps) {
   const components = useMemo(
-    () => untrustedMarkdownComponents(imagePlaceholder),
-    [imagePlaceholder],
+    () => untrustedMarkdownComponents(imagePlaceholder, compactCode),
+    [compactCode, imagePlaceholder],
   );
   const blob = baseUrl?.blob;
   const raw = baseUrl?.raw;
@@ -481,13 +572,16 @@ export function UntrustedMarkdown({
   );
   return (
     <Streamdown
-      className="w-full min-w-0 max-w-full text-sm leading-7 [overflow-wrap:anywhere] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:[overflow-wrap:normal]"
+      className={cn(
+        compactCode && compactClassName,
+        "w-full min-w-0 max-w-full text-sm leading-7 [overflow-wrap:anywhere] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:[overflow-wrap:normal]",
+      )}
       components={components}
       controls={{ code: { copy: true, download: false }, table: false }}
       linkSafety={{ enabled: false }}
       mode="static"
       parseIncompleteMarkdown={false}
-      plugins={plugins}
+      plugins={compactCode ? undefined : plugins}
       rehypePlugins={rehypePlugins}
       urlTransform={defaultUrlTransform}
     >
