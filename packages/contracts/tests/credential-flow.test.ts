@@ -67,6 +67,9 @@ test("start request validates and rejects extra fields", () => {
       roots: ["/"].concat(Array(20).fill("/a")),
     },
     { serverUrl: "https://a.example", name: "x", roots: ["a".repeat(513)] },
+    // An empty roots array must be rejected at start (it previously passed start
+    // and failed only after approval, orphaning the issued app password).
+    { serverUrl: "https://a.example", name: "x", roots: [] },
     { serverUrl: "https://a.example", name: "x", extra: 1 },
   ]) {
     assert.equal(

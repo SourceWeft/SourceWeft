@@ -523,7 +523,9 @@ export const startCredentialFlowRequestSchema = z
   .object({
     serverUrl: z.string().trim().min(1).max(2048),
     name: z.string().trim().min(1).max(200),
-    roots: z.array(z.string().max(512)).max(20).optional(),
+    // When present, at least one and at most twenty folders: an empty list would
+    // pass start and then fail after approval, orphaning the issued app password.
+    roots: z.array(z.string().max(512)).min(1).max(20).optional(),
     periodicIndexingEnabled: z.boolean().optional(),
     /** Present when reconnecting an existing connector. */
     connectorId: z.string().trim().min(1).optional(),
