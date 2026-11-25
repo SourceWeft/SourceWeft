@@ -3592,7 +3592,8 @@
           "expired": "登入授權已過期。請重新開始。",
           "timedOut": "未在規定時間內完成登入授權。請重新開始。",
           "failed": "無法完成連接，請重試。"
-        }
+        },
+        "disconnectNote": "SourceWeft 會嘗試移除它建立的應用專用密碼，但如果沒有成功，你可以在 Nextcloud 的「設定 > 安全」中將其刪除。"
       },
       "gmail": {
         "modeTitle": "選擇 Gmail 用途",

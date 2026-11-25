@@ -3592,7 +3592,8 @@
           "expired": "The login approval expired. Start again.",
           "timedOut": "The login was not approved in time. Start again.",
           "failed": "The connection could not be completed. Try again."
-        }
+        },
+        "disconnectNote": "SourceWeft tries to remove the app password it created, but if that does not succeed you can delete it in Nextcloud under Settings > Security."
       },
       "gmail": {
         "modeTitle": "Choose how to use Gmail",

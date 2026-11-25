@@ -10,24 +10,31 @@ import type { ConnectorItem } from "./types";
 
 afterEach(unmountAll);
 
-const connector: ConnectorItem = {
-  id: "gmail-1",
-  name: "Gmail",
-  status: "active",
-  meta: "",
-  raw: {
-    id: "gmail-1",
-    connectorType: "gmail",
-    name: "Gmail",
+function connectorOfType(connectorType: string): ConnectorItem {
+  return {
+    id: `${connectorType}-1`,
+    name: connectorType,
     status: "active",
-  } as SourceConnector,
-};
+    meta: "",
+    raw: {
+      id: `${connectorType}-1`,
+      connectorType,
+      name: connectorType,
+      status: "active",
+    } as SourceConnector,
+  };
+}
 
-function renderDialog(broker: string | null) {
+const connector = connectorOfType("gmail");
+
+function renderDialog(
+  broker: string | null,
+  item: ConnectorItem = connector,
+) {
   return mountWithIntl(
     createElement(ConnectorDisconnectDialog, {
       broker,
-      connector,
+      connector: item,
       hardDelete: true,
       isBusy: false,
       onConfirm: vi.fn(),
@@ -36,6 +43,9 @@ function renderDialog(broker: string | null) {
     }),
   );
 }
+
+const NEXTCLOUD_NOTE =
+  "you can delete it in Nextcloud under Settings > Security";
 
 test("a Composio-brokered connector says deleting removes the Composio connection", async () => {
   await renderDialog("composio");
@@ -55,4 +65,14 @@ test("a standard OAuth connector keeps the note that the provider grant stays", 
     "SourceWeft will not revoke access in the third-party provider.",
   );
   expect(text).not.toContain("Composio");
+});
+
+test("a Nextcloud (login_flow) connector shows the manual app-password removal note", async () => {
+  await renderDialog(null, connectorOfType("nextcloud"));
+  expect(document.body.textContent ?? "").toContain(NEXTCLOUD_NOTE);
+});
+
+test("a non-login-flow connector does not show the manual app-password note", async () => {
+  await renderDialog(null, connectorOfType("gmail"));
+  expect(document.body.textContent ?? "").not.toContain(NEXTCLOUD_NOTE);
 });
