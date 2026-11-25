@@ -22,7 +22,7 @@
 //!   launcher: encoded script, `Start-Process -Verb RunAs`, the elevated script, the result file.
 //!   On such an account `RunAs` completes without a prompt. **What this does not cover:** a UAC
 //!   prompt answered (or dismissed) by a human, on the secure desktop. That is checked by hand.
-//! - The upstream default `@anthropic-ai/sandbox-runtime@0.0.81` installed first under
+//! - The upstream default `@anthropic-ai/sandbox-runtime@0.0.83` installed first under
 //!   `apps/desktop/sandbox-sidecar/dist/upstream-srt` with its own vendored `srt-win.exe install`
 //!   (account `srt-sandbox`, ports 60080-60089). The coexistence tests read its `status` and
 //!   require it to be the same after anything ours does.
@@ -316,7 +316,7 @@ fn upstream_srt_win() -> PathBuf {
         .join("srt-win.exe");
     assert!(
         path.is_file(),
-        "expected the upstream default srt at {path:?}: install @anthropic-ai/sandbox-runtime@0.0.81 \
+        "expected the upstream default srt at {path:?}: install @anthropic-ai/sandbox-runtime@0.0.83 \
          under apps/desktop/sandbox-sidecar/dist/upstream-srt and run its vendored \
          `srt-win.exe install` first (scripts/ci/windows-sandbox-coexist.ps1 install-upstream; the \
          windows-sandbox CI job does this before the suite)"

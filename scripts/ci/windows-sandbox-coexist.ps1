@@ -33,7 +33,7 @@ param(
   [ValidateSet('preflight', 'install-upstream', 'hosts', 'hide-bash', 'restore-bash', 'assert-coexist', 'final-uninstall', 'cleanup')]
   [string]$Action,
   [string]$UpstreamDir = 'apps/desktop/sandbox-sidecar/dist/upstream-srt',
-  [string]$Version = '0.0.81'
+  [string]$Version = '0.0.83'
 )
 
 $ErrorActionPreference = 'Stop'

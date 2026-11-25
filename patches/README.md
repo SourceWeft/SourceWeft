@@ -127,7 +127,7 @@ The separate `langchain` patch (the model node pushed the same middleware
 
 ## macOS sandbox proxy endpoint
 
-`@anthropic-ai__sandbox-runtime@0.0.81.patch` applies to the existing pinned
+`@anthropic-ai__sandbox-runtime@0.0.83.patch` applies to the existing pinned
 SourceWeft runtime tarball. For the owned, authenticated macOS HTTP/SOCKS mux
 only, generated proxy endpoints use `127.0.0.1`, matching the IPv4 listener,
 instead of relying on `localhost` address-family resolution inside Seatbelt.
