@@ -131,28 +131,50 @@ export const ConversationKeyboardAnchor = ({
 }: {
   onBeforeScroll?: () => void;
 }) => {
+  const { scrollRef } = useStickToBottomContext();
   const { scrollToActualBottom } = useActualBottom(onBeforeScroll);
   useEffect(() => {
-    const viewport = window.visualViewport;
-    if (!viewport) {
+    const el = scrollRef.current;
+    if (!el) {
       return;
     }
-    let lastHeight = viewport.height;
+    // iOS WKWebView resizes the layout (not always the visual viewport) when the
+    // keyboard opens, so watch the scroll area itself as well as the viewport.
+    let lastHeight = el.clientHeight;
     let frame = 0;
-    const onResize = () => {
-      const shrank = viewport.height < lastHeight - 80;
-      lastHeight = viewport.height;
+    const jump = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => scrollToActualBottom("instant"));
+    };
+    const onElementResize = () => {
+      const height = el.clientHeight;
+      const shrank = height < lastHeight - 80;
+      lastHeight = height;
       if (shrank) {
-        cancelAnimationFrame(frame);
-        frame = requestAnimationFrame(() => scrollToActualBottom("instant"));
+        jump();
       }
     };
-    viewport.addEventListener("resize", onResize);
+    const observer = new ResizeObserver(onElementResize);
+    observer.observe(el);
+    const viewport = window.visualViewport;
+    let lastViewportHeight = viewport?.height ?? 0;
+    const onViewportResize = () => {
+      if (!viewport) {
+        return;
+      }
+      const shrank = viewport.height < lastViewportHeight - 80;
+      lastViewportHeight = viewport.height;
+      if (shrank) {
+        jump();
+      }
+    };
+    viewport?.addEventListener("resize", onViewportResize);
     return () => {
       cancelAnimationFrame(frame);
-      viewport.removeEventListener("resize", onResize);
+      observer.disconnect();
+      viewport?.removeEventListener("resize", onViewportResize);
     };
-  }, [scrollToActualBottom]);
+  }, [scrollRef, scrollToActualBottom]);
   return null;
 };
 
