@@ -246,7 +246,7 @@ export function buildProjectCodePayload(
         content: JSON.stringify(
           {
             private: true,
-            packageManager: "pnpm@10.19.0",
+            packageManager: "pnpm@10.34.9",
             scripts: {
               build: "tsc -p tsconfig.json --noEmit",
               "render-smoke": "node scripts/render-smoke.mjs",

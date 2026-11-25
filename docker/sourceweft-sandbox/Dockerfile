@@ -22,7 +22,7 @@ ENV LANG=en_US.UTF-8 \
     TZ=UTC
 
 # Fixed tool paths — must match install-base.sh and the Cloudflare image.
-ENV NODE_VERSION=22.19.0
+ENV NODE_VERSION=22.23.5
 ENV PNPM_HOME=/pnpm
 ENV VIRTUAL_ENV=/opt/venv
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
