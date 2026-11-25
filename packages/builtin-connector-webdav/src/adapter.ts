@@ -489,8 +489,8 @@ export function createWebdavAdapter(
             if (missing != null) {
               return {
                 ready: false,
-                reason: "config_invalid",
-                message: missing,
+                reason: missing.reason,
+                message: missing.message,
               };
             }
           }

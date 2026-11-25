@@ -61,7 +61,7 @@ test("a disabled WebDAV capability never builds the credentialed fetch", async (
   assert.equal(result.agentToolDefs.length, 0);
 });
 
-test("WebDAV capability registers one credential adapter without OAuth methods when enabled", async () => {
+test("the same switch registers both the WebDAV and Nextcloud credential adapters when enabled", async () => {
   for (const value of ["true", "1", "TRUE", " true "]) {
     const { reads, env } = environment({ WEBDAV_CONNECTOR_ENABLED: value });
     const result = await createConnectorAdapters({
@@ -69,13 +69,15 @@ test("WebDAV capability registers one credential adapter without OAuth methods w
       credentialedFetch: inertCredentialedFetch,
     });
     assert.deepEqual(result.agentToolDefs, []);
-    assert.equal(result.adapters.length, 1);
-    const adapter = result.adapters[0]!;
-    assert.equal(adapter.getManifest().type, "webdav");
-    assert.equal(adapter.getManifest().auth.kind, "credential");
-    assert.equal(adapter.exchangeOAuthCode, undefined);
-    assert.equal(adapter.refreshOAuthToken, undefined);
-    // Only the switch is read; the adapter builds lazily and touches no env.
+    assert.equal(result.adapters.length, 2);
+    const types = result.adapters.map((a) => a.getManifest().type).sort();
+    assert.deepEqual(types, ["nextcloud", "webdav"]);
+    for (const adapter of result.adapters) {
+      assert.equal(adapter.getManifest().auth.kind, "credential");
+      assert.equal(adapter.exchangeOAuthCode, undefined);
+      assert.equal(adapter.refreshOAuthToken, undefined);
+    }
+    // Only the one switch is read; both adapters build lazily and touch no env.
     assert.deepEqual(reads, ["WEBDAV_CONNECTOR_ENABLED"]);
   }
 });

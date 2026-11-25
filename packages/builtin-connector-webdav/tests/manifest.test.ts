@@ -27,6 +27,13 @@ test("JSON capability manifest matches the TypeScript export", async () => {
   capabilityManifestSchema.parse(builtinWebDavConnectorCapabilityManifest);
 });
 
+test("the capability declares both the webdav and nextcloud contributions", () => {
+  const ids = builtinWebDavConnectorCapabilityManifest.connectors.map(
+    (c) => c.id,
+  );
+  assert.deepEqual(ids, ["webdav", "nextcloud"]);
+});
+
 test("the contribution is a basic-credential connector with browse and describe", () => {
   const c = webDavConnectorContribution;
   assert.equal(c.id, "webdav");

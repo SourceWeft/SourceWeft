@@ -67,7 +67,7 @@ const fakeFlavor: WebDavFlavor = {
   requireProps(entries) {
     return entries.every((e) => e.fileId != null)
       ? null
-      : "This server is not recognised.";
+      : { reason: "x_unrecognised", message: "This server is not recognised." };
   },
 };
 
@@ -308,6 +308,7 @@ test("requireProps fails readiness when the required property is absent", async 
     discoverInput(["/"]),
   );
   assert.equal(result.ready, false);
+  assert.equal(result.reason, "x_unrecognised");
   assert.equal(result.message, "This server is not recognised.");
 });
 

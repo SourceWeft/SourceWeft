@@ -100,6 +100,109 @@
         "kinds": ["folder"],
         "maxItems": 20
       }
+    },
+    {
+      "id": "nextcloud",
+      "title": "Nextcloud",
+      "auth": {
+        "kind": "credential",
+        "scheme": "basic"
+      },
+      "sync": {
+        "supportsIncremental": false,
+        "defaultFrequencyMinutes": 360,
+        "minFrequencyMinutes": 60,
+        "resources": [
+          {
+            "type": "nextcloud_file",
+            "title": "Nextcloud file",
+            "supportsDeleteDetection": true
+          }
+        ]
+      },
+      "actions": [
+        {
+          "id": "nextcloud.browse",
+          "title": "Browse Nextcloud",
+          "description": "List the folders of a Nextcloud account so the user can choose root folders for this connector.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "internal",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "containerId": {
+                "type": ["string", "null"],
+                "pattern": "^/[^\\u0000-\\u001F]{0,511}$"
+              }
+            }
+          }
+        },
+        {
+          "id": "nextcloud.describe",
+          "title": "Describe Nextcloud folders",
+          "description": "Return the display name and existence of the selected Nextcloud folders.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "internal",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["ids"],
+            "properties": {
+              "ids": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 20,
+                "items": {
+                  "type": "string",
+                  "pattern": "^/[^\\u0000-\\u001F]{0,511}$"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["server", "endpoint", "userId", "roots"],
+        "properties": {
+          "server": {
+            "type": "string",
+            "pattern": "^https?://[^/?#@\\s]{1,253}(/[^?#\\s]{0,1790})?$"
+          },
+          "endpoint": {
+            "type": "string",
+            "pattern": "^https?://[^/?#@\\s]{1,253}(/[^?#\\s]{0,1790})?$"
+          },
+          "userId": {
+            "type": "string",
+            "pattern": "^[^\\u0000-\\u001F]{1,255}$"
+          },
+          "roots": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 20,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^/[^\\u0000-\\u001F]{0,511}$"
+            }
+          }
+        }
+      },
+      "selection": {
+        "actions": {
+          "browse": "nextcloud.browse",
+          "describe": "nextcloud.describe"
+        },
+        "kinds": ["folder"],
+        "maxItems": 20
+      }
     }
   ]
 }

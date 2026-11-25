@@ -60,10 +60,13 @@ export type WebDavFlavor = {
    * without making the scan incomplete. */
   isReadable(entry: DavEntry): boolean;
   /** Readiness-only hook: given a collection listing, return a fixed,
-   * non-secret message when the server did not return the properties this
-   * flavor requires (so readiness fails), or null when it is satisfactory.
-   * Never called during discovery. */
-  requireProps?(entries: DavEntry[]): string | null;
+   * non-secret `reason` code and user-facing `message` when the server did not
+   * return the properties this flavor requires (so readiness fails), or null
+   * when it is satisfactory. The adapter passes both straight through as the
+   * readiness result's `reason` and `message`. Never called during discovery. */
+  requireProps?(
+    entries: DavEntry[],
+  ): { reason: string; message: string } | null;
 };
 
 /**

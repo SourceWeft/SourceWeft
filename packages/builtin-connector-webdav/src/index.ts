@@ -18,6 +18,13 @@ export {
   type WebDavItemIdentityContext,
 } from "./flavor";
 export {
+  nextcloudConnectorContribution,
+  NEXTCLOUD_USER_ID_PATTERN,
+} from "./nextcloud/contribution";
+export { toBackendNextcloudManifest } from "./nextcloud/backend-manifest";
+export { nextcloudFlavor } from "./nextcloud/flavor";
+export { nextcloudEndpoint } from "./nextcloud/endpoint";
+export {
   discoverWebDavPages,
   DEFAULT_DISCOVERY_LIMITS,
   type DiscoveryLimits,
