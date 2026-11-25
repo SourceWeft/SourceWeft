@@ -59,9 +59,9 @@ overrides:
   mocha>glob: ^14.0.3
 
 patchedDependencies:
-  '@anthropic-ai/sandbox-runtime@0.0.81':
+  '@anthropic-ai/sandbox-runtime@0.0.83':
     hash: e54e4bf5ad7755e025a74cae8f0b55c75c2a088adcccff6adca7f8f5867aada8
-    path: patches/@anthropic-ai__sandbox-runtime@0.0.81.patch
+    path: patches/@anthropic-ai__sandbox-runtime@0.0.83.patch
   '@google/generative-ai@0.24.1':
     hash: f1c04dafce852c24000cc45bf3d72d885167ceb003077316c2daddc8cf383cb5
     path: patches/@google__generative-ai@0.24.1.patch
@@ -460,8 +460,8 @@ importers:
   apps/desktop/sandbox-sidecar:
     dependencies:
       '@anthropic-ai/sandbox-runtime':
-        specifier: https://github.com/SourceWeft/sandbox-runtime/releases/download/v0.0.81-sourceweft.5/sandbox-runtime-v0.0.81-sourceweft.5.tgz
-        version: https://github.com/SourceWeft/sandbox-runtime/releases/download/v0.0.81-sourceweft.5/sandbox-runtime-v0.0.81-sourceweft.5.tgz(patch_hash=e54e4bf5ad7755e025a74cae8f0b55c75c2a088adcccff6adca7f8f5867aada8)
+        specifier: https://github.com/SourceWeft/sandbox-runtime/releases/download/v0.0.83-sourceweft.1/sandbox-runtime-v0.0.83-sourceweft.1.tgz
+        version: https://github.com/SourceWeft/sandbox-runtime/releases/download/v0.0.83-sourceweft.1/sandbox-runtime-v0.0.83-sourceweft.1.tgz(patch_hash=e54e4bf5ad7755e025a74cae8f0b55c75c2a088adcccff6adca7f8f5867aada8)
     devDependencies:
       '@types/node':
         specifier: ^22.20.1
@@ -2417,11 +2417,16 @@ packages:
   '@antfu/install-pkg@1.1.0':
     resolution: {integrity: sha512-MGQsmw10ZyI+EJo45CdSER4zEb+p31LpDAFp2Z3gkSd1yqVZGi0Ebx++YTEMonJy4oChEMLsxZ64j8FH6sSqtQ==}
 
-  '@anthropic-ai/sandbox-runtime@https://github.com/SourceWeft/sandbox-runtime/releases/download/v0.0.81-sourceweft.5/sandbox-runtime-v0.0.81-sourceweft.5.tgz':
-    resolution: {tarball: https://github.com/SourceWeft/sandbox-runtime/releases/download/v0.0.81-sourceweft.5/sandbox-runtime-v0.0.81-sourceweft.5.tgz}
-    version: 0.0.81
+  '@anthropic-ai/sandbox-runtime@https://github.com/SourceWeft/sandbox-runtime/releases/download/v0.0.83-sourceweft.1/sandbox-runtime-v0.0.83-sourceweft.1.tgz':
+    resolution: {tarball: https://github.com/SourceWeft/sandbox-runtime/releases/download/v0.0.83-sourceweft.1/sandbox-runtime-v0.0.83-sourceweft.1.tgz}
+    version: 0.0.83
     engines: {node: '>=22.12.0'}
     hasBin: true
+    peerDependencies:
+      '@microsoft/mxc-sdk': ^1.0.1
+    peerDependenciesMeta:
+      '@microsoft/mxc-sdk':
+        optional: true
 
   '@anthropic-ai/sdk@1.11.0':
     resolution: {integrity: sha512-lW16YCGJ7ItUy92hehGjuMIxvhCeW8pYi4w4jzzfo8UtRbEamagUJAzAEh1VxS6wHfDh6yB+/KE/Rqp2i6elIw==}
@@ -11600,7 +11605,7 @@ snapshots:
       package-manager-detector: 1.8.0
       tinyexec: 1.3.0
 
-  '@anthropic-ai/sandbox-runtime@https://github.com/SourceWeft/sandbox-runtime/releases/download/v0.0.81-sourceweft.5/sandbox-runtime-v0.0.81-sourceweft.5.tgz(patch_hash=e54e4bf5ad7755e025a74cae8f0b55c75c2a088adcccff6adca7f8f5867aada8)':
+  '@anthropic-ai/sandbox-runtime@https://github.com/SourceWeft/sandbox-runtime/releases/download/v0.0.83-sourceweft.1/sandbox-runtime-v0.0.83-sourceweft.1.tgz(patch_hash=e54e4bf5ad7755e025a74cae8f0b55c75c2a088adcccff6adca7f8f5867aada8)':
     dependencies:
       '@pondwader/socks5-server': 1.0.10
       commander: 12.1.0

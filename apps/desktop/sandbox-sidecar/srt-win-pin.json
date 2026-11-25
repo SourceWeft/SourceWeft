@@ -1,7 +1,7 @@
 {
-  "tag": "v0.0.81-sourceweft.5",
+  "tag": "v0.0.83-sourceweft.1",
   "srtWin": {
-    "x86_64-pc-windows-msvc": "8f0b88f2affc44f59bbe6838efcda8edff8b6eb0f27ced2be6176b86aa5fd43d",
-    "aarch64-pc-windows-msvc": "33f6cc3dd6302f124a334853532ce64ecf184c353c31eadb170bf9080fd06820"
+    "x86_64-pc-windows-msvc": "4b42bf01d1bc84982aef5c23168cf25c9b3c35a7100ab113c48fdb7daa811868",
+    "aarch64-pc-windows-msvc": "d28650419a15fc29b9e99458e0d12533e7c08db99b719dae1da17da68c0cf2bf"
   }
 }

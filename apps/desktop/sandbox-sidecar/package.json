@@ -10,7 +10,7 @@
     "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sandbox-runtime": "https://github.com/SourceWeft/sandbox-runtime/releases/download/v0.0.81-sourceweft.5/sandbox-runtime-v0.0.81-sourceweft.5.tgz"
+    "@anthropic-ai/sandbox-runtime": "https://github.com/SourceWeft/sandbox-runtime/releases/download/v0.0.83-sourceweft.1/sandbox-runtime-v0.0.83-sourceweft.1.tgz"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",

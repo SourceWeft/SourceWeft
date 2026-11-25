@@ -792,7 +792,7 @@ test("the Windows real-sandbox job installs upstream first, drives the real laun
   assert.match(code, /sandbox-runtime@\$Version/);
   assert.match(code, /Run-Checked \$exe @\('install'\)/);
   assert.doesNotMatch(code, /--sandbox-user|--sublayer-guid|--proxy-port-range|--force/);
-  assert.match(job.steps[upstream].run, /install-upstream .* -Version 0\.0\.81/);
+  assert.match(job.steps[upstream].run, /install-upstream .* -Version 0\.0\.83/);
   // Cleanup always runs; Git Bash is restored even when the second pass fails.
   assert.match(job.steps[cleanup].if, /always\(\)/);
   assert.match(job.steps[restore].if, /always\(\)/);

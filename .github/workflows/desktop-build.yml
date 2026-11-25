@@ -692,7 +692,7 @@ jobs:
         # Coexistence is part of the contract: the namespaced build must neither read nor change an
         # upstream default install. The suite compares the upstream status before and after.
         shell: pwsh
-        run: ./scripts/ci/windows-sandbox-coexist.ps1 install-upstream -UpstreamDir $env:UPSTREAM_DIR -Version 0.0.81
+        run: ./scripts/ci/windows-sandbox-coexist.ps1 install-upstream -UpstreamDir $env:UPSTREAM_DIR -Version 0.0.83
       - name: Add the hosts-file entries the proxy hostname tests require
         shell: pwsh
         run: ./scripts/ci/windows-sandbox-coexist.ps1 hosts
