@@ -245,6 +245,8 @@ describe("user mail usability", () => {
     assert.doesNotMatch(rendered.html, /[运执户错览导团库]|定时|智能体/);
     assert.match(rendered.html, /代理程式/);
     assert.match(rendered.html, /排程任務/);
+    assert.doesNotMatch(rendered.html, /只讀/);
+    assert.match(rendered.html, /唯讀/);
   });
 
   test("welcome footer links render independently without a dangling separator", () => {
@@ -270,6 +272,21 @@ describe("user mail usability", () => {
       );
       assert.ok(onlyCommunity.text.includes(variables.communityUrl));
       assert.doesNotMatch(onlyCommunity.html, /href=""/);
+
+      // With both links present, the plain text must have a space between
+      // the first link's URL and the second link's label: no "]GitHub".
+      const both = renderMailTemplate(
+        "auth.welcome",
+        {
+          ...welcome,
+          communityUrl: variables.communityUrl,
+          githubUrl: variables.githubUrl,
+        },
+        locale,
+      );
+      assert.doesNotMatch(both.text, /\]GitHub/);
+      assert.ok(both.text.includes(variables.communityUrl));
+      assert.ok(both.text.includes(variables.githubUrl));
     }
   });
 });
