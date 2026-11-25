@@ -14,7 +14,6 @@ import {
   createOAuthStateRecord,
   deleteCredentialFlowRecord,
   deleteExpiredCredentialFlowRecords,
-  findOAuthAccountRecord,
   findOAuthStateRecord,
   findSourceConnectorRecord,
 } from "./repository";
@@ -59,15 +58,32 @@ function hashFlowId(flowId: string): string {
   return createHash("sha256").update(flowId).digest("hex");
 }
 
-function originOf(value: unknown): string | null {
+/**
+ * The reconnect-identity key: an endpoint's origin plus its pathname with a
+ * single trailing slash, or null when it is not an http(s) URL. For Nextcloud
+ * the endpoint is `<server-base>/remote.php/dav/files/<files-user-id>/`, so this
+ * captures BOTH the specific server install (origin + base path) AND the account
+ * (the files user id) in one value. Matching it — rather than the origin plus
+ * the login name — means two installs on one origin (`/nc1` vs `/nc2`) are never
+ * rotated onto each other, and a member who first logged in with their uid and
+ * later with their e-mail still reconnects (the files user id, hence the
+ * endpoint, is unchanged while the login name is not).
+ */
+function normalizedEndpoint(value: unknown): string | null {
   if (typeof value !== "string") {
     return null;
   }
+  let url: URL;
   try {
-    return new URL(value).origin;
+    url = new URL(value);
   } catch {
     return null;
   }
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    return null;
+  }
+  const path = url.pathname.endsWith("/") ? url.pathname : `${url.pathname}/`;
+  return `${url.origin}${path}`;
 }
 
 /** The decrypted pending state of one in-progress login flow. */
@@ -350,26 +366,18 @@ export class ConnectorCredentialFlowService {
       workspaceId: input.workspace.id,
       connectorId: input.connectorId,
     });
-    const storedOrigin = originOf(connector?.configJson.endpoint);
-    const newOrigin = originOf(input.authorized.config.endpoint);
-    const account =
-      connector && connector.oauthAccountId
-        ? await findOAuthAccountRecord({
-            teamId: input.workspace.organizationId,
-            workspaceId: input.workspace.id,
-            accountId: connector.oauthAccountId,
-          })
-        : null;
-    // Only re-point an existing connector at a credential from the SAME server
-    // and the SAME login name; anything else is discarded, never silently
+    const storedEndpoint = normalizedEndpoint(connector?.configJson.endpoint);
+    const newEndpoint = normalizedEndpoint(input.authorized.config.endpoint);
+    // Only re-point an existing connector at a credential for the SAME normalised
+    // endpoint (origin + base path + files user id). That one value carries the
+    // account identity, so the login-name format (uid vs e-mail) is irrelevant;
+    // a different server, base path or files user is discarded, never silently
     // re-pointed.
     if (
       !connector ||
-      storedOrigin === null ||
-      newOrigin === null ||
-      storedOrigin !== newOrigin ||
-      !account ||
-      account.displayName !== input.authorized.credential.username
+      storedEndpoint === null ||
+      newEndpoint === null ||
+      storedEndpoint !== newEndpoint
     ) {
       await this.discard(
         input.adapter,

@@ -546,7 +546,7 @@ describe("poll", () => {
     assert.equal(mocks.createCredentialConnectorRecord.mock.calls.length, 0);
   });
 
-  test("reconnect rotates the credential in place when server and user match", async () => {
+  test("reconnect rotates the credential in place when the endpoint matches", async () => {
     mocks.findOAuthStateRecord.mockResolvedValue(
       stateRow({ attemptRef: storedBlob({ connectorId: "conn_nc" }) }),
     );
@@ -559,6 +559,28 @@ describe("poll", () => {
     assert.equal(mocks.updateOAuthAccountCredentialRecord.mock.calls.length, 1);
     // No new connector/account is created on a reconnect.
     assert.equal(mocks.createCredentialConnectorRecord.mock.calls.length, 0);
+    assert.equal(flowDiscard.mock.calls.length, 0);
+  });
+
+  test("reconnect rotates even when only the login name differs (email vs uid, same endpoint)", async () => {
+    mocks.findOAuthStateRecord.mockResolvedValue(
+      stateRow({ attemptRef: storedBlob({ connectorId: "conn_nc" }) }),
+    );
+    // The member first connected with their uid and now logs in with their
+    // e-mail. The files user id (and therefore the endpoint) is unchanged, so
+    // the endpoint carries the account identity and the same account is rotated
+    // in place — the login-name format must not reject the reconnect.
+    flowPoll.mockResolvedValue({
+      ...AUTHORIZED,
+      credential: { username: "nc-user@example.com", secret: SECRET },
+      config: ADAPTER_CONFIG,
+    });
+    const { flow } = services();
+
+    const result = await flow.poll(pollInput());
+
+    assert.equal(result.status, "connected");
+    assert.equal(mocks.updateOAuthAccountCredentialRecord.mock.calls.length, 1);
     assert.equal(flowDiscard.mock.calls.length, 0);
   });
 
@@ -580,13 +602,38 @@ describe("poll", () => {
     assert.equal(mocks.updateOAuthAccountCredentialRecord.mock.calls.length, 0);
   });
 
-  test("reconnect rejects a different login name and discards", async () => {
+  test("reconnect rejects a different base path on the same origin and discards", async () => {
+    // Two installs on one origin (`/` vs `/nc2`) with the same login must not be
+    // rotated onto each other: the normalised endpoint carries the base path.
     mocks.findOAuthStateRecord.mockResolvedValue(
       stateRow({ attemptRef: storedBlob({ connectorId: "conn_nc" }) }),
     );
     flowPoll.mockResolvedValue({
       ...AUTHORIZED,
-      credential: { username: "someone-else", secret: SECRET },
+      config: {
+        ...ADAPTER_CONFIG,
+        endpoint: "https://cloud.example.com/nc2/remote.php/dav/files/nc-user/",
+      },
+    });
+    const { flow } = services();
+
+    const error = await rejection(flow.poll(pollInput()));
+
+    assert.equal(error.code, "CONNECTOR_CREDENTIAL_FLOW_MISMATCH");
+    assert.equal(flowDiscard.mock.calls.length, 1);
+    assert.equal(mocks.updateOAuthAccountCredentialRecord.mock.calls.length, 0);
+  });
+
+  test("reconnect rejects a different files user on the same server and discards", async () => {
+    mocks.findOAuthStateRecord.mockResolvedValue(
+      stateRow({ attemptRef: storedBlob({ connectorId: "conn_nc" }) }),
+    );
+    flowPoll.mockResolvedValue({
+      ...AUTHORIZED,
+      config: {
+        ...ADAPTER_CONFIG,
+        endpoint: "https://cloud.example.com/remote.php/dav/files/other-user/",
+      },
     });
     const { flow } = services();
 
