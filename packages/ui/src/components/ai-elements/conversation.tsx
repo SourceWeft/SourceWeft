@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import type { UIMessage } from "ai";
 import { ArrowDownIcon, DownloadIcon } from "lucide-react";
 import type { ComponentProps } from "react";
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 
 export type ConversationProps = ComponentProps<typeof StickToBottom>;
@@ -69,23 +69,114 @@ export const ConversationEmptyState = ({
   </div>
 );
 
-export type ConversationScrollButtonProps = ComponentProps<typeof Button>;
+/** Distance below which the view counts as resting at the real bottom. */
+const BOTTOM_TOLERANCE_PX = 48;
+
+/**
+ * Tracks the real distance to the end of the scroll area, not the library's
+ * `isAtBottom`: that one is measured against the (possibly pinned) target
+ * scroll position, so it reads "at bottom" while a reply still extends below
+ * the fold.
+ */
+function useActualBottom(onBeforeScroll?: () => void) {
+  const { scrollRef, contentRef, scrollToBottom } = useStickToBottomContext();
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const onBeforeScrollRef = useRef(onBeforeScroll);
+  onBeforeScrollRef.current = onBeforeScroll;
+
+  const scrollToActualBottom = useCallback(
+    (behavior: ScrollBehavior = "smooth") => {
+      const el = scrollRef.current;
+      if (!el) {
+        return;
+      }
+      onBeforeScrollRef.current?.();
+      scrollToBottom({ preserveScrollPosition: true });
+      el.scrollTo({ top: el.scrollHeight, behavior });
+    },
+    [scrollRef, scrollToBottom]
+  );
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) {
+      return;
+    }
+    const update = () =>
+      setIsAtBottom(
+        el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_TOLERANCE_PX
+      );
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    if (contentRef.current) {
+      observer.observe(contentRef.current);
+    }
+    return () => {
+      el.removeEventListener("scroll", update);
+      observer.disconnect();
+    };
+  }, [scrollRef, contentRef]);
+
+  return { isAtBottom, scrollToActualBottom };
+}
+
+/**
+ * On touch devices the on-screen keyboard shrinks the visual viewport; keep the
+ * latest messages in view by scrolling to the end whenever it opens.
+ */
+export const ConversationKeyboardAnchor = ({
+  onBeforeScroll,
+}: {
+  onBeforeScroll?: () => void;
+}) => {
+  const { scrollToActualBottom } = useActualBottom(onBeforeScroll);
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) {
+      return;
+    }
+    let lastHeight = viewport.height;
+    let frame = 0;
+    const onResize = () => {
+      const shrank = viewport.height < lastHeight - 80;
+      lastHeight = viewport.height;
+      if (shrank) {
+        cancelAnimationFrame(frame);
+        frame = requestAnimationFrame(() => scrollToActualBottom("instant"));
+      }
+    };
+    viewport.addEventListener("resize", onResize);
+    return () => {
+      cancelAnimationFrame(frame);
+      viewport.removeEventListener("resize", onResize);
+    };
+  }, [scrollToActualBottom]);
+  return null;
+};
+
+export type ConversationScrollButtonProps = ComponentProps<typeof Button> & {
+  /** Runs before jumping to the end, e.g. to release a pinned scroll target. */
+  onBeforeScroll?: () => void;
+};
 
 export const ConversationScrollButton = ({
   className,
+  onBeforeScroll,
   ...props
 }: ConversationScrollButtonProps) => {
-  const { isAtBottom, scrollToBottom } = useStickToBottomContext();
+  const { isAtBottom, scrollToActualBottom } = useActualBottom(onBeforeScroll);
 
   const handleScrollToBottom = useCallback(() => {
-    scrollToBottom();
-  }, [scrollToBottom]);
+    scrollToActualBottom("smooth");
+  }, [scrollToActualBottom]);
 
   return (
     !isAtBottom && (
       <Button
         className={cn(
-          "absolute bottom-4 left-[50%] translate-x-[-50%] rounded-full dark:bg-background dark:hover:bg-muted",
+          "absolute bottom-4 left-[50%] z-10 translate-x-[-50%] rounded-full dark:bg-background dark:hover:bg-muted",
           className
         )}
         onClick={handleScrollToBottom}

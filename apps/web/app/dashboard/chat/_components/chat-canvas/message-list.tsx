@@ -33,6 +33,7 @@ import { type SavedNoteRef, useSavedNotes } from "./use-saved-notes";
 import {
   Conversation,
   ConversationContent,
+  ConversationKeyboardAnchor,
   ConversationScrollButton,
 } from "@sourceweft/ui-web/components/ai-elements/conversation";
 import {
@@ -1704,6 +1705,10 @@ function MessageListContent({
     [],
   );
 
+  const releasePinnedUserTurn = useCallback(() => {
+    pinnedUserGroupIdRef.current = null;
+  }, []);
+
   return (
     <Conversation
       className="h-full min-h-0 flex-1 overflow-hidden [scrollbar-gutter:stable]"
@@ -1819,7 +1824,8 @@ function MessageListContent({
           })}
         </div>
       </ConversationContent>
-      <ConversationScrollButton />
+      <ConversationKeyboardAnchor onBeforeScroll={releasePinnedUserTurn} />
+      <ConversationScrollButton onBeforeScroll={releasePinnedUserTurn} />
     </Conversation>
   );
 }

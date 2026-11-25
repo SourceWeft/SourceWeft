@@ -248,6 +248,30 @@ html:lang(he) .font-brand {
   [role="button"]:not(:disabled) {
     cursor: pointer;
   }
+
+  /* Touch devices: no grey flash or double-tap-zoom delay, and an immediate
+     pressed state so a tap reads as handled before the route finishes loading. */
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  a,
+  button,
+  [role="button"],
+  summary {
+    touch-action: manipulation;
+  }
+
+  @media (hover: none) {
+    a[href]:active,
+    button:not(:disabled):active,
+    [role="button"]:not(:disabled):active {
+      opacity: 0.7;
+      transition: opacity 60ms ease-out;
+    }
+  }
 }
 
 @layer utilities {

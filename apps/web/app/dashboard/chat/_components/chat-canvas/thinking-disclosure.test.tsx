@@ -15,6 +15,7 @@ vi.mock("@sourceweft/ui-web/components/ai-elements/conversation", () => ({
   ConversationContent: ({ children }: PropsWithChildren) => (
     <div>{children}</div>
   ),
+  ConversationKeyboardAnchor: () => null,
   ConversationScrollButton: () => null,
 }));
 vi.mock("./message-response", () => ({
