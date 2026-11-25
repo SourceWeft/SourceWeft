@@ -547,7 +547,7 @@ export function SourcePreviewPanel({
               />
             ) : null}
             {editingNote && detail && source && workspaceId ? (
-              <ScrollArea className="min-h-0 flex-1">
+              <ScrollArea className="min-h-0 flex-1 [&_[data-radix-scroll-area-viewport]>div]:!block">
                 <NoteEditor
                   expectedUpdatedAt={detail.source.updatedAt}
                   initialText={detail.source.contentText}
@@ -569,7 +569,7 @@ export function SourcePreviewPanel({
                 />
               </ScrollArea>
             ) : isExternalCitation && citation ? (
-              <ScrollArea className="min-h-0 flex-1">
+              <ScrollArea className="min-h-0 flex-1 [&_[data-radix-scroll-area-viewport]>div]:!block">
                 <div className="mx-auto flex min-h-full max-w-4xl flex-col justify-center space-y-4 px-5 py-6 lg:px-8">
                   <div className="rounded-2xl border border-dashed bg-muted/20 px-5 py-4 text-sm text-muted-foreground">
                     <div className="mb-2 flex items-center gap-2 font-medium text-foreground">
@@ -622,7 +622,7 @@ export function SourcePreviewPanel({
                 {t("sourcePreview.loading")}
               </div>
             ) : isDeletedCitation && citation ? (
-              <ScrollArea className="min-h-0 flex-1">
+              <ScrollArea className="min-h-0 flex-1 [&_[data-radix-scroll-area-viewport]>div]:!block">
                 <div className="mx-auto flex min-h-full max-w-4xl flex-col justify-center space-y-4 px-5 py-6 lg:px-8">
                   <div className="rounded-2xl border border-dashed bg-muted/20 px-5 py-4 text-sm text-muted-foreground">
                     <div className="mb-2 flex items-center gap-2 font-medium text-foreground">
@@ -671,7 +671,7 @@ export function SourcePreviewPanel({
               </div>
             ) : detail ? (
               previewMode === "source-file" ? (
-                <ScrollArea className="min-h-0 flex-1">
+                <ScrollArea className="min-h-0 flex-1 [&_[data-radix-scroll-area-viewport]>div]:!block">
                   <div className="mx-auto flex min-h-full max-w-6xl flex-col px-5 py-6 lg:px-8">
                     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
                       <section className="overflow-hidden rounded-[28px] border border-border/70 bg-[linear-gradient(160deg,hsl(var(--background)),hsl(var(--muted)/0.18))] shadow-[0_20px_60px_-32px_hsl(var(--foreground)/0.35)]">
@@ -773,13 +773,13 @@ export function SourcePreviewPanel({
                   </div>
                 </ScrollArea>
               ) : previewMode === "raw" ? (
-                <ScrollArea className="min-h-0 flex-1">
+                <ScrollArea className="min-h-0 flex-1 [&_[data-radix-scroll-area-viewport]>div]:!block">
                   <pre className="mx-auto min-h-full max-w-5xl whitespace-pre-wrap break-words px-5 py-6 font-mono text-xs leading-6 text-foreground lg:px-8">
                     {rawMarkdown || t("sourcePreview.noMarkdown")}
                   </pre>
                 </ScrollArea>
               ) : previewMode === "preview" ? (
-                <ScrollArea className="min-h-0 flex-1">
+                <ScrollArea className="min-h-0 flex-1 [&_[data-radix-scroll-area-viewport]>div]:!block">
                   <article className="mx-auto min-h-full max-w-4xl px-5 py-6 lg:px-8">
                     <MessageResponse className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left">
                       {rawMarkdown || t("sourcePreview.noMarkdown")}
@@ -832,7 +832,7 @@ export function SourcePreviewPanel({
                     </aside>
                   ) : null}
 
-                  <ScrollArea className="min-w-0 flex-1" ref={scrollRootRef}>
+                  <ScrollArea className="min-w-0 flex-1 [&_[data-radix-scroll-area-viewport]>div]:!block" ref={scrollRootRef}>
                     <div className="mx-auto max-w-4xl space-y-4 px-5 py-6 lg:px-8">
                       {detail.chunks.map((chunk, index) => {
                         const isCited = chunk.id === citation?.chunkId;
