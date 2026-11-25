@@ -15,6 +15,7 @@ import { fakeHarness } from "./fake-dav";
 // Secrets are given recognisable markers so a leak into an error, its stack, or
 // a logger call is unmistakable.
 const SERVER = "https://cloud.example.com";
+const ENDPOINT = `${SERVER}/remote.php/dav/files/alice/`;
 const POLL_TOKEN = "poll-token-SECRET-xyzzy";
 const APP_PASSWORD = "app-pw-SECRET-plugh";
 const LOGIN_NAME = "alice@login-SECRET";
@@ -467,7 +468,7 @@ test("poll sends the token form body and sends credentials only to the server or
 test("discard sends a DELETE with Basic auth and the OCS header, and swallows failures", async () => {
   const ok = flowFor();
   await ok.flow.discard!({
-    config: { server: SERVER },
+    config: { server: SERVER, endpoint: ENDPOINT },
     credential: { username: LOGIN_NAME, secret: APP_PASSWORD },
   });
   const del = ok.calls.find((c) => c.method === "DELETE");
@@ -480,17 +481,36 @@ test("discard sends a DELETE with Basic auth and the OCS header, and swallows fa
   const failing = flowFor({ del: { status: 500 } });
   await assert.doesNotReject(
     failing.flow.discard!({
-      config: { server: SERVER },
+      config: { server: SERVER, endpoint: ENDPOINT },
       credential: { username: LOGIN_NAME, secret: APP_PASSWORD },
     }),
   );
   const throwing = flowFor({ del: { throw: "network" } });
   await assert.doesNotReject(
     throwing.flow.discard!({
-      config: { server: SERVER },
+      config: { server: SERVER, endpoint: ENDPOINT },
       credential: { username: LOGIN_NAME, secret: APP_PASSWORD },
     }),
   );
+});
+
+test("discard is a no-op (sends nothing) when server and endpoint are on different origins", async () => {
+  // A tampered `server` on another origin must never receive the app password:
+  // if it does not share the endpoint's origin, discard sends no request at all.
+  const tampered = flowFor();
+  await tampered.flow.discard!({
+    config: { server: "https://evil.example.com", endpoint: ENDPOINT },
+    credential: { username: LOGIN_NAME, secret: APP_PASSWORD },
+  });
+  assert.equal(tampered.calls.length, 0);
+
+  // A missing endpoint is also a no-op (nothing to compare the origin against).
+  const noEndpoint = flowFor();
+  await noEndpoint.flow.discard!({
+    config: { server: SERVER },
+    credential: { username: LOGIN_NAME, secret: APP_PASSWORD },
+  });
+  assert.equal(noEndpoint.calls.length, 0);
 });
 
 // --- secret hygiene ---------------------------------------------------------
@@ -544,7 +564,7 @@ test("no thrown error, its serialization or a logger call carries a secret", asy
   await flow.poll({ pending: started.pending });
   await flow.poll({ pending: started.pending });
   await flow.discard!({
-    config: { server: SERVER },
+    config: { server: SERVER, endpoint: ENDPOINT },
     credential: { username: LOGIN_NAME, secret: APP_PASSWORD },
   });
   assert.deepEqual(harness.warnings, []);

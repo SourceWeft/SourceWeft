@@ -136,11 +136,17 @@ function readinessFailure(error: unknown): ConnectorSyncReadinessResult | null {
 }
 
 /** Parses and normalizes the non-secret config into an endpoint URL and the
- * normalized roots. Throws a fixed WebDAV error on anything malformed. */
-function resolveConfig(config: Record<string, unknown>): {
+ * normalized roots. Throws a fixed WebDAV error on anything malformed, and runs
+ * the flavor's config-consistency guard (e.g. Nextcloud's server/endpoint
+ * same-origin check) first so a tampered config fails before any request. */
+function resolveConfig(
+  config: Record<string, unknown>,
+  flavor?: WebDavFlavor,
+): {
   endpoint: URL;
   roots: string[];
 } {
+  flavor?.validateConfig?.(config);
   const endpoint = parseEndpoint(
     typeof config.endpoint === "string" ? config.endpoint : "",
   );
@@ -292,7 +298,7 @@ export function createWebdavAdapter(
   ): { credential: DavCredential; endpoint: URL; roots: string[] } {
     try {
       const credential = parseStoredCredential(accessToken);
-      const { endpoint, roots } = resolveConfig(config);
+      const { endpoint, roots } = resolveConfig(config, flavor);
       return { credential, endpoint, roots };
     } catch (error) {
       mapOperationError(error);
@@ -473,7 +479,7 @@ export function createWebdavAdapter(
       input: ConnectorDiscoverInput,
     ): Promise<ConnectorSyncReadinessResult> {
       try {
-        const { endpoint, roots } = resolveConfig(input.config);
+        const { endpoint, roots } = resolveConfig(input.config, flavor);
         const credential = parseStoredCredential(input.accessToken);
         const scope = credentialedFetch();
         try {

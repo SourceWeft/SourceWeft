@@ -235,6 +235,51 @@ test("readiness passes when the server returns an oc:fileid", async () => {
   assert.equal(result.ready, true);
 });
 
+// --- server/endpoint origin binding (F1) ------------------------------------
+
+test("readiness fails config_invalid when server is on a different origin than endpoint", async () => {
+  // A config whose `server` was re-pointed to another origin (e.g. a PATCH that
+  // slipped past the backend lock) must not be used: readiness fails with a
+  // fixed, non-echoing reason and the server is never contacted.
+  const { adapter } = adapterFor({ "/": { self: { fileId: "10" } } });
+  const result = await adapter.checkSyncReadiness!(
+    discoverInput(["/"], { server: "https://evil.example.com" }),
+  );
+  assert.equal(result.ready, false);
+  assert.equal(result.reason, "config_invalid");
+  assert.equal(typeof result.message, "string");
+  assert.ok(!(result.message ?? "").includes("evil"));
+});
+
+test("discovery emits nothing and no canonical link when server and endpoint origins differ", async () => {
+  const { adapter } = adapterFor({
+    "/": {
+      self: { fileId: "10" },
+      files: {
+        "report.pdf": {
+          size: 1,
+          etag: '"a"',
+          fileId: "555",
+          permissions: "RGDNVW",
+        },
+      },
+    },
+  });
+  await assert.rejects(
+    discoverItems(
+      adapter,
+      discoverInput(["/"], { server: "https://evil.example.com" }),
+    ),
+    (error: unknown) => {
+      // A fixed adapter-boundary error that echoes no input; never a canonical
+      // link to the mismatched origin (nothing is emitted at all).
+      const message = (error as { message?: unknown }).message;
+      assert.ok(typeof message === "string" && !message.includes("evil"));
+      return true;
+    },
+  );
+});
+
 // --- extract ----------------------------------------------------------------
 
 test("extract downloads the file using metadata.path, not the nc:<fileid> id", async () => {

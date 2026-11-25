@@ -88,6 +88,14 @@ export type WebDavFlavor = {
   requireProps?(
     entries: DavEntry[],
   ): { reason: string; message: string } | null;
+  /** Config-consistency guard, run wherever the non-secret config is resolved
+   * (readiness, discovery, browse, describe, extract). Throws a fixed
+   * {@link WebDavError} when the stored config is internally inconsistent — for
+   * Nextcloud, when `server` and `endpoint` are on different origins, which a
+   * tampered config could make true and which would otherwise send the
+   * credential, or build canonical links, to an unexpected origin. Plain WebDAV
+   * has no second address and no guard. */
+  validateConfig?(config: Record<string, unknown>): void;
   /** Credential login-flow factory (credential `flow: "login_flow"` only).
    * Present only on a flavor whose connector obtains its credential through a
    * server-driven browser login (Nextcloud); the adapter attaches the result as

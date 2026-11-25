@@ -479,6 +479,95 @@ describe("updateConnector locks a credential connector's endpoint origin", () =>
   });
 });
 
+describe("updateConnector locks every URL-valued config key of a credential connector", () => {
+  const NC_SERVER = "https://cloud.example.com";
+  const NC_ENDPOINT = "https://cloud.example.com/remote.php/dav/files/alice/";
+  const NC_CONFIG = {
+    endpoint: NC_ENDPOINT,
+    server: NC_SERVER,
+    userId: "alice",
+    roots: ["/"],
+  };
+
+  // A credential adapter (like Nextcloud) whose config carries a SECOND
+  // http(s) URL value — `server`, the canonical-link base — besides `endpoint`.
+  function nextcloudCredentialAdapter(): ConnectorAdapter {
+    const m = {
+      ...manifest("nextcloud", { kind: "credential", scheme: "basic" }),
+      configSchema: {
+        type: "object",
+        required: ["endpoint", "server"],
+        properties: {
+          endpoint: { type: "string" },
+          server: { type: "string" },
+          userId: { type: "string" },
+          roots: { type: "array", items: { type: "string" } },
+        },
+        additionalProperties: false,
+      },
+    } as ConnectorManifest;
+    return {
+      getManifest: () => m,
+      credentialIdentity,
+      checkSyncReadiness,
+      async *discover() {},
+      extract: async ({ item }: { item: unknown }) => ({ item }),
+      executeAction: async () => ({ result: {} }),
+    } as unknown as ConnectorAdapter;
+  }
+
+  const patchNc = (configJson: Record<string, unknown>) =>
+    service(nextcloudCredentialAdapter()).updateConnector({
+      workspaceId: "workspace",
+      userId: "user",
+      connectorId: "conn_cred",
+      configJson,
+    });
+
+  beforeEach(() => {
+    mocks.findSourceConnectorRecord.mockResolvedValue({
+      ...createdConnector,
+      connectorType: "nextcloud",
+      configJson: NC_CONFIG,
+    });
+  });
+
+  test("rejects a different server origin even when the endpoint is unchanged, and persists nothing", async () => {
+    const error = await rejection(
+      patchNc({
+        endpoint: NC_ENDPOINT,
+        server: "https://evil.example.com/",
+        userId: "alice",
+        roots: ["/"],
+      }),
+    );
+    assert.equal(error.statusCode, 400);
+    assert.equal(error.code, "CONNECTOR_CREDENTIAL_ENDPOINT_LOCKED");
+    // The message echoes no input (no server, endpoint or path).
+    assert.ok(!error.message.includes("evil.example.com"));
+    assert.equal(mocks.updateSourceConnectorRecord.mock.calls.length, 0);
+  });
+
+  test("allows a same-origin base-path change on both server and endpoint", async () => {
+    await patchNc({
+      endpoint: "https://cloud.example.com/remote.php/dav/files/alice2/",
+      server: "https://cloud.example.com/sub",
+      userId: "alice",
+      roots: ["/"],
+    });
+    assert.equal(mocks.updateSourceConnectorRecord.mock.calls.length, 1);
+  });
+
+  test("allows a roots-only change with both URL addresses unchanged", async () => {
+    await patchNc({ ...NC_CONFIG, roots: ["/Docs/"] });
+    assert.equal(mocks.updateSourceConnectorRecord.mock.calls.length, 1);
+    assert.deepEqual(
+      mocks.updateSourceConnectorRecord.mock.calls[0]?.[0].configJson.roots,
+      ["/Docs/"],
+    );
+  });
+});
+
 describe("rotateConnectorCredential", () => {
   const rotate = (
     svc: ConnectorService,

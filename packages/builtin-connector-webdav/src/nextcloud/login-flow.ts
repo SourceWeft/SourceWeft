@@ -271,7 +271,23 @@ export function createNextcloudCredentialFlow(
 
     async discard({ config, credential }) {
       const server = typeof config.server === "string" ? config.server : null;
-      if (server === null) return;
+      const endpoint =
+        typeof config.endpoint === "string" ? config.endpoint : null;
+      if (server === null || endpoint === null) return;
+      // Only ever revoke at the credential's own endpoint origin. The OCS delete
+      // addresses `config.server`; if that was tampered to another origin (a
+      // config PATCH that slipped past the backend lock), the origins differ and
+      // discard is a no-op, so the app password is never sent anywhere but where
+      // it is used.
+      let serverOrigin: string;
+      let endpointOrigin: string;
+      try {
+        serverOrigin = new URL(server).origin;
+        endpointOrigin = new URL(endpoint).origin;
+      } catch {
+        return;
+      }
+      if (serverOrigin !== endpointOrigin) return;
       try {
         const scope = credentialedFetch();
         try {

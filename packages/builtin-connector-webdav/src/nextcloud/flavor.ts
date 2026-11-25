@@ -1,8 +1,23 @@
+import { WebDavError } from "../errors";
 import type { WebDavFlavor } from "../flavor";
 import type { DavEntry } from "../multistatus";
 import { toRequestUrl } from "../paths";
 import { toBackendNextcloudManifest } from "./backend-manifest";
 import { createNextcloudCredentialFlow } from "./login-flow";
+
+/** The http(s) origin of a config value, or null when it is not an http(s)
+ * URL. Used to bind `server` (canonical links, revoke) to `endpoint`'s origin. */
+function httpOrigin(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+  return url.origin;
+}
 
 /** Fixed, non-secret readiness message for a server that is reachable but does
  * not behave like Nextcloud (it returned no file ids). */
@@ -89,6 +104,24 @@ export const nextcloudFlavor: WebDavFlavor = {
     return hasFileId
       ? null
       : { reason: "not_nextcloud", message: NOT_NEXTCLOUD_MESSAGE };
+  },
+
+  // `server` (the canonical-link base and the OCS revoke target) must share the
+  // origin of `endpoint` (the DAV/Authorization target). They always do when the
+  // login flow builds the config, but a later config PATCH could try to re-point
+  // `server` alone; if it slipped past the backend lock, this fails readiness and
+  // discovery with a fixed, non-echoing error so the credential is never used,
+  // and canonical links are never built, against a mismatched origin.
+  validateConfig(config: Record<string, unknown>) {
+    const endpointOrigin = httpOrigin(config.endpoint);
+    const serverOrigin = httpOrigin(config.server);
+    if (
+      endpointOrigin === null ||
+      serverOrigin === null ||
+      endpointOrigin !== serverOrigin
+    ) {
+      throw new WebDavError("WEBDAV_ENDPOINT_INVALID");
+    }
   },
 
   // Nextcloud obtains its credential through Login Flow v2 (the member approves

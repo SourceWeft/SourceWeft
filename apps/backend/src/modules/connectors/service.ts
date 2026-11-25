@@ -674,38 +674,57 @@ export class ConnectorService {
         label: "configJson",
       });
     }
-    // A credential connector's endpoint is bound to its stored secret: the
-    // account identity and the Authorization target are fixed at create time.
-    // A member with connector.manage who never knew the password must not be
-    // able to point that credential at another origin by editing the config
+    // A credential connector's server addresses are bound to its stored secret:
+    // the account identity and every Authorization target are fixed at create
+    // time. A member with connector.manage who never knew the password must not
+    // be able to point that credential at another origin by editing the config
     // (which would send `Authorization: Basic` to an attacker on the next sync
-    // or browse). Same-origin path changes and `roots` edits stay allowed; a
-    // different or unparsable endpoint origin is rejected with a fixed message
-    // that echoes no input.
+    // or browse, or on the best-effort credential revoke when the connector is
+    // deleted). The lock covers EVERY top-level config value that parses as an
+    // http(s) URL — not just `endpoint`, but also e.g. Nextcloud's `server`
+    // canonical-link base — so none of them can be re-pointed. Each such key
+    // must keep the origin it had: a newly URL-valued key (absent or non-URL
+    // before) is rejected, and so is removing or re-pointing one. Same-origin
+    // path changes and non-URL edits (`roots`, `userId`) stay allowed. The
+    // fixed message echoes no input.
     if (
       input.configJson !== undefined &&
       manifest.auth?.kind === "credential"
     ) {
-      const endpointOrigin = (value: unknown): string | null => {
+      const httpOrigin = (value: unknown): string | null => {
         if (typeof value !== "string") return null;
+        let url: URL;
         try {
-          return new URL(value).origin;
+          url = new URL(value);
         } catch {
           return null;
         }
+        if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+        return url.origin;
       };
-      const storedOrigin = endpointOrigin(current.configJson.endpoint);
-      const nextOrigin = endpointOrigin(nextConfig.endpoint);
-      if (
-        storedOrigin === null ||
-        nextOrigin === null ||
-        storedOrigin !== nextOrigin
-      ) {
-        throw new ConnectorError(
-          400,
-          "CONNECTOR_CREDENTIAL_ENDPOINT_LOCKED",
-          "This connector's server address cannot be changed",
-        );
+      const stored = current.configJson as Record<string, unknown>;
+      const next = nextConfig as Record<string, unknown>;
+      for (const key of new Set([
+        ...Object.keys(stored),
+        ...Object.keys(next),
+      ])) {
+        const storedOrigin = httpOrigin(stored[key]);
+        const nextOrigin = httpOrigin(next[key]);
+        // Neither side is an http(s) URL at this key: not an address to lock.
+        if (storedOrigin === null && nextOrigin === null) continue;
+        // One side URL-valued and the other not, or a changed origin: a new
+        // URL-valued key, a removed one, or a re-pointed origin — all rejected.
+        if (
+          storedOrigin === null ||
+          nextOrigin === null ||
+          storedOrigin !== nextOrigin
+        ) {
+          throw new ConnectorError(
+            400,
+            "CONNECTOR_CREDENTIAL_ENDPOINT_LOCKED",
+            "This connector's server address cannot be changed",
+          );
+        }
       }
     }
 
