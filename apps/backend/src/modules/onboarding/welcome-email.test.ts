@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import { beforeEach, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  databaseQuery: vi.fn(),
   enqueueWithAudit: vi.fn(),
   getBillingDeploymentCapabilities: vi.fn(),
   loggerError: vi.fn(),
+  loggerInfo: vi.fn(),
   mailDeliveryConfigured: vi.fn(),
   resolveMailLocale: vi.fn(),
+  sendTemplate: vi.fn(),
 }));
 
 vi.mock("../../shared/config", () => ({
@@ -25,6 +28,14 @@ vi.mock("../mail/delivery", () => ({
   mailDeliveryConfigured: mocks.mailDeliveryConfigured,
 }));
 
+vi.mock("../mail", () => ({
+  mailService: { sendTemplate: mocks.sendTemplate },
+}));
+
+vi.mock("@sourceweft/db", () => ({
+  database: { query: mocks.databaseQuery },
+}));
+
 vi.mock("../auth/mail-locale", () => ({
   resolveMailLocale: mocks.resolveMailLocale,
 }));
@@ -36,7 +47,7 @@ vi.mock("../../shared/queue", () => ({
 vi.mock("../../shared/logger", () => ({
   logger: {
     debug: vi.fn(),
-    info: vi.fn(),
+    info: mocks.loggerInfo,
     warn: vi.fn(),
     error: mocks.loggerError,
   },
@@ -45,14 +56,18 @@ vi.mock("../../shared/logger", () => ({
 import {
   buildWelcomeMailVariables,
   enqueueWelcomeEmail,
+  sendWelcomeEmail,
 } from "./welcome-email";
 
 beforeEach(() => {
+  mocks.databaseQuery.mockReset();
   mocks.enqueueWithAudit.mockReset();
   mocks.getBillingDeploymentCapabilities.mockReset();
   mocks.loggerError.mockReset();
+  mocks.loggerInfo.mockReset();
   mocks.mailDeliveryConfigured.mockReset();
   mocks.resolveMailLocale.mockReset();
+  mocks.sendTemplate.mockReset();
 
   mocks.getBillingDeploymentCapabilities.mockReturnValue({
     billing: {
@@ -62,6 +77,10 @@ beforeEach(() => {
   });
   mocks.mailDeliveryConfigured.mockReturnValue(true);
   mocks.resolveMailLocale.mockResolvedValue("en");
+  mocks.databaseQuery.mockResolvedValue({
+    rows: [{ email: "a@example.test", name: "Alice", emailVerified: true }],
+  });
+  mocks.sendTemplate.mockResolvedValue(undefined);
 });
 
 test("builds links from the web base URL without double slashes", () => {
@@ -182,5 +201,57 @@ test("never throws when resolving the mail locale fails", async () => {
   assert.equal(
     mocks.loggerError.mock.calls[0]?.[0],
     "welcome_email_enqueue_failed",
+  );
+});
+
+test("sends auth.welcome in the job's locale to the user's current address", async () => {
+  // User row: { email: "a@example.test", name: "Alice", emailVerified: true }
+  assert.equal(await sendWelcomeEmail({ userId: "u1", locale: "zh-CN" }), "sent");
+  const call = mocks.sendTemplate.mock.calls[0]![0];
+  assert.equal(call.to, "a@example.test");
+  assert.equal(call.templateId, "auth.welcome");
+  assert.equal(call.messageType, "auth.welcome");
+  assert.equal(call.locale, "zh-CN");
+  assert.equal(call.variables.name, "Alice");
+});
+
+test("falls back to English when the job has no usable locale", async () => {
+  await sendWelcomeEmail({ userId: "u1" });
+  await sendWelcomeEmail({ userId: "u1", locale: "fr" });
+  assert.equal(mocks.sendTemplate.mock.calls[0]![0].locale, "en");
+  assert.equal(mocks.sendTemplate.mock.calls[1]![0].locale, "en");
+});
+
+test("skips a user that no longer exists", async () => {
+  mocks.databaseQuery.mockResolvedValueOnce({ rows: [] });
+  assert.equal(await sendWelcomeEmail({ userId: "gone", locale: "en" }), "skipped");
+  assert.equal(mocks.sendTemplate.mock.calls.length, 0);
+});
+
+test("skips a user whose email is not verified", async () => {
+  mocks.databaseQuery.mockResolvedValueOnce({
+    rows: [{ email: "a@example.test", name: "Alice", emailVerified: false }],
+  });
+  assert.equal(await sendWelcomeEmail({ userId: "u1", locale: "en" }), "skipped");
+  assert.equal(mocks.sendTemplate.mock.calls.length, 0);
+});
+
+test("throws when this process cannot deliver mail", async () => {
+  mocks.mailDeliveryConfigured.mockReturnValue(false);
+  await assert.rejects(
+    sendWelcomeEmail({ userId: "u1", locale: "en" }),
+    /not configured/,
+  );
+});
+
+test("throws on a payload without a user id", async () => {
+  await assert.rejects(sendWelcomeEmail({ locale: "en" }), /userId/);
+});
+
+test("lets a provider failure propagate so the job retries", async () => {
+  mocks.sendTemplate.mockRejectedValueOnce(new Error("plunk 503"));
+  await assert.rejects(
+    sendWelcomeEmail({ userId: "u1", locale: "en" }),
+    /plunk 503/,
   );
 });

@@ -127,6 +127,21 @@ test("an ordinary oversized error message and stack are capped", () => {
   assert.match(stack, /…\[truncated \d+ chars\]$/);
 });
 
+test("a welcome email job's failure log payload is exactly userId and locale", () => {
+  const log = buildWorkerJobFailureLog(
+    {
+      id: "welcome-email_user-1",
+      name: "welcome-email",
+      attemptsMade: 1,
+      opts: { attempts: 5 },
+      data: { userId: "user-1", locale: "zh-CN" },
+    } as never,
+    new Error("boom"),
+  );
+
+  assert.deepEqual(log.payload, { userId: "user-1", locale: "zh-CN" });
+});
+
 test("a short error message and stack are logged untouched", () => {
   const error = new Error("boom");
   const log = buildWorkerJobFailureLog(undefined, error);
