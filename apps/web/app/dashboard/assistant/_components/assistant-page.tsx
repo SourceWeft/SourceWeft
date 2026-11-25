@@ -9,6 +9,7 @@ import type {
   AssistantFeedItem,
   AssistantTicket,
 } from "@sourceweft/contracts/assistants";
+import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import {
   useAssistant,
@@ -21,8 +22,11 @@ import { authClient } from "../../../../lib/auth-client";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
 import { AssistantMenu } from "./assistant-menu";
 import { EnableCard } from "./enable-card";
+import { AssistantSummary } from "./assistant-summary";
+import { DecisionList } from "./decision-list";
 import { FeedComposer } from "./feed-composer";
 import { FeedList } from "./feed-list";
+import { AssistantWelcome } from "./assistant-welcome";
 import { memberName } from "./member-name";
 import { TicketList } from "./ticket-list";
 
@@ -142,6 +146,20 @@ export function AssistantView({
   const [view, setView] = React.useState<"activity" | "tickets">(() =>
     highlightTicketId ? "tickets" : "activity",
   );
+  const [panelOpen, setPanelOpen] = React.useState(true);
+  const [section, setSection] = React.useState<"chat" | "decisions">("chat");
+  const [seed, setSeed] = React.useState<{ id: number; text: string } | null>(
+    null,
+  );
+  // A workspace that has never used the assistant: nothing to list, so the
+  // page greets instead of showing two empty columns.
+  const fresh =
+    !feed.isPending &&
+    !feed.isError &&
+    !tickets.isPending &&
+    !tickets.isError &&
+    feed.items.length === 0 &&
+    tickets.items.length === 0;
   const openTickets = tickets.items.filter(
     (ticket) => ticket.stage !== "ended",
   );
@@ -187,13 +205,31 @@ export function AssistantView({
           ) : null}
         </div>
         {assistant && !loading ? (
-          <AssistantMenu
-            assistant={assistant}
-            workspaceId={workspaceId}
-            isAdmin={isAdmin}
-            canWrite={canWrite}
-            members={members}
-          />
+          <div className="flex items-center gap-1">
+            {fresh ? null : (
+              <button
+                type="button"
+                aria-pressed={panelOpen}
+                aria-label={t("page.toggleTickets")}
+                title={t("page.toggleTickets")}
+                className="inline-flex size-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground max-md:hidden"
+                onClick={() => setPanelOpen((open) => !open)}
+              >
+                {panelOpen ? (
+                  <PanelRightClose className="size-4" aria-hidden />
+                ) : (
+                  <PanelRightOpen className="size-4" aria-hidden />
+                )}
+              </button>
+            )}
+            <AssistantMenu
+              assistant={assistant}
+              workspaceId={workspaceId}
+              isAdmin={isAdmin}
+              canWrite={canWrite}
+              members={members}
+            />
+          </div>
         ) : null}
       </header>
 
@@ -213,105 +249,183 @@ export function AssistantView({
         <EnableCard workspaceId={workspaceId} isAdmin={isAdmin} />
       ) : (
         <>
-          <div
-            role="tablist"
-            className="mb-2 grid grid-cols-2 gap-1 rounded-xl bg-muted p-1 md:hidden"
-          >
-            {(["activity", "tickets"] as const).map((key) => (
-              <button
-                key={key}
-                type="button"
-                role="tab"
-                aria-selected={view === key}
-                className={cn(
-                  "flex h-9 items-center justify-center gap-2 rounded-lg text-sm font-medium transition-colors",
-                  view === key
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground",
-                )}
-                onClick={() => setView(key)}
+          {fresh ? null : (
+            <>
+              <div
+                role="tablist"
+                aria-label={t("sections.label")}
+                className="mb-3 flex gap-4 border-b border-border/60"
               >
-                {key === "activity"
-                  ? t("page.feedHeading")
-                  : t("page.ticketsHeading")}
-                {key === "tickets" && openTickets.length > 0 ? (
-                  <span
+                {(["chat", "decisions"] as const).map((key) => (
+                  <button
+                    key={key}
+                    type="button"
+                    role="tab"
+                    data-section={key}
+                    aria-selected={section === key}
                     className={cn(
-                      "min-w-5 rounded-full px-1.5 text-center text-xs tabular-nums",
-                      needsPerson > 0
-                        ? "bg-amber-500/20 text-amber-700 dark:text-amber-400"
-                        : "bg-foreground/10 text-muted-foreground",
+                      "-mb-px border-b-2 px-0.5 pb-2 text-sm font-medium transition-colors",
+                      section === key
+                        ? "border-foreground text-foreground"
+                        : "border-transparent text-muted-foreground hover:text-foreground",
                     )}
+                    onClick={() => setSection(key)}
                   >
-                    {needsPerson > 0 ? needsPerson : openTickets.length}
-                  </span>
-                ) : null}
-              </button>
-            ))}
-          </div>
-          <div className="flex min-h-0 flex-1 flex-col md:grid md:grid-cols-[minmax(0,1fr)_17rem] md:gap-8">
-            <section
-              className={cn(
-                "flex min-h-0 min-w-0 flex-1 flex-col",
-                view === "tickets" && "max-md:hidden",
-              )}
-            >
-              <h2 className="pb-1 text-xs font-medium text-muted-foreground max-md:hidden">
-                {t("page.feedHeading")}
-              </h2>
-              {feed.isError ? (
-                <p className="text-sm text-destructive" role="alert">
-                  {t("feed.loadError")}
-                </p>
-              ) : feed.isPending ? (
-                <p className="text-sm text-muted-foreground" role="status">
-                  {t("page.loading")}
-                </p>
-              ) : (
-                <FeedList
-                  items={feed.items}
-                  tickets={tickets.items}
-                  members={members}
-                  viewerId={viewerId}
-                  hasOlder={feed.hasOlder}
-                  loadingOlder={feed.loadingOlder}
-                  onLoadOlder={feed.onLoadOlder}
-                />
-              )}
-              <FeedComposer
+                    {t(`sections.${key}`)}
+                  </button>
+                ))}
+              </div>
+              <AssistantSummary
+                assistant={assistant}
                 workspaceId={workspaceId}
-                disabledReason={disabledReason}
+                canWrite={canWrite}
+                tickets={tickets.items}
+                onShowTickets={() => {
+                  setSection("chat");
+                  setPanelOpen(true);
+                  setView("tickets");
+                }}
               />
-            </section>
-            <aside
+            </>
+          )}
+          {section === "decisions" && !fresh ? (
+            <DecisionList workspaceId={workspaceId} members={members} />
+          ) : null}
+          {fresh || section !== "chat" ? null : (
+            <div
+              role="tablist"
+              className="mb-2 grid grid-cols-2 gap-1 rounded-xl bg-muted p-1 md:hidden"
+            >
+              {(["activity", "tickets"] as const).map((key) => (
+                <button
+                  key={key}
+                  type="button"
+                  role="tab"
+                  data-view-tab={key}
+                  aria-selected={view === key}
+                  className={cn(
+                    "flex h-9 items-center justify-center gap-2 rounded-lg text-sm font-medium transition-colors",
+                    view === key
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground",
+                  )}
+                  onClick={() => setView(key)}
+                >
+                  {key === "activity"
+                    ? t("page.feedHeading")
+                    : t("page.ticketsHeading")}
+                  {key === "tickets" && openTickets.length > 0 ? (
+                    <span
+                      className={cn(
+                        "min-w-5 rounded-full px-1.5 text-center text-xs tabular-nums",
+                        needsPerson > 0
+                          ? "bg-amber-500/20 text-amber-700 dark:text-amber-400"
+                          : "bg-foreground/10 text-muted-foreground",
+                      )}
+                    >
+                      {needsPerson > 0 ? needsPerson : openTickets.length}
+                    </span>
+                  ) : null}
+                </button>
+              ))}
+            </div>
+          )}
+          {section === "chat" ? (
+            <div
               className={cn(
-                "flex min-h-0 min-w-0 flex-col overflow-y-auto pb-4 md:border-l md:border-border/60 md:pl-6",
-                view === "activity" && "max-md:hidden",
+                "flex min-h-0 flex-1 flex-col",
+                !fresh &&
+                  panelOpen &&
+                  "md:grid md:grid-cols-[minmax(0,1fr)_19rem] md:gap-4",
               )}
             >
-              <h2 className="pb-2 text-xs font-medium text-muted-foreground max-md:hidden">
-                {t("page.ticketsHeading")}
-              </h2>
-              {tickets.isError ? (
-                <p className="text-sm text-destructive" role="alert">
-                  {t("tickets.loadError")}
-                </p>
-              ) : tickets.isPending ? (
-                <p className="text-sm text-muted-foreground" role="status">
-                  {t("page.loading")}
-                </p>
-              ) : (
-                <TicketList
+              <section
+                className={cn(
+                  "flex min-h-0 min-w-0 flex-1 flex-col",
+                  view === "tickets" && "max-md:hidden",
+                )}
+              >
+                <h2
+                  className={cn(
+                    "pb-1 text-xs font-medium text-muted-foreground max-md:hidden",
+                    fresh && "md:hidden",
+                  )}
+                >
+                  {t("page.feedHeading")}
+                </h2>
+                {feed.isError ? (
+                  <p className="text-sm text-destructive" role="alert">
+                    {t("feed.loadError")}
+                  </p>
+                ) : feed.isPending ? (
+                  <p className="text-sm text-muted-foreground" role="status">
+                    {t("page.loading")}
+                  </p>
+                ) : fresh ? (
+                  <AssistantWelcome
+                    disabled={Boolean(disabledReason)}
+                    onPick={(text) =>
+                      setSeed((current) => ({
+                        id: (current?.id ?? 0) + 1,
+                        text,
+                      }))
+                    }
+                  />
+                ) : (
+                  <FeedList
+                    items={feed.items}
+                    tickets={tickets.items}
+                    members={members}
+                    viewerId={viewerId}
+                    hasOlder={feed.hasOlder}
+                    loadingOlder={feed.loadingOlder}
+                    onLoadOlder={feed.onLoadOlder}
+                  />
+                )}
+                <FeedComposer
                   workspaceId={workspaceId}
-                  tickets={tickets.items}
-                  members={members}
-                  canWrite={canWrite}
-                  viewerId={viewerId}
-                  highlightTicketId={highlightTicketId}
+                  disabledReason={disabledReason}
+                  seed={seed}
                 />
+              </section>
+              {fresh ? null : (
+                <aside
+                  className={cn(
+                    "flex min-h-0 min-w-0 flex-col overflow-y-auto pb-4 md:mb-4 md:rounded-2xl md:border md:border-border md:bg-card md:p-3",
+                    view === "activity" && "max-md:hidden",
+                    !panelOpen && "md:hidden",
+                  )}
+                >
+                  <h2 className="flex items-center gap-2 px-2 pb-2 text-sm font-medium max-md:hidden">
+                    {t("page.ticketsHeading")}
+                    {openTickets.length > 0 ? (
+                      <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums text-muted-foreground">
+                        {openTickets.length}
+                      </span>
+                    ) : null}
+                  </h2>
+                  {tickets.isError ? (
+                    <p className="text-sm text-destructive" role="alert">
+                      {t("tickets.loadError")}
+                    </p>
+                  ) : tickets.isPending ? (
+                    <p className="text-sm text-muted-foreground" role="status">
+                      {t("page.loading")}
+                    </p>
+                  ) : (
+                    <TicketList
+                      workspaceId={workspaceId}
+                      tickets={tickets.items}
+                      members={members}
+                      canWrite={canWrite}
+                      viewerId={viewerId}
+                      highlightTicketId={highlightTicketId}
+                    />
+                  )}
+                </aside>
               )}
-            </aside>
-          </div>
+            </div>
+          ) : null}
         </>
       )}
     </div>

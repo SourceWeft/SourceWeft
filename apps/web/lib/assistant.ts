@@ -8,7 +8,10 @@ import {
 } from "@tanstack/react-query";
 import { hasMemberRole } from "@better-auth-ui/core/plugins/organization";
 import type { WorkspaceMember } from "@sourceweft/contracts";
-import type { UpdateAssistantRequest } from "@sourceweft/contracts/assistants";
+import type {
+  AssistantDecisionAction,
+  UpdateAssistantRequest,
+} from "@sourceweft/contracts/assistants";
 import { HttpClientError } from "@sourceweft/sdk";
 import { assistantClient, workspaceClient } from "./sdk";
 
@@ -30,6 +33,8 @@ export const assistantKeys = {
     ["assistant", workspaceId, "assistant"] as const,
   feed: (workspaceId: string | null) =>
     ["assistant", workspaceId, "feed"] as const,
+  decisions: (workspaceId: string | null, action: string | null) =>
+    ["assistant", workspaceId, "decisions", action] as const,
   tickets: (workspaceId: string | null) =>
     ["assistant", workspaceId, "tickets"] as const,
   members: (workspaceId: string | null) =>
@@ -58,6 +63,26 @@ export function useAssistantFeed(workspaceId: string | null, enabled: boolean) {
     queryFn: ({ pageParam }) =>
       assistantClient.listFeed(workspaceId!, {
         limit: FEED_PAGE_SIZE,
+        ...(pageParam ? { before: pageParam } : {}),
+      }),
+    initialPageParam: "",
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+    enabled: enabled && Boolean(workspaceId),
+    refetchInterval: ASSISTANT_POLL_MS,
+  });
+}
+
+/** The router's decisions, newest first, optionally of one kind. */
+export function useAssistantDecisions(
+  workspaceId: string | null,
+  action: AssistantDecisionAction | null,
+  enabled: boolean,
+) {
+  return useInfiniteQuery({
+    queryKey: assistantKeys.decisions(workspaceId, action),
+    queryFn: ({ pageParam }) =>
+      assistantClient.listDecisions(workspaceId!, {
+        ...(action ? { action } : {}),
         ...(pageParam ? { before: pageParam } : {}),
       }),
     initialPageParam: "",

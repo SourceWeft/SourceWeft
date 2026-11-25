@@ -579,3 +579,113 @@ test("a workspace member gets a 404 for a ticket id that is not theirs", async (
     "404 ASSISTANT_TICKET_NOT_FOUND",
   );
 });
+
+test("decisions list newest first with their event and ticket, filter by action, page, and never cross tenants", async () => {
+  const tenantA = await teamWithOwnerAndMember();
+  const assistantA = await f.service.enable(tenantA.ownerCaller);
+  const tenantB = await teamWithOwnerAndMember();
+  const assistantB = await f.service.enable(tenantB.ownerCaller);
+
+  const base = Date.now() - 60_000;
+  const decide = async (
+    tenant: typeof tenantA,
+    assistantId: string,
+    index: number,
+    action: "create_ticket" | "route_to_ticket" | "ignore",
+    ticketId: string | null,
+    text = `event ${index}`,
+  ) => {
+    const trigger = await f.insertTrigger({
+      teamId: tenant.teamId,
+      workspaceId: tenant.workspaceId,
+      assistantId,
+      payerUserId: tenant.owner,
+      text,
+      status: "decided",
+      createdAt: new Date(base + index * 1000),
+    });
+    const id = randomUUID();
+    await f.schema.db.insert(f.schema.assistantDecisions).values({
+      id,
+      teamId: tenant.teamId,
+      workspaceId: tenant.workspaceId,
+      assistantId,
+      triggerId: trigger.id,
+      routerBatchKey: `batch-${index}`,
+      action,
+      ticketId,
+      reason: `reason ${index}`,
+      createdAt: new Date(base + index * 1000),
+    });
+    return id;
+  };
+
+  const ticket = await f.insertTicket({
+    teamId: tenantA.teamId,
+    workspaceId: tenantA.workspaceId,
+    assistantId: assistantA.id,
+    payerUserId: tenantA.owner,
+    title: "Triage the inbox",
+  });
+  const first = await decide(
+    tenantA,
+    assistantA.id,
+    1,
+    "create_ticket",
+    ticket.id,
+  );
+  const second = await decide(tenantA, assistantA.id, 2, "ignore", null);
+  const long = await decide(
+    tenantA,
+    assistantA.id,
+    3,
+    "route_to_ticket",
+    ticket.id,
+    "x".repeat(500),
+  );
+  const foreign = await decide(tenantB, assistantB.id, 4, "ignore", null);
+
+  const all = await f.service.listDecisions(tenantA.ownerCaller);
+  assert.deepEqual(
+    all.items.map((item) => item.id),
+    [long, second, first],
+  );
+  assert.equal(all.items[0]!.trigger.text.length, 201);
+  assert.deepEqual(all.items[2]!.ticket, {
+    id: ticket.id,
+    title: "Triage the inbox",
+  });
+  assert.equal(all.items[1]!.ticket, null);
+  assert.equal(all.nextCursor, null);
+
+  const ignored = await f.service.listDecisions(tenantA.ownerCaller, {
+    action: "ignore",
+  });
+  assert.deepEqual(
+    ignored.items.map((item) => item.id),
+    [second],
+  );
+
+  const page = await f.service.listDecisions(tenantA.ownerCaller, { limit: 2 });
+  assert.deepEqual(
+    page.items.map((item) => item.id),
+    [long, second],
+  );
+  assert.equal(page.nextCursor, second);
+  const rest = await f.service.listDecisions(tenantA.ownerCaller, {
+    before: page.nextCursor!,
+  });
+  assert.deepEqual(
+    rest.items.map((item) => item.id),
+    [first],
+  );
+
+  // Another tenant's decision id as a cursor pages nothing of ours.
+  const foreignCursor = await f.service.listDecisions(tenantA.ownerCaller, {
+    before: foreign,
+  });
+  assert.deepEqual(
+    foreignCursor.items.map((item) => item.id),
+    [long, second, first],
+  );
+});

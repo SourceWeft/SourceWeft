@@ -270,6 +270,8 @@ test("the rail links primary pages and keeps secondary ones under More", async (
   assert.deepEqual(links, [
     "/dashboard",
     "/dashboard/chat",
+    "/dashboard/assistant",
+    "/dashboard/scheduled",
     "/dashboard/skills",
     "/dashboard/mcp",
   ]);
@@ -278,8 +280,24 @@ test("the rail links primary pages and keeps secondary ones under More", async (
   assert.ok(more.className.includes("bg-sidebar-accent"));
   const menu = rail.querySelector('[role="menu"]')!;
   assert.ok(menu.querySelector('a[href="/dashboard/observability"]'));
-  assert.ok(menu.querySelector('a[href="/dashboard/scheduled"]'));
+  assert.equal(menu.querySelector('a[href="/dashboard/scheduled"]'), null);
   assert.ok(menu.querySelector("[data-market-admin]"));
+  // The assistant and scheduled tasks have their own icons on the rail, so
+  // More does not repeat them.
+  assert.equal(menu.querySelector('a[href="/dashboard/assistant"]'), null);
+});
+
+test("the assistant's rail icon is current on its page and More is not highlighted", async () => {
+  const container = await render({
+    pathname: "/dashboard/assistant",
+    docked: true,
+  });
+  const rail = container.querySelector('[data-testid="navigation-rail"]')!;
+  const link = rail.querySelector('nav > a[href="/dashboard/assistant"]')!;
+  assert.equal(link.getAttribute("aria-current"), "page");
+  // Nothing under the rail's More is current, so More is not highlighted.
+  const more = rail.querySelector<HTMLButtonElement>('[aria-label="More"]')!;
+  assert.ok(!more.className.includes("bg-sidebar-accent"));
 });
 
 test("the macOS rail leaves the traffic lights a drag strip instead of the brand", async () => {

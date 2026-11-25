@@ -1732,6 +1732,7 @@
       "loadError": "無法載入助理。",
       "feedHeading": "動態",
       "ticketsHeading": "工單",
+      "toggleTickets": "顯示或隱藏工單",
       "steward": "負責人：{name}"
     },
     "status": {
@@ -1802,6 +1803,20 @@
         "credit_cap": "已停止：達到額度上限。",
         "insufficient_credits": "已停止：提出請求的人額度不足。",
         "repeated_failure": "已停止：多次執行失敗。"
+      },
+      "showDetails": "詳細資訊",
+      "hideDetails": "收起詳細資訊",
+      "origin": {
+        "explicit": "成員發起",
+        "inferred": "助理自行接下"
+      },
+      "detail": {
+        "goal": "目標",
+        "origin": "來源",
+        "creditCap": "額度上限",
+        "failures": "連續失敗次數",
+        "created": "建立時間",
+        "ended": "結束時間"
       }
     },
     "menu": {
@@ -1840,6 +1855,61 @@
       "router": "這是助理的工作記錄。助理會自行執行，這裡不接收訊息。",
       "ticket": "這個對話屬於助理的一個工單，這裡不接收訊息。",
       "open": "去和助理對話"
+    },
+    "welcome": {
+      "title": "想讓助理做點什麼？",
+      "suggestions": {
+        "changes": "總結一下本週來源裡有哪些變化。",
+        "questions": "各個來源裡還有哪些未解決的問題？",
+        "briefing": "根據最新的來源起草一份簡報。",
+        "outdated": "找出看起來已過時或互相矛盾的來源。"
+      },
+      "steps": {
+        "ask": {
+          "title": "直接用日常語言提出",
+          "body": "工作區裡有寫入權限的成員都可以發起請求。"
+        },
+        "ticket": {
+          "title": "每個請求都是一個工單",
+          "body": "它會獨立執行，費用由發起人承擔。"
+        },
+        "report": {
+          "title": "結果會回報到這裡",
+          "body": "開啟工單背後的對話，可以檢視完整過程。"
+        }
+      }
+    },
+    "summary": {
+      "waiting": "{count} 個工單等你處理",
+      "blocked": "{count} 個工單已受阻",
+      "paused": "助理已暫停。"
+    },
+    "sections": {
+      "label": "助理分區",
+      "chat": "對話",
+      "decisions": "決策"
+    },
+    "decisions": {
+      "empty": "還沒有決策。助理判斷過的每個請求都會連同理由顯示在這裡。",
+      "loadError": "無法載入決策。",
+      "loadOlder": "載入更早的決策",
+      "why": "理由：{reason}",
+      "ticket": "工單：{title}",
+      "filter": {
+        "all": "全部",
+        "create_ticket": "新增工單",
+        "route_to_ticket": "轉給工單",
+        "ignore": "已忽略"
+      },
+      "action": {
+        "create_ticket": "新增了工單",
+        "route_to_ticket": "轉給了工單",
+        "ignore": "已忽略"
+      },
+      "source": {
+        "member_message": "成員的訊息",
+        "worker_report": "工單的報告"
+      }
     }
   },
   "dashboardChat": {

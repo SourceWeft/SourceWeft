@@ -228,6 +228,91 @@ export async function listFeedItemRows(input: {
     .limit(input.limit);
 }
 
+// ── decisions ────────────────────────────────────────────────────────────
+
+export type AssistantDecisionListRow = {
+  id: string;
+  action: AssistantDecisionAction;
+  reason: string | null;
+  createdAt: Date;
+  triggerId: string;
+  triggerSourceKind: AssistantTriggerSource;
+  triggerAuthorUserId: string | null;
+  triggerText: string;
+  ticketId: string | null;
+  ticketTitle: string | null;
+};
+
+/**
+ * The router's decisions, newest first, each with the event it judged and
+ * the ticket it concerns. `before` is a decision id, scoped to the same
+ * assistant like the feed's cursor, so another assistant's id pages nothing.
+ */
+export async function listDecisionRows(input: {
+  assistantId: string;
+  action?: AssistantDecisionAction;
+  before?: string;
+  limit: number;
+}): Promise<AssistantDecisionListRow[]> {
+  const [beforeRow] = input.before
+    ? await db
+        .select({
+          id: assistantDecisions.id,
+          createdAt: assistantDecisions.createdAt,
+        })
+        .from(assistantDecisions)
+        .where(
+          and(
+            eq(assistantDecisions.id, input.before),
+            eq(assistantDecisions.assistantId, input.assistantId),
+          ),
+        )
+        .limit(1)
+    : [];
+  return db
+    .select({
+      id: assistantDecisions.id,
+      action: assistantDecisions.action,
+      reason: assistantDecisions.reason,
+      createdAt: assistantDecisions.createdAt,
+      triggerId: assistantTriggers.id,
+      triggerSourceKind: assistantTriggers.sourceKind,
+      triggerAuthorUserId: assistantTriggers.authorUserId,
+      triggerText: assistantTriggers.text,
+      ticketId: assistantTickets.id,
+      ticketTitle: assistantTickets.title,
+    })
+    .from(assistantDecisions)
+    .innerJoin(
+      assistantTriggers,
+      eq(assistantTriggers.id, assistantDecisions.triggerId),
+    )
+    .leftJoin(
+      assistantTickets,
+      and(
+        eq(assistantTickets.id, assistantDecisions.ticketId),
+        eq(assistantTickets.assistantId, assistantDecisions.assistantId),
+      ),
+    )
+    .where(
+      and(
+        eq(assistantDecisions.assistantId, input.assistantId),
+        input.action ? eq(assistantDecisions.action, input.action) : undefined,
+        beforeRow
+          ? or(
+              lt(assistantDecisions.createdAt, beforeRow.createdAt),
+              and(
+                eq(assistantDecisions.createdAt, beforeRow.createdAt),
+                lt(assistantDecisions.id, beforeRow.id),
+              ),
+            )
+          : undefined,
+      ),
+    )
+    .orderBy(desc(assistantDecisions.createdAt), desc(assistantDecisions.id))
+    .limit(input.limit);
+}
+
 // ── triggers ─────────────────────────────────────────────────────────────
 
 /** One trigger, scoped to its tenant and assistant — see `findFeedItemRow`. */
