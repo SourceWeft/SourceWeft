@@ -418,6 +418,7 @@ const noneConnectorAuthSchema = z.object({
 const credentialConnectorAuthSchema = z.object({
   kind: z.literal("credential"),
   scheme: z.literal("basic"),
+  flow: z.literal("login_flow").optional(),
 });
 
 export const connectorAuthSchema = z.discriminatedUnion("kind", [

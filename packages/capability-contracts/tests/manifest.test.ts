@@ -868,3 +868,57 @@ test("capability-manifest.connector rejects an unknown credential scheme", () =>
   });
   assert.equal(result.success, false);
 });
+
+test("capability-manifest.connector accepts the optional login_flow marker on credential auth", () => {
+  const manifest = capabilityManifestSchema.parse({
+    schemaVersion: 1,
+    id: "sourceweft/webdav",
+    kind: "connector",
+    name: "WebDAV Connector",
+    version: "0.1.0",
+    connectors: [
+      {
+        id: "nextcloud",
+        title: "Nextcloud",
+        auth: { kind: "credential", scheme: "basic", flow: "login_flow" },
+        sync: {
+          supportsIncremental: true,
+          defaultFrequencyMinutes: 360,
+          resources: [],
+        },
+        actions: [],
+        configSchema: {},
+      },
+    ],
+  });
+  assert.deepEqual(manifest.contributes.connectors[0]?.auth, {
+    kind: "credential",
+    scheme: "basic",
+    flow: "login_flow",
+  });
+});
+
+test("capability-manifest.connector rejects an unknown credential flow", () => {
+  const result = capabilityManifestSchema.safeParse({
+    schemaVersion: 1,
+    id: "sourceweft/webdav",
+    kind: "connector",
+    name: "WebDAV Connector",
+    version: "0.1.0",
+    connectors: [
+      {
+        id: "nextcloud",
+        title: "Nextcloud",
+        auth: { kind: "credential", scheme: "basic", flow: "device" },
+        sync: {
+          supportsIncremental: true,
+          defaultFrequencyMinutes: 360,
+          resources: [],
+        },
+        actions: [],
+        configSchema: {},
+      },
+    ],
+  });
+  assert.equal(result.success, false);
+});

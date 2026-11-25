@@ -203,3 +203,65 @@ test("ConnectorRegistry registers a credential adapter without OAuth methods", (
 
   assert.equal(registry.getManifest("webdavlike").auth.kind, "credential");
 });
+
+const loginFlowManifest: ConnectorManifest = {
+  ...manifest,
+  type: "flowlike",
+  auth: { kind: "credential", scheme: "basic", flow: "login_flow" },
+  actions: [],
+};
+
+const credentialFlow: NonNullable<ConnectorAdapter["credentialFlow"]> = {
+  start: async () => ({
+    loginUrl: "https://cloud.example.com/login",
+    pending: {},
+  }),
+  poll: async () => ({ status: "pending" }),
+};
+
+test("ConnectorRegistry registers a login_flow adapter that implements credentialFlow", () => {
+  const {
+    exchangeOAuthCode: _exchange,
+    refreshOAuthToken: _refresh,
+    ...noOAuth
+  } = adapter;
+  const registry = new ConnectorRegistry([
+    { ...noOAuth, getManifest: () => loginFlowManifest, credentialFlow },
+  ]);
+
+  assert.equal(registry.getManifest("flowlike").auth.kind, "credential");
+});
+
+test("ConnectorRegistry rejects a login_flow manifest without credentialFlow", () => {
+  const {
+    exchangeOAuthCode: _exchange,
+    refreshOAuthToken: _refresh,
+    ...noOAuth
+  } = adapter;
+  assertManifestInvalid(
+    () =>
+      new ConnectorRegistry([
+        { ...noOAuth, getManifest: () => loginFlowManifest },
+      ]),
+    /flowlike.*login_flow.*does not implement credentialFlow/,
+  );
+});
+
+test("ConnectorRegistry rejects credentialFlow without a login_flow credential manifest", () => {
+  const {
+    exchangeOAuthCode: _exchange,
+    refreshOAuthToken: _refresh,
+    ...noOAuth
+  } = adapter;
+  assertManifestInvalid(
+    () =>
+      new ConnectorRegistry([
+        { ...noOAuth, getManifest: () => credentialManifest, credentialFlow },
+      ]),
+    /webdavlike.*credentialFlow.*login_flow/,
+  );
+  assertManifestInvalid(
+    () => new ConnectorRegistry([{ ...adapter, credentialFlow }]),
+    /fake.*credentialFlow.*login_flow/,
+  );
+});
