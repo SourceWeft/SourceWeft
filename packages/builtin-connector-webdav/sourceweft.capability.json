@@ -106,7 +106,8 @@
       "title": "Nextcloud",
       "auth": {
         "kind": "credential",
-        "scheme": "basic"
+        "scheme": "basic",
+        "flow": "login_flow"
       },
       "sync": {
         "supportsIncremental": false,

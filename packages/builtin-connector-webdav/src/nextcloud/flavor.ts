@@ -2,6 +2,7 @@ import type { WebDavFlavor } from "../flavor";
 import type { DavEntry } from "../multistatus";
 import { toRequestUrl } from "../paths";
 import { toBackendNextcloudManifest } from "./backend-manifest";
+import { createNextcloudCredentialFlow } from "./login-flow";
 
 /** Fixed, non-secret readiness message for a server that is reachable but does
  * not behave like Nextcloud (it returned no file ids). */
@@ -88,5 +89,12 @@ export const nextcloudFlavor: WebDavFlavor = {
     return hasFileId
       ? null
       : { reason: "not_nextcloud", message: NOT_NEXTCLOUD_MESSAGE };
+  },
+
+  // Nextcloud obtains its credential through Login Flow v2 (the member approves
+  // in their browser and Nextcloud hands back an app password). Only this flavor
+  // has it, so only the Nextcloud adapter exposes `credentialFlow`.
+  makeCredentialFlow(deps) {
+    return createNextcloudCredentialFlow(deps);
   },
 };

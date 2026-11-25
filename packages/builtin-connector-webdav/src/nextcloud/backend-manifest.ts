@@ -9,7 +9,11 @@ export function toBackendNextcloudManifest(): ConnectorManifest {
   return {
     type: contribution.id,
     displayName: contribution.title,
-    auth: { kind: "credential", scheme: contribution.auth.scheme },
+    auth: {
+      kind: "credential",
+      scheme: contribution.auth.scheme,
+      flow: contribution.auth.flow,
+    },
     sync: {
       supportsIncremental: contribution.sync.supportsIncremental,
       defaultFrequencyMinutes: contribution.sync.defaultFrequencyMinutes,

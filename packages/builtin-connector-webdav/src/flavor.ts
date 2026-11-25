@@ -1,7 +1,24 @@
-import type { ConnectorManifest } from "@sourceweft/contracts";
+import type {
+  ConnectorCredentialFlow,
+  ConnectorManifest,
+} from "@sourceweft/contracts";
+import type { ConnectorPublicFetchScope } from "@sourceweft/contracts/capability-host-services";
 import { toBackendWebDavManifest } from "./backend-manifest";
 import type { DavEntry } from "./multistatus";
 import { toRequestUrl } from "./paths";
+
+/**
+ * What a flavor's credential login-flow needs from the adapter: the host
+ * credentialed fetch (a scope opened per call and closed in `finally`), plus
+ * optional test seams for the per-request timeout and the response size cap.
+ */
+export type WebDavCredentialFlowDeps = {
+  credentialedFetch: () => ConnectorPublicFetchScope;
+  /** Test seam: per-request timeout. Defaults to the DAV request timeout. */
+  requestTimeoutMs?: number;
+  /** Test seam: response body ceiling. Defaults to the login-flow cap. */
+  maxResponseBytes?: number;
+};
 
 /** The context a flavor gets when turning one discovered entry into an item. */
 export type WebDavItemIdentityContext = {
@@ -71,6 +88,12 @@ export type WebDavFlavor = {
   requireProps?(
     entries: DavEntry[],
   ): { reason: string; message: string } | null;
+  /** Credential login-flow factory (credential `flow: "login_flow"` only).
+   * Present only on a flavor whose connector obtains its credential through a
+   * server-driven browser login (Nextcloud); the adapter attaches the result as
+   * `credentialFlow`. A flavor without it (plain WebDAV) yields an adapter with
+   * no `credentialFlow`, which is what the bidirectional registry rule requires. */
+  makeCredentialFlow?(deps: WebDavCredentialFlowDeps): ConnectorCredentialFlow;
 };
 
 /**

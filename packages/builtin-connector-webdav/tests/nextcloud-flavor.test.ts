@@ -191,7 +191,11 @@ test("nextcloudEndpoint strips a trailing slash from the server", () => {
 test("the nextcloud contribution is a basic-credential connector with its own actions", () => {
   const c = nextcloudConnectorContribution;
   assert.equal(c.id, "nextcloud");
-  assert.deepEqual(c.auth, { kind: "credential", scheme: "basic" });
+  assert.deepEqual(c.auth, {
+    kind: "credential",
+    scheme: "basic",
+    flow: "login_flow",
+  });
   assert.equal(c.sync.resources[0]!.type, "nextcloud_file");
   assert.equal(c.sync.resources[0]!.supportsDeleteDetection, true);
   assert.deepEqual(
@@ -226,7 +230,11 @@ test("the nextcloud backend manifest carries credential auth and the selection s
   const manifest = connectorManifestSchema.parse(toBackendNextcloudManifest());
   assert.equal(manifest.type, "nextcloud");
   assert.equal(manifest.displayName, "Nextcloud");
-  assert.deepEqual(manifest.auth, { kind: "credential", scheme: "basic" });
+  assert.deepEqual(manifest.auth, {
+    kind: "credential",
+    scheme: "basic",
+    flow: "login_flow",
+  });
   assert.deepEqual(
     manifest.actions.map((a) => a.type),
     ["nextcloud.browse", "nextcloud.describe"],

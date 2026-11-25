@@ -215,6 +215,9 @@ export function createWebdavAdapter(
   const { credentialedFetch, logger } = adapterInput;
   const flavor = adapterInput.flavor ?? webdavFlavor;
   const now = adapterInput.now ?? Date.now;
+  // Only a flavor that logs in through a server-driven browser flow (Nextcloud)
+  // supplies this; the plain WebDAV adapter is left with no `credentialFlow`.
+  const credentialFlow = flavor.makeCredentialFlow?.({ credentialedFetch });
   const limits: DiscoveryLimits = {
     ...DEFAULT_DISCOVERY_LIMITS,
     ...adapterInput.limits,
@@ -457,6 +460,7 @@ export function createWebdavAdapter(
   return {
     capabilityId: flavor.capabilityId,
     getManifest: flavor.getManifest,
+    ...(credentialFlow ? { credentialFlow } : {}),
 
     credentialIdentity(
       config: Record<string, unknown>,

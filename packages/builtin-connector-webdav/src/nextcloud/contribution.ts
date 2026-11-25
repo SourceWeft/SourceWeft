@@ -16,7 +16,10 @@ export const nextcloudConnectorContribution = {
   // The login name and the app password Nextcloud issues through Login Flow v2;
   // stored encrypted as a connector account and never part of the configuration
   // below. The scheme is the same HTTP Basic the shared WebDAV client sends.
-  auth: { kind: "credential", scheme: "basic" },
+  // `flow: "login_flow"` marks the server-driven browser login: the adapter
+  // implements `credentialFlow` and the backend runs the flow, so no app
+  // password is ever typed by the member.
+  auth: { kind: "credential", scheme: "basic", flow: "login_flow" },
   sync: {
     supportsIncremental: false,
     defaultFrequencyMinutes: 360,
