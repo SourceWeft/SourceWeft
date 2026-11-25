@@ -471,10 +471,12 @@ describe("poll", () => {
     assert.deepEqual(persisted.configJson.roots, ["/"]);
     assert.ok(!JSON.stringify(persisted.configJson).includes(SECRET));
 
-    // The row is claimed BEFORE the authorized credential is used.
+    // The row is claimed BEFORE the authorized credential is used. Both calls
+    // happened (asserted above via their call counts), so each has a first
+    // invocation order; `!` narrows away the `number | undefined` index access.
     assert.ok(
-      mocks.claimCredentialFlowRecord.mock.invocationCallOrder[0] <
-        mocks.createCredentialConnectorRecord.mock.invocationCallOrder[0],
+      mocks.claimCredentialFlowRecord.mock.invocationCallOrder[0]! <
+        mocks.createCredentialConnectorRecord.mock.invocationCallOrder[0]!,
     );
   });
 
