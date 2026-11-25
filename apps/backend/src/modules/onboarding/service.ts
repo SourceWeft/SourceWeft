@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createSourceweftOrganizationMetadata } from "../auth/organization-metadata";
 import { billingOrganizationHooks as billingService } from "../../billing-host/bindings";
 import { workspaceService } from "../workspace";
+import { enqueueWelcomeEmail } from "./welcome-email";
 
 export class OnboardingService {
   async provisionOrganization(input: {
@@ -50,7 +51,28 @@ export class OnboardingService {
       });
     }
 
-    return { organizationId: created.id };
+    return { organizationId: created.id, created: created.created };
+  }
+
+  async handleSessionCreated(input: {
+    userId: string;
+    headers?: Headers | null;
+  }): Promise<void> {
+    const result = await this.ensurePersonalTeamForUser({
+      userId: input.userId,
+    });
+
+    if (result?.created === true) {
+      // Do not await: sign-in must not wait on Redis. enqueueWelcomeEmail
+      // never rejects by contract, but with Redis unreachable `queue.add`
+      // can hang until reconnection (maxRetriesPerRequest: null), which
+      // would stall the better-auth session.create.after hook and hang the
+      // sign-in response.
+      void enqueueWelcomeEmail({
+        userId: input.userId,
+        headers: input.headers,
+      });
+    }
   }
 }
 

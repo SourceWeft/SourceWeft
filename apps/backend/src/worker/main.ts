@@ -26,6 +26,8 @@ import {
 import { processSyncModelPricingJob } from "./processors/sync-model-pricing";
 import { processProviderCostReconciliationJob } from "../shared/model-gateway/provider-cost-reconciliation";
 import { processThreadTitleGenerateJob } from "./processors/thread-title";
+import { processWelcomeEmailJob } from "./processors/welcome-email";
+import { WELCOME_EMAIL_JOB } from "../modules/onboarding/welcome-email";
 import { processSourceGuideGenerateJob } from "./processors/source-guide";
 import { processStudyGenerateJob } from "./processors/study";
 import { processTableGenerateJob } from "./processors/table";
@@ -84,6 +86,7 @@ const primaryProcessors: Record<string, JobProcessor> = {
   "reconcile-provider-cost": processProviderCostReconciliationJob,
   "thread-chat-run": processThreadChatRunJob,
   "thread-title-generate": processThreadTitleGenerateJob,
+  [WELCOME_EMAIL_JOB]: processWelcomeEmailJob,
   "source-guide-generate": processSourceGuideGenerateJob,
   "study-generate": processStudyGenerateJob,
   "table-generate": processTableGenerateJob,

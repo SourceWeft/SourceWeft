@@ -141,6 +141,12 @@ describe("user mail usability", () => {
     organizationName: "Research & Design",
     workspaceName: "Research & Design",
     greeting: "Hello <Alice>",
+    chatUrl: "https://app.sourceweft.test/dashboard/chat",
+    scheduledUrl: "https://app.sourceweft.test/dashboard/scheduled",
+    assistantUrl: "https://app.sourceweft.test/dashboard/assistant",
+    downloadUrl: "https://app.sourceweft.test/download",
+    communityUrl: "https://discord.gg/KNqTGh2qrk",
+    githubUrl: "https://github.com/sourceweft/sourceweft",
   };
 
   for (const locale of ["en", "zh-CN", "zh-TW"]) {
@@ -176,15 +182,111 @@ describe("user mail usability", () => {
     }
   }
 
-  test("optional welcome content does not render empty greetings or links", () => {
+  const welcome = {
+    baseUrl: variables.baseUrl,
+    dashboardUrl: variables.dashboardUrl,
+    chatUrl: variables.chatUrl,
+    scheduledUrl: variables.scheduledUrl,
+    assistantUrl: variables.assistantUrl,
+    downloadUrl: variables.downloadUrl,
+  };
+
+  test("welcome renders without a name, credits or footer links", () => {
     const rendered = renderMailTemplate("auth.welcome", {
-      baseUrl: variables.baseUrl,
-      dashboardUrl: variables.dashboardUrl,
+      ...welcome,
+      name: null,
+      freeCredits: null,
+      freePages: null,
     });
     assert.doesNotMatch(rendered.html, /href=""|\{\{/);
-    assert.doesNotMatch(rendered.text, /Virtual FS|Skills|NotebookLM/);
-    assert.match(rendered.text, /Add a source/);
-    assert.match(rendered.text, /Ask a question/);
-    assert.match(rendered.text, /Check the citations/);
+    assert.doesNotMatch(rendered.text, /^Hi\b/m);
+    assert.doesNotMatch(rendered.text, /credits each month|free allowance/i);
+    assert.match(rendered.text, /Three ways to hand off work/);
+    assert.match(rendered.text, /You stay in control/);
+  });
+
+  test("welcome shows the free allowance when both numbers are given", () => {
+    const rendered = renderMailTemplate("auth.welcome", {
+      ...welcome,
+      name: "Alice",
+      freeCredits: "3,000",
+      freePages: "300",
+    });
+    assert.match(rendered.text, /Hi Alice,/);
+    assert.match(rendered.text, /3,000 credits each month/);
+    assert.match(rendered.text, /300 pages each month/);
+  });
+
+  test("welcome escapes the name", () => {
+    const rendered = renderMailTemplate("auth.welcome", {
+      ...welcome,
+      name: "<script>alert(1)</script>",
+    });
+    assert.doesNotMatch(rendered.html, /<script>alert/);
+  });
+
+  test("welcome plain text carries every deep link in all locales", () => {
+    for (const locale of ["en", "zh-CN", "zh-TW"]) {
+      const rendered = renderMailTemplate("auth.welcome", welcome, locale);
+      for (const url of [
+        welcome.chatUrl,
+        welcome.scheduledUrl,
+        welcome.assistantUrl,
+        welcome.downloadUrl,
+        welcome.dashboardUrl,
+      ]) {
+        assert.ok(rendered.text.includes(url), `${locale} is missing ${url}`);
+      }
+    }
+  });
+
+  test("welcome zh-TW copy is Traditional and follows the glossary", () => {
+    const rendered = renderMailTemplate("auth.welcome", welcome, "zh-TW");
+    assert.doesNotMatch(rendered.html, /[运执户错览导团库]|定时|智能体/);
+    assert.match(rendered.html, /代理程式/);
+    assert.match(rendered.html, /排程任務/);
+    assert.doesNotMatch(rendered.html, /只讀/);
+    assert.match(rendered.html, /唯讀/);
+  });
+
+  test("welcome footer links render independently without a dangling separator", () => {
+    for (const locale of ["en", "zh-CN", "zh-TW"]) {
+      const onlyGithub = renderMailTemplate(
+        "auth.welcome",
+        { ...welcome, githubUrl: variables.githubUrl },
+        locale,
+      );
+      assert.ok(onlyGithub.text.includes(variables.githubUrl));
+      // layout.html's own footer always contains a literal "&middot;"
+      // (siteName &middot; baseUrlLabel), so a bare /&middot;/ match would
+      // always be true regardless of the welcome body. Narrow the check to
+      // a middot directly attached to the GitHub link, which is what a
+      // dangling separator (no community link before it) would produce.
+      assert.doesNotMatch(onlyGithub.html, /&middot;\s*<a[^>]*>\s*GitHub/);
+      assert.doesNotMatch(onlyGithub.text, /·\s*GitHub/);
+
+      const onlyCommunity = renderMailTemplate(
+        "auth.welcome",
+        { ...welcome, communityUrl: variables.communityUrl },
+        locale,
+      );
+      assert.ok(onlyCommunity.text.includes(variables.communityUrl));
+      assert.doesNotMatch(onlyCommunity.html, /href=""/);
+
+      // With both links present, the plain text must have a space between
+      // the first link's URL and the second link's label: no "]GitHub".
+      const both = renderMailTemplate(
+        "auth.welcome",
+        {
+          ...welcome,
+          communityUrl: variables.communityUrl,
+          githubUrl: variables.githubUrl,
+        },
+        locale,
+      );
+      assert.doesNotMatch(both.text, /\]GitHub/);
+      assert.ok(both.text.includes(variables.communityUrl));
+      assert.ok(both.text.includes(variables.githubUrl));
+    }
   });
 });

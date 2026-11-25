@@ -1,18 +1,85 @@
 ---
 subject: 歡迎使用 SourceWeft
-heading: 從一份資料開始
-preview: 新增資料、提出問題，再查看答案中的引用。
+heading: 交給代理程式去做，由你把關
+preview: 在對話裡交辦、設成排程任務，或交給助理，每個結果都有據可查。
 action: 進入工作區
 url: {{dashboardUrl}}
 ---
 
-{{#if greeting}}
+{{#if name}}
 <p style="margin: 0 0 18px; color: #374151; font-size: 15px; line-height: 26px">
-  {{greeting}}
+  你好，{{name}}：
 </p>
 {{/if}}
 <p style="margin: 0 0 18px; color: #374151; font-size: 15px; line-height: 26px">
-  SourceWeft 幫你從自己的資料中找到答案。不妨先選一份熟悉的文件：
+  SourceWeft
+  是一個自主代理程式工作區。代理程式根據你的資料規劃並完成任務，每個結論都能追溯到原文。
+</p>
+{{#if freeCredits}}
+<p
+  style="
+    margin: 0 0 12px;
+    color: #111827;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 22px;
+  "
+>
+  你的免費額度已到帳
+</p>
+<table
+  role="presentation"
+  cellpadding="0"
+  cellspacing="0"
+  border="0"
+  width="100%"
+  style="margin: 0 0 12px; background-color: #f3f4f6; border-radius: 6px"
+>
+  <tr>
+    <td
+      style="
+        padding: 16px 12px 16px 20px;
+        width: 50%;
+        vertical-align: top;
+        color: #374151;
+        font-size: 15px;
+        line-height: 22px;
+      "
+    >
+      每月
+      <strong style="color: #111827; font-size: 18px">{{freeCredits}}</strong>
+      credits，用於對話和任務執行
+    </td>
+    <td
+      style="
+        padding: 16px 20px 16px 12px;
+        width: 50%;
+        vertical-align: top;
+        color: #374151;
+        font-size: 15px;
+        line-height: 22px;
+      "
+    >
+      每月
+      <strong style="color: #111827; font-size: 18px">{{freePages}}</strong>
+      頁，用於文件解析
+    </td>
+  </tr>
+</table>
+<p style="margin: 0 0 18px; color: #6b7280; font-size: 13px; line-height: 22px">
+  每月自動重置，無需綁定付款方式。
+</p>
+{{/if}}
+<p
+  style="
+    margin: 0 0 12px;
+    color: #111827;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 22px;
+  "
+>
+  三種交辦方式
 </p>
 <ol style="margin: 0 0 20px; padding-left: 24px">
   <li
@@ -24,7 +91,12 @@ url: {{dashboardUrl}}
       line-height: 26px;
     "
   >
-    <strong>新增資料</strong><br />上傳一份文件，或貼上一個連結。
+    <strong>在對話裡交辦</strong
+    ><br />說出目標，代理程式自行規劃，分派子代理程式平行處理，交回報告、投影片或表格。<br /><a
+      href="{{chatUrl}}"
+      style="color: #374151; text-decoration: underline"
+      >開始對話</a
+    >
   </li>
   <li
     style="
@@ -35,7 +107,12 @@ url: {{dashboardUrl}}
       line-height: 26px;
     "
   >
-    <strong>提出問題</strong><br />試著問：「這份資料的主要觀點是什麼？」
+    <strong>設成排程任務</strong
+    ><br />儲存一段提示詞，依排程自動執行，結果放進一個新對話。<br /><a
+      href="{{scheduledUrl}}"
+      style="color: #374151; text-decoration: underline"
+      >新增排程任務</a
+    >
   </li>
   <li
     style="
@@ -46,18 +123,99 @@ url: {{dashboardUrl}}
       line-height: 26px;
     "
   >
-    <strong>查看引用</strong><br />開啟答案中的引用，核對對應的原文。
+    <strong>交給工作區助理</strong
+    ><br />啟用後，在共享動態裡提出請求。助理為每個請求開一個工單，平行處理並回報進度。<br /><a
+      href="{{assistantUrl}}"
+      style="color: #374151; text-decoration: underline"
+      >開啟助理</a
+    >
   </li>
 </ol>
+<p
+  style="
+    margin: 0 0 12px;
+    color: #111827;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 22px;
+  "
+>
+  你始終掌控
+</p>
+<ul style="margin: 0 0 20px; padding-left: 24px">
+  <li
+    style="
+      margin: 0 0 12px;
+      padding-left: 4px;
+      color: #374151;
+      font-size: 15px;
+      line-height: 26px;
+    "
+  >
+    <strong>有據可查。</strong> 回答附引用，助理的每個判斷都附理由。
+  </li>
+  <li
+    style="
+      margin: 0 0 12px;
+      padding-left: 4px;
+      color: #374151;
+      font-size: 15px;
+      line-height: 26px;
+    "
+  >
+    <strong>不確定就問。</strong> 資訊不夠時，代理程式會先問你，不會自己猜。
+  </li>
+  <li
+    style="
+      margin: 0 0 12px;
+      padding-left: 4px;
+      color: #374151;
+      font-size: 15px;
+      line-height: 26px;
+    "
+  >
+    <strong>變更先核准。</strong>
+    有風險的操作需要你同意。無人看守的執行一律唯讀。
+  </li>
+</ul>
+<p
+  style="
+    margin: 0 0 12px;
+    color: #111827;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 22px;
+  "
+>
+  隨處可用
+</p>
+<p style="margin: 0 0 12px; color: #374151; font-size: 15px; line-height: 26px">
+  同一個帳戶和工作區，在網頁、手機瀏覽器和桌面版（macOS、Windows、Linux）上都能用。桌面版還能在你的電腦上執行任務、讀寫本機資料夾。iOS
+  和 Android 應用程式即將推出。
+</p>
 <p style="margin: 0 0 18px; color: #374151; font-size: 15px; line-height: 26px">
-  SourceWeft 團隊
+  <a href="{{downloadUrl}}" style="color: #374151; text-decoration: underline"
+    >下載桌面版</a
+  >
 </p>
 <p
   class="muted"
-  style="margin: 18px 0 0; color: #6b7280; font-size: 13px; line-height: 22px"
+  style="margin: 0 0 12px; color: #6b7280; font-size: 13px; line-height: 22px"
 >
-  {{#if docsUrl}}<a href="{{docsUrl}}" style="color: #374151">使用文件</a
-  >{{/if}} {{#if discordUrl}}<a href="{{discordUrl}}" style="color: #374151"
+  還可以用 Skills、MCP 工具和連接器（雲端硬碟、電子郵件等）擴充代理程式的能力。
+</p>
+<p
+  class="muted"
+  style="margin: 0 0 18px; color: #6b7280; font-size: 13px; line-height: 22px"
+>
+  {{#if communityUrl}}<a
+    href="{{communityUrl}}"
+    style="color: #374151; margin-right: 12px"
     >社群</a
+  >{{/if}} {{#if githubUrl}}<a href="{{githubUrl}}" style="color: #374151"
+    >GitHub</a
   >{{/if}}
+</p>
+<p style="margin: 0; color: #374151; font-size: 15px; line-height: 26px">
+  先做這一步：新增一份你熟悉的資料，再交辦第一個任務。
 </p>

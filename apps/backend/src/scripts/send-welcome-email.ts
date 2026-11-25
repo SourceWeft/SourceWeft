@@ -1,20 +1,25 @@
 import "dotenv/config";
 
+import { isLocale, type Locale } from "@sourceweft/i18n";
 import { renderMailTemplate } from "../modules/mail/templates";
 
 type Args = {
   dryRun: boolean;
   email: string | null;
   name: string | null;
+  locale: Locale;
 };
 
 const USAGE = [
-  "Usage: pnpm --filter @sourceweft/backend run mail:welcome -- --email user@example.com [--name Alice] [--dry-run]",
+  "Usage: pnpm --filter @sourceweft/backend run mail:welcome -- --email user@example.com [--name Alice] [--locale en|zh-CN|zh-TW] [--dry-run]",
+  "",
+  "This script loads the backend configuration (the same environment as the API) to build the links and free allowance, including for --dry-run.",
   "",
   "Options:",
-  "  --email <email>   Recipient email address.",
-  "  --name <name>     Optional recipient display name.",
-  "  --dry-run         Print the email payload without sending it.",
+  "  --email <email>    Recipient email address.",
+  "  --name <name>      Optional recipient display name.",
+  "  --locale <locale>  Email locale: en (default), zh-CN, or zh-TW.",
+  "  --dry-run          Print the email payload without sending it.",
 ].join("\n");
 
 function readOption(argv: string[], name: string) {
@@ -36,21 +41,22 @@ function readOption(argv: string[], name: string) {
 }
 
 function parseArgs(argv: string[]): Args {
+  const localeOption = readOption(argv, "locale");
+  const locale = localeOption === null ? "en" : localeOption;
+  if (!isLocale(locale)) {
+    throw new Error(`Invalid --locale value: ${locale}\n\n${USAGE}`);
+  }
+
   return {
     dryRun: argv.includes("--dry-run"),
     email: readOption(argv, "email"),
     name: readOption(argv, "name"),
+    locale,
   };
 }
 
 function isValidEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-}
-
-function resolveWebBaseUrl() {
-  return (
-    process.env.NEXT_PUBLIC_WEB_BASE_URL?.trim() || "http://localhost:3000"
-  ).replace(/\/$/, "");
 }
 
 async function main() {
@@ -71,19 +77,13 @@ async function main() {
     }
   }
 
-  const webBaseUrl = resolveWebBaseUrl();
-  const dashboardUrl = `${webBaseUrl}/dashboard`;
-  const name = args.name?.trim() || null;
-  const rendered = renderMailTemplate("auth.welcome", {
-    baseUrl: webBaseUrl,
-    dashboardUrl,
-    discordUrl: "https://discord.gg/KNqTGh2qrk",
-    docsUrl: `${webBaseUrl}/docs`,
-    greeting: name ? `Hi ${name},` : "Hi there,",
-    githubUrl: "https://github.com/sourceweft/sourceweft",
-    imageUrl: `${webBaseUrl}/icon-512.png`,
-    name,
+  const { buildWelcomeMailVariables } =
+    await import("../modules/onboarding/welcome-email");
+  const variables = buildWelcomeMailVariables({
+    name: args.name,
+    locale: args.locale,
   });
+  const rendered = renderMailTemplate("auth.welcome", variables, args.locale);
 
   if (args.dryRun) {
     console.log(
@@ -96,6 +96,7 @@ async function main() {
           messageType: "auth.welcome",
           text: rendered.text,
           htmlPreview: rendered.html.slice(0, 500),
+          locale: args.locale,
         },
         null,
         2,
@@ -113,8 +114,8 @@ async function main() {
     templateId: "auth.welcome.test",
     messageType: "auth.welcome",
     variables: {
-      dashboardUrl,
-      name,
+      dashboardUrl: variables.dashboardUrl,
+      name: variables.name,
       test: true,
     },
   });

@@ -50,6 +50,13 @@ function pickThreadTitlePayload(data: Record<string, unknown>) {
   };
 }
 
+function pickWelcomeEmailPayload(data: Record<string, unknown>) {
+  return {
+    userId: stringValue(data.userId),
+    locale: stringValue(data.locale),
+  };
+}
+
 function safePayloadForJob(job: LoggableJob): Record<string, unknown> | null {
   switch (job.name) {
     case "source-parse":
@@ -58,6 +65,8 @@ function safePayloadForJob(job: LoggableJob): Record<string, unknown> | null {
       return pickSourceParsePollPayload(job.data);
     case "thread-title-generate":
       return pickThreadTitlePayload(job.data);
+    case "welcome-email":
+      return pickWelcomeEmailPayload(job.data);
     default:
       return {
         dataKeys: Object.keys(job.data).sort(),

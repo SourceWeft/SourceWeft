@@ -1,18 +1,85 @@
 ---
 subject: 欢迎使用 SourceWeft
-heading: 从一份资料开始
-preview: 添加资料、提出问题，再查看答案中的引用。
+heading: 交给智能体去做，你来把关
+preview: 在对话里交办、设成定时任务，或交给助理，每个结果都有据可查。
 action: 进入工作区
 url: {{dashboardUrl}}
 ---
 
-{{#if greeting}}
+{{#if name}}
 <p style="margin: 0 0 18px; color: #374151; font-size: 15px; line-height: 26px">
-  {{greeting}}
+  你好，{{name}}：
 </p>
 {{/if}}
 <p style="margin: 0 0 18px; color: #374151; font-size: 15px; line-height: 26px">
-  SourceWeft 帮你从自己的资料中找到答案。不妨先选一份熟悉的文档：
+  SourceWeft
+  是一个自主智能体工作区。智能体基于你的资料规划并完成任务，每个结论都能追溯到原文。
+</p>
+{{#if freeCredits}}
+<p
+  style="
+    margin: 0 0 12px;
+    color: #111827;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 22px;
+  "
+>
+  你的免费额度已到账
+</p>
+<table
+  role="presentation"
+  cellpadding="0"
+  cellspacing="0"
+  border="0"
+  width="100%"
+  style="margin: 0 0 12px; background-color: #f3f4f6; border-radius: 6px"
+>
+  <tr>
+    <td
+      style="
+        padding: 16px 12px 16px 20px;
+        width: 50%;
+        vertical-align: top;
+        color: #374151;
+        font-size: 15px;
+        line-height: 22px;
+      "
+    >
+      每月
+      <strong style="color: #111827; font-size: 18px">{{freeCredits}}</strong>
+      credits，用于对话和任务运行
+    </td>
+    <td
+      style="
+        padding: 16px 20px 16px 12px;
+        width: 50%;
+        vertical-align: top;
+        color: #374151;
+        font-size: 15px;
+        line-height: 22px;
+      "
+    >
+      每月
+      <strong style="color: #111827; font-size: 18px">{{freePages}}</strong>
+      页，用于文档解析
+    </td>
+  </tr>
+</table>
+<p style="margin: 0 0 18px; color: #6b7280; font-size: 13px; line-height: 22px">
+  每月自动重置，无需绑定支付方式。
+</p>
+{{/if}}
+<p
+  style="
+    margin: 0 0 12px;
+    color: #111827;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 22px;
+  "
+>
+  三种交办方式
 </p>
 <ol style="margin: 0 0 20px; padding-left: 24px">
   <li
@@ -24,7 +91,12 @@ url: {{dashboardUrl}}
       line-height: 26px;
     "
   >
-    <strong>添加资料</strong><br />上传一份文档，或粘贴一个链接。
+    <strong>在对话里交办</strong
+    ><br />说出目标，智能体自己规划，分派子智能体并行处理，交回报告、幻灯片或表格。<br /><a
+      href="{{chatUrl}}"
+      style="color: #374151; text-decoration: underline"
+      >开始对话</a
+    >
   </li>
   <li
     style="
@@ -35,7 +107,12 @@ url: {{dashboardUrl}}
       line-height: 26px;
     "
   >
-    <strong>提出问题</strong><br />试着问：“这份资料的主要观点是什么？”
+    <strong>设成定时任务</strong
+    ><br />保存一段提示词，按时间自动运行，结果放进一个新对话。<br /><a
+      href="{{scheduledUrl}}"
+      style="color: #374151; text-decoration: underline"
+      >新建定时任务</a
+    >
   </li>
   <li
     style="
@@ -46,18 +123,98 @@ url: {{dashboardUrl}}
       line-height: 26px;
     "
   >
-    <strong>查看引用</strong><br />打开答案中的引用，核对对应的原文。
+    <strong>交给工作区助理</strong
+    ><br />启用后，在共享动态里提出请求。助理为每个请求开一个工单，并行处理并回报进度。<br /><a
+      href="{{assistantUrl}}"
+      style="color: #374151; text-decoration: underline"
+      >打开助理</a
+    >
   </li>
 </ol>
+<p
+  style="
+    margin: 0 0 12px;
+    color: #111827;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 22px;
+  "
+>
+  你始终掌控
+</p>
+<ul style="margin: 0 0 20px; padding-left: 24px">
+  <li
+    style="
+      margin: 0 0 12px;
+      padding-left: 4px;
+      color: #374151;
+      font-size: 15px;
+      line-height: 26px;
+    "
+  >
+    <strong>有据可查。</strong> 回答附引用，助理的每个判断都附理由。
+  </li>
+  <li
+    style="
+      margin: 0 0 12px;
+      padding-left: 4px;
+      color: #374151;
+      font-size: 15px;
+      line-height: 26px;
+    "
+  >
+    <strong>不确定就问。</strong> 信息不够时，智能体先问你，不会自己猜。
+  </li>
+  <li
+    style="
+      margin: 0 0 12px;
+      padding-left: 4px;
+      color: #374151;
+      font-size: 15px;
+      line-height: 26px;
+    "
+  >
+    <strong>改动先批准。</strong> 有风险的操作要你同意。无人看守的运行只读不写。
+  </li>
+</ul>
+<p
+  style="
+    margin: 0 0 12px;
+    color: #111827;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 22px;
+  "
+>
+  随处可用
+</p>
+<p style="margin: 0 0 12px; color: #374151; font-size: 15px; line-height: 26px">
+  同一个账户和工作区，在网页、手机浏览器和桌面版（macOS、Windows、Linux）上都能用。桌面版还能在你的电脑上执行任务、读写本地文件夹。iOS
+  和 Android 应用即将推出。
+</p>
 <p style="margin: 0 0 18px; color: #374151; font-size: 15px; line-height: 26px">
-  SourceWeft 团队
+  <a href="{{downloadUrl}}" style="color: #374151; text-decoration: underline"
+    >下载桌面版</a
+  >
 </p>
 <p
   class="muted"
-  style="margin: 18px 0 0; color: #6b7280; font-size: 13px; line-height: 22px"
+  style="margin: 0 0 12px; color: #6b7280; font-size: 13px; line-height: 22px"
 >
-  {{#if docsUrl}}<a href="{{docsUrl}}" style="color: #374151">使用文档</a
-  >{{/if}} {{#if discordUrl}}<a href="{{discordUrl}}" style="color: #374151"
+  还可以用 Skills、MCP 工具和连接器（云盘、邮箱等）扩展智能体的能力。
+</p>
+<p
+  class="muted"
+  style="margin: 0 0 18px; color: #6b7280; font-size: 13px; line-height: 22px"
+>
+  {{#if communityUrl}}<a
+    href="{{communityUrl}}"
+    style="color: #374151; margin-right: 12px"
     >社区</a
+  >{{/if}} {{#if githubUrl}}<a href="{{githubUrl}}" style="color: #374151"
+    >GitHub</a
   >{{/if}}
+</p>
+<p style="margin: 0; color: #374151; font-size: 15px; line-height: 26px">
+  先做这一步：添加一份你熟悉的资料，再交办第一个任务。
 </p>
