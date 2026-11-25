@@ -1,0 +1,15 @@
+{
+  "tag": "v0.3.0-rc.11",
+  "releasedAt": "2026-11-25",
+  "category": "Release",
+  "commit": "9519cee3a03ccc0728ebfe395d28c5825d20e545",
+  "title": "Updated local sandbox runtime",
+  "summary": "The desktop app's local sandbox, the layer that runs commands on your computer with file and network limits, moved to the newest upstream release of its runtime. The macOS app is signed and notarized, Windows installers are not publisher-signed, and the stable and latest channels are unchanged.",
+  "items": [
+    "The local sandbox runtime was updated from version 0.0.81 to 0.0.83. The way commands are approved and which hosts they may reach is unchanged.",
+    "On Windows, the sandbox's one-time administrator setup is reported as out of date after this update, so the app asks for one administrator confirmation the next time you set it up.",
+    "The app's own features and its connection to your workspace are unchanged from the previous release."
+  ],
+  "githubPrerelease": false,
+  "desktopPublicationPolicy": "macos-signed"
+}
