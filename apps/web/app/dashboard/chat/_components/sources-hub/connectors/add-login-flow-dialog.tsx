@@ -197,12 +197,43 @@ function LoginFlowBody({
   const startedAtRef = useRef(0);
   const flowIdRef = useRef<string | null>(null);
   const loginUrlRef = useRef<string | null>(null);
+  // Set once the backend has created or rotated the connector, so no exit after
+  // a successful connect ever cancels the (now consumed) flow.
+  const connectedRef = useRef(false);
 
   function stopPolling() {
     activeRef.current = false;
     if (timerRef.current !== null) {
       window.clearTimeout(timerRef.current);
       timerRef.current = null;
+    }
+  }
+
+  /** Best-effort DELETE of a server-side flow; rejections are swallowed so the
+   * dialog never blocks on, or surfaces, a cancel failure. */
+  function safeCancel(flowId: string) {
+    void (async () => {
+      try {
+        await onCancel(flowId);
+      } catch {
+        // Best-effort.
+      }
+    })();
+  }
+
+  /**
+   * Cancel the active flow on any exit that is not a successful connect — a
+   * dialog close (Escape, outside click, Cancel/Close buttons, all of which
+   * unmount this body), an unmount while waiting, a poll error, an expiry or a
+   * timeout. The flow id is cleared so a second exit (e.g. the unmount that
+   * follows a Cancel click) does not cancel again: exactly once, never after a
+   * connect.
+   */
+  function cancelActiveFlow() {
+    const flowId = flowIdRef.current;
+    flowIdRef.current = null;
+    if (flowId && !connectedRef.current) {
+      safeCancel(flowId);
     }
   }
 
@@ -226,6 +257,7 @@ function LoginFlowBody({
     if (!activeRef.current) return;
     if (Date.now() - startedAtRef.current >= MAX_WAIT_MS) {
       stopPolling();
+      cancelActiveFlow();
       setPhase("failed");
       setErrorText(t("connectors.nextcloud.errors.timedOut"));
       return;
@@ -241,17 +273,24 @@ function LoginFlowBody({
       }
       if (result.status === "expired") {
         stopPolling();
+        cancelActiveFlow();
         setPhase("failed");
         setErrorText(t("connectors.nextcloud.errors.expired"));
         return;
       }
       // Connected: the backend created or rotated the connector during the poll.
+      // Mark it before closing so the unmount that follows never cancels the
+      // (now consumed) flow.
+      connectedRef.current = true;
       stopPolling();
       onConnected(result.connector);
       onOpenChange(false);
     } catch (error) {
       if (!activeRef.current || !mountedRef.current) return;
+      // A poll error (including a transient failure) cancels the flow and lets
+      // the member retry with a fresh one; the error is shown, not swallowed.
       stopPolling();
+      cancelActiveFlow();
       setPhase("failed");
       setErrorText(loginFlowErrorText(error, t));
     }
@@ -280,7 +319,7 @@ function LoginFlowBody({
     // is never opened — abort the flow and best-effort cancel it on the backend.
     const safeLoginUrl = openLogin(started.loginUrl);
     if (!safeLoginUrl) {
-      if (started.flowId) void onCancel(started.flowId);
+      if (started.flowId) safeCancel(started.flowId);
       setPhase("failed");
       setErrorText(t("connectors.nextcloud.errors.failed"));
       return;
@@ -333,8 +372,7 @@ function LoginFlowBody({
 
   function handleCancelWaiting() {
     stopPolling();
-    const flowId = flowIdRef.current;
-    if (flowId) void onCancel(flowId);
+    cancelActiveFlow();
     onOpenChange(false);
   }
 
@@ -351,6 +389,8 @@ function LoginFlowBody({
     return () => {
       mountedRef.current = false;
       stopPolling();
+      // Any close/unmount that is not a successful connect cancels the flow.
+      cancelActiveFlow();
     };
     // Run once per mount; `beginFlow` and `reconnect` are stable for a given open.
     // eslint-disable-next-line react-hooks/exhaustive-deps

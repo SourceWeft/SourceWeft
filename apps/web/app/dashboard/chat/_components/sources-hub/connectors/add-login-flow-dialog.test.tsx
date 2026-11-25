@@ -188,13 +188,17 @@ test.each([
 test("a connected poll calls onConnected with the connector and closes", async () => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
   const onPoll = vi.fn().mockResolvedValue(connectedResult("nc-9"));
-  const { onConnected, onOpenChange } = await mountDialog({ onPoll });
+  const { onConnected, onOpenChange, onCancel } = await mountDialog({ onPoll });
   await connect();
   await advance(2000);
 
   expect(onPoll).toHaveBeenCalledWith(FLOW_ID);
   expect(onConnected).toHaveBeenCalledWith({ id: "nc-9" });
   expect(onOpenChange).toHaveBeenCalledWith(false);
+  // A successful connect never cancels the (now consumed) flow, even once the
+  // dialog unmounts.
+  await unmountAll();
+  expect(onCancel).not.toHaveBeenCalled();
 });
 
 test("polling is sequential, two seconds apart, and never overlaps", async () => {
@@ -227,17 +231,49 @@ test("Cancel calls the delete route with the flow id and stops polling", async (
 
   await advance(6000);
   expect(onPoll).toHaveBeenCalledTimes(1);
+  // The flow is cancelled exactly once: the unmount that follows does not repeat
+  // it (the flow id was cleared).
+  await unmountAll();
+  expect(onCancel).toHaveBeenCalledTimes(1);
 });
 
-test("closing (unmounting) the dialog stops polling", async () => {
+test("closing (unmounting) the dialog stops polling and cancels the flow once", async () => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
   const onPoll = vi.fn().mockResolvedValue({ status: "pending" } as Pending);
-  await mountDialog({ onPoll });
+  const { onCancel } = await mountDialog({ onPoll });
   await connect();
   await advance(2000);
   expect(onPoll).toHaveBeenCalledTimes(1);
 
   await unmountAll();
+  // Closing the dialog while waiting (Escape, outside click, the X — all unmount
+  // this body) cancels the server-side flow exactly once.
+  expect(onCancel).toHaveBeenCalledWith(FLOW_ID);
+  expect(onCancel).toHaveBeenCalledTimes(1);
+  await advance(6000);
+  expect(onPoll).toHaveBeenCalledTimes(1);
+});
+
+test("a poll error cancels the flow, shows the error, and lets the member retry", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  const onPoll = vi.fn().mockRejectedValue(
+    new HttpClientError({
+      message: "x",
+      status: 502,
+      statusText: "Bad Gateway",
+      code: "NEXTCLOUD_UNREACHABLE",
+    }),
+  );
+  const { onCancel } = await mountDialog({ onPoll });
+  await connect();
+  await advance(2000);
+
+  // The transient failure is surfaced and the flow is cancelled exactly once so
+  // the member retries with a fresh one.
+  expect(bodyText()).toContain("could not be reached");
+  expect(onCancel).toHaveBeenCalledWith(FLOW_ID);
+  expect(onCancel).toHaveBeenCalledTimes(1);
+  // No further polling happens after the error.
   await advance(6000);
   expect(onPoll).toHaveBeenCalledTimes(1);
 });
