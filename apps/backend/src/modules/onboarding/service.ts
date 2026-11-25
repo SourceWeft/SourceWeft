@@ -63,7 +63,12 @@ export class OnboardingService {
     });
 
     if (result?.created === true) {
-      await enqueueWelcomeEmail({
+      // Do not await: sign-in must not wait on Redis. enqueueWelcomeEmail
+      // never rejects by contract, but with Redis unreachable `queue.add`
+      // can hang until reconnection (maxRetriesPerRequest: null), which
+      // would stall the better-auth session.create.after hook and hang the
+      // sign-in response.
+      void enqueueWelcomeEmail({
         userId: input.userId,
         headers: input.headers,
       });

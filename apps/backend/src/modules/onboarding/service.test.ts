@@ -84,6 +84,25 @@ test("does not enqueue when a concurrent session created the workspace first", a
   assert.equal(mocks.provisionAccount.mock.calls.length, 0);
 });
 
+test("does not wait on the welcome email queue before resolving", async () => {
+  const headers = new Headers();
+  mocks.findPersonalOrganizationMembershipByUser.mockResolvedValue(null);
+  mocks.createPersonalOrganization.mockResolvedValue({
+    created: true,
+    id: "org1",
+  });
+  // enqueueWelcomeEmail never rejects by contract; here it never even
+  // settles, simulating a Redis outage hanging the queue add. The sign-in
+  // hook must still resolve without waiting on it.
+  mocks.enqueueWelcomeEmail.mockReturnValue(new Promise(() => {}));
+
+  await onboardingService.handleSessionCreated({ userId: "u1", headers });
+
+  assert.deepEqual(mocks.enqueueWelcomeEmail.mock.calls, [
+    [{ userId: "u1", headers }],
+  ]);
+});
+
 test("still rejects when provisioning fails, and enqueues nothing", async () => {
   mocks.findPersonalOrganizationMembershipByUser.mockResolvedValue(null);
   mocks.createPersonalOrganization.mockResolvedValue({
