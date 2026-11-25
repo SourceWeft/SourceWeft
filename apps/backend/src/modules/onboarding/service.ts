@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createSourceweftOrganizationMetadata } from "../auth/organization-metadata";
 import { billingOrganizationHooks as billingService } from "../../billing-host/bindings";
 import { workspaceService } from "../workspace";
+import { enqueueWelcomeEmail } from "./welcome-email";
 
 export class OnboardingService {
   async provisionOrganization(input: {
@@ -50,7 +51,23 @@ export class OnboardingService {
       });
     }
 
-    return { organizationId: created.id };
+    return { organizationId: created.id, created: created.created };
+  }
+
+  async handleSessionCreated(input: {
+    userId: string;
+    headers?: Headers | null;
+  }): Promise<void> {
+    const result = await this.ensurePersonalTeamForUser({
+      userId: input.userId,
+    });
+
+    if (result?.created === true) {
+      await enqueueWelcomeEmail({
+        userId: input.userId,
+        headers: input.headers,
+      });
+    }
   }
 }
 

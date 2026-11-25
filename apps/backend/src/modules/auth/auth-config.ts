@@ -879,8 +879,9 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}) {
                 after: async (session, context) => {
                   logAuthSessionCreated(session, context);
                   const { onboardingService } = await import("../onboarding");
-                  await onboardingService.ensurePersonalTeamForUser({
+                  await onboardingService.handleSessionCreated({
                     userId: session.userId,
+                    headers: context?.headers ?? null,
                   });
                 },
               },
