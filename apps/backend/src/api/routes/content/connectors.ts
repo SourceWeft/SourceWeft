@@ -11,13 +11,16 @@ import {
   listConnectorOAuthAccountsRequestSchema,
   listWorkspaceConnectorSyncRunsRequestSchema,
   listConnectorWebhookEventsRequestSchema,
+  pollCredentialFlowRequestSchema,
   rotateConnectorCredentialRequestSchema,
   startConnectorOAuthRequestSchema,
+  startCredentialFlowRequestSchema,
   updateConnectorRequestSchema,
 } from "@sourceweft/contracts";
 import { config } from "../../../shared/config";
 import {
   connectorActionRunner,
+  connectorCredentialFlowService,
   connectorOAuthService,
   connectorRegistry,
   connectorService,
@@ -118,9 +121,7 @@ export function registerConnectorRoutes(app: Hono) {
       configJson: parsed.data.configJson,
       // Forwarded only for a credential connector; absent otherwise so the
       // credential-free call shape is unchanged.
-      ...(parsed.data.credential
-        ? { credential: parsed.data.credential }
-        : {}),
+      ...(parsed.data.credential ? { credential: parsed.data.credential } : {}),
     });
     c.header("Cache-Control", "no-store");
     return ApiResponse.success(c, result);
@@ -369,9 +370,7 @@ export function registerConnectorRoutes(app: Hono) {
       configJson: parsed.data.configJson,
       periodicIndexingEnabled: parsed.data.periodicIndexingEnabled,
       indexingFrequencyMinutes: parsed.data.indexingFrequencyMinutes,
-      ...(parsed.data.credential
-        ? { credential: parsed.data.credential }
-        : {}),
+      ...(parsed.data.credential ? { credential: parsed.data.credential } : {}),
     });
     return ApiResponse.success(c, result, 201);
   });
@@ -477,6 +476,85 @@ export function registerConnectorRoutes(app: Hono) {
     c.header("Cache-Control", "no-store");
     return ApiResponse.success(c, result);
   });
+
+  // Credential login flow (`auth.flow: "login_flow"`). The backend starts the
+  // provider login, the member approves it in their browser, and the backend
+  // polls until the provider hands back the credential. The poll token and the
+  // issued secret never reach the browser; only the opaque `flowId` does, so
+  // these bodies carry nothing secret (see logger redaction for the last line of
+  // defence). The generic `:connectorType` keeps the route capability-blind.
+  app.post("/connectors/:connectorType/credential-flow/start", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const body = ensureObjectBody(await c.req.json().catch(() => null));
+    const parsed = startCredentialFlowRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const result = await connectorCredentialFlowService.start({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+      connectorType: requireRouteParam(c, "connectorType"),
+      serverUrl: parsed.data.serverUrl,
+      name: parsed.data.name,
+      roots: parsed.data.roots,
+      periodicIndexingEnabled: parsed.data.periodicIndexingEnabled,
+      ...(parsed.data.connectorId
+        ? { connectorId: parsed.data.connectorId }
+        : {}),
+    });
+    c.header("Cache-Control", "no-store");
+    return ApiResponse.success(c, result, 201);
+  });
+
+  app.post("/connectors/:connectorType/credential-flow/poll", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const body = ensureObjectBody(await c.req.json().catch(() => null));
+    const parsed = pollCredentialFlowRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const result = await connectorCredentialFlowService.poll({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+      connectorType: requireRouteParam(c, "connectorType"),
+      flowId: parsed.data.flowId,
+    });
+    c.header("Cache-Control", "no-store");
+    return ApiResponse.success(c, result);
+  });
+
+  app.delete(
+    "/connectors/:connectorType/credential-flow/:flowId",
+    async (c) => {
+      const session = await requireSession(c);
+      if (!session) {
+        throw ApiError.unauthorized();
+      }
+
+      const result = await connectorCredentialFlowService.cancel({
+        workspaceId: requireRouteParam(c, "workspaceId"),
+        userId: getSessionUserId(session),
+        connectorType: requireRouteParam(c, "connectorType"),
+        flowId: requireRouteParam(c, "flowId"),
+      });
+      c.header("Cache-Control", "no-store");
+      return ApiResponse.success(c, result);
+    },
+  );
 
   app.delete("/connectors/:connectorId", async (c) => {
     const session = await requireSession(c);

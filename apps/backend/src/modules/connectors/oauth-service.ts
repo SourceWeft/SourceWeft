@@ -8,6 +8,7 @@ import {
   type TeamSecretCipher,
 } from "../../shared/team-secrets";
 import { ConnectorError, toConnectorError } from "./errors";
+import { parseCredentialAccessToken } from "./credential-token";
 import { requireOAuthMethods } from "./oauth-methods";
 import { isRetryableOAuthRefreshError } from "./oauth-refresh-error";
 import { requireConnectorWorkspace } from "./permissions";
@@ -577,9 +578,17 @@ export class ConnectorOAuthService {
    * Revoke a stored authorization at the provider. A no-op when the adapter
    * has no `revokeAuthorization` hook (every standard OAuth2 adapter today).
    * The credential is decrypted only for this call and never logged.
+   *
+   * A `credential` login-flow account is revoked instead through the adapter's
+   * `credentialFlow.discard`, which needs the connector's config (passed as
+   * `options.config`) to target the right server. That path is always
+   * best-effort: a discard failure is logged and swallowed so it can never
+   * block the local delete, and a missing config (e.g. an account-only delete
+   * with no connector) simply skips it.
    */
   async revokeStoredAuthorization(
     account: ConnectorOAuthAccountSecretRecord,
+    options?: { config?: Record<string, unknown> },
   ): Promise<void> {
     let adapter: ConnectorAdapter;
     try {
@@ -601,6 +610,31 @@ export class ConnectorOAuthService {
         return;
       }
       throw error;
+    }
+    // A credential login-flow account revokes through the adapter's
+    // `credentialFlow.discard`, best-effort and never blocking the delete.
+    const manifest = adapter.getManifest();
+    if (
+      manifest.auth.kind === "credential" &&
+      adapter.credentialFlow?.discard
+    ) {
+      const config = options?.config;
+      if (!config) {
+        return;
+      }
+      const discard = adapter.credentialFlow.discard;
+      try {
+        const credential = parseCredentialAccessToken(
+          await decryptTeamSecret(account.accessTokenEncrypted, account.teamId),
+        );
+        await discard({ config, credential });
+      } catch {
+        logger.error("connector_authorization_revoke_failed", {
+          accountId: account.id,
+          connectorType: account.connectorType,
+        });
+      }
+      return;
     }
     if (!adapter.revokeAuthorization) {
       return;

@@ -31,25 +31,12 @@ import {
   updateSourceConnectorRecord,
 } from "./repository";
 import { ConnectorRegistry, connectorRegistry } from "./registry";
+import { credentialAccessToken } from "./credential-token";
 import type {
   ConnectorStatus,
   ConnectorSyncReadinessResult,
   SourceConnectorRecord,
 } from "./types";
-
-/**
- * The opaque credential string an adapter receives in `accessToken` for a
- * `credential` connector: the member's username and secret as JSON. Built in
- * exactly one place so the check path and the stored value never diverge. The
- * secret never leaves this shape — it is encrypted before storage and never
- * logged, copied into configJson, or returned.
- */
-function credentialAccessToken(credential: ConnectorCredentialInput): string {
-  return JSON.stringify({
-    username: credential.username,
-    secret: credential.secret,
-  });
-}
 
 /**
  * Rejects a username the stored credential could not be parsed back out of. A
@@ -566,6 +553,44 @@ export class ConnectorService {
     };
   }
 
+  /**
+   * One connector's full response (stored columns, schedule status and — for a
+   * `credential` connector — its credential status), under `connector.read`.
+   * The secret is never read. Used where a caller already changed a connector
+   * through another path (e.g. the credential login flow rotating in place) and
+   * needs the connector to return to the client.
+   */
+  async getConnector(input: {
+    workspaceId: string;
+    userId: string;
+    connectorId: string;
+  }) {
+    const { workspace } = await requireConnectorWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      permission: "connector.read",
+    });
+    const connector = await findSourceConnectorRecord({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      connectorId: input.connectorId,
+    });
+    if (!connector) {
+      throw new ConnectorError(
+        404,
+        "CONNECTOR_NOT_FOUND",
+        "Connector not found",
+      );
+    }
+    return {
+      connector: await this.buildConnectorResponse(
+        workspace.organizationId,
+        workspace.id,
+        connector,
+      ),
+    };
+  }
+
   async updateConnector(input: {
     workspaceId: string;
     userId: string;
@@ -944,14 +969,19 @@ export class ConnectorService {
       }
 
       // Revoke at the provider before any local row is removed: a failure
-      // here must leave the connector, its sources and the account intact.
+      // here must leave the connector, its sources and the account intact. The
+      // connector's stored config is handed along so a credential login-flow
+      // adapter's best-effort `discard` can target the right server (it never
+      // blocks the delete).
       const account = await findOAuthAccountRecord({
         teamId: workspace.organizationId,
         workspaceId: workspace.id,
         accountId: current.oauthAccountId,
       });
       if (account) {
-        await this.oauthService.revokeStoredAuthorization(account);
+        await this.oauthService.revokeStoredAuthorization(account, {
+          config: current.configJson,
+        });
       }
     }
 
