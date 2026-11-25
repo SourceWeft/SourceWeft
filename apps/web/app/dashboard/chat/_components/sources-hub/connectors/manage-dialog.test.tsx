@@ -26,6 +26,7 @@ function baseProps(
   } = {},
 ) {
   const handlers = {
+    onAddLoginFlow: vi.fn(),
     onCancelConnector: vi.fn(),
     onCheckCredential: vi.fn(),
     onCheckFeed: vi.fn(),

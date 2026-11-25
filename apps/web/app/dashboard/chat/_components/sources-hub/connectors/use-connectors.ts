@@ -26,6 +26,7 @@ import {
   getCachedWorkspaceHubValue,
   setCachedWorkspaceHubValue,
 } from "../workspace-hub-cache";
+import type { LoginFlowStartInput } from "./add-login-flow-dialog";
 import { connectorCatalog } from "./catalog";
 import {
   gmailConfigForMode,
@@ -55,6 +56,16 @@ function isCredentialConnectorType(connectorType: string): boolean {
   return (
     connectorCatalog.find((item) => item.id === connectorType)?.addMode ===
     "credential"
+  );
+}
+
+/** A catalog type whose add/reconnect flow is a server-driven browser login
+ * (Nextcloud). Both the add card and the reconnect path branch on this; there
+ * is no password dialog for these connectors. */
+function isLoginFlowConnectorType(connectorType: string): boolean {
+  return (
+    connectorCatalog.find((item) => item.id === connectorType)?.addMode ===
+    "login_flow"
   );
 }
 
@@ -119,6 +130,19 @@ function selectionSpecsMatch(
 ): boolean {
   return snapshot.workspaceId === workspaceId && snapshot.actorId === actorId;
 }
+
+/**
+ * The open login-flow (Nextcloud) dialog. `add` opens the full form; `reconnect`
+ * seeds the fixed server and connector name from the connector being
+ * reconnected and runs the flow with its `connectorId` (no form, no password).
+ */
+export type LoginFlowDialogState = {
+  mode: "add" | "reconnect";
+  connectorType: string;
+  connectorId?: string;
+  serverUrl?: string;
+  connectorName?: string;
+};
 
 type WorkspaceConnectorsCacheValue = {
   accounts: ConnectorAccountItem[];
@@ -338,6 +362,14 @@ export function useConnectors(input: {
   // The credential connector whose rotate ("reconnect") dialog is open, or null.
   const [rotateCredentialConnector, setRotateCredentialConnector] =
     useState<ConnectorItem | null>(null);
+  // The in-progress login-flow (Nextcloud) dialog: an `add` (new connector) or a
+  // `reconnect` (existing connector, credential rotated in place), or null when
+  // closed. The server/name are seeded from the connector for a reconnect; the
+  // flow id and login URL never leave the dialog's own state.
+  const [loginFlowState, setLoginFlowState] =
+    useState<LoginFlowDialogState | null>(null);
+  const loginFlowStateRef = useRef<LoginFlowDialogState | null>(null);
+  loginFlowStateRef.current = loginFlowState;
   const [connectorWebhookEventsById, setConnectorWebhookEventsById] = useState<
     Record<string, ConnectorWebhookEventItem[]>
   >({});
@@ -1158,17 +1190,43 @@ export function useConnectors(input: {
     ],
   );
 
+  const handleAddLoginFlow = useCallback((item: ConnectorCatalogItem) => {
+    setLoginFlowState({ mode: "add", connectorType: item.id });
+  }, []);
+
   const handleReconnectConnector = useCallback(
     (connector: ConnectorItem) => {
+      const connectorType = connector.raw.connectorType;
+      // A login-flow connector (Nextcloud) reconnects by running the SAME
+      // server-driven browser login again, keyed to its connectorId: the backend
+      // rotates the credential in place. There is no password dialog; the server
+      // and name are fixed to the existing connector.
+      if (isLoginFlowConnectorType(connectorType)) {
+        const config = connector.raw.configJson;
+        const serverUrl =
+          typeof config.server === "string" && config.server
+            ? config.server
+            : typeof config.endpoint === "string"
+              ? config.endpoint
+              : "";
+        setLoginFlowState({
+          mode: "reconnect",
+          connectorType,
+          connectorId: connector.id,
+          serverUrl,
+          connectorName: connector.name,
+        });
+        return;
+      }
       // A credential connector (WebDAV) has no OAuth flow: reconnecting means
       // replacing the stored username and app password, so open the rotate
       // dialog instead of starting an authorization.
-      if (isCredentialConnectorType(connector.raw.connectorType)) {
+      if (isCredentialConnectorType(connectorType)) {
         setRotateCredentialConnector(connector);
         return;
       }
       const item = connectorCatalog.find(
-        (candidate) => candidate.id === connector.raw.connectorType,
+        (candidate) => candidate.id === connectorType,
       );
       if (!item) {
         toast.error(t("toasts.connectors.settingsUnavailable"));
@@ -1575,6 +1633,98 @@ export function useConnectors(input: {
     ],
   );
 
+  // Start a login flow for the open dialog (Nextcloud). The connector type comes
+  // from the dialog state, and a reconnect adds its connectorId. Only the
+  // returned flowId and loginUrl travel back, and they stay inside the dialog.
+  const handleStartLoginFlow = useCallback(
+    async (input: LoginFlowStartInput) => {
+      const state = loginFlowStateRef.current;
+      if (!workspaceId || !state) {
+        throw new Error(t("toasts.connectors.noWorkspace"));
+      }
+      return connectorsClient.startCredentialFlow(
+        workspaceId,
+        state.connectorType,
+        {
+          serverUrl: input.serverUrl,
+          name: input.name,
+          ...(input.roots ? { roots: input.roots } : {}),
+          ...(input.periodicIndexingEnabled !== undefined
+            ? { periodicIndexingEnabled: input.periodicIndexingEnabled }
+            : {}),
+          ...(state.connectorId ? { connectorId: state.connectorId } : {}),
+        },
+      );
+    },
+    [workspaceId, t],
+  );
+
+  const handlePollLoginFlow = useCallback(
+    async (flowId: string) => {
+      const state = loginFlowStateRef.current;
+      if (!workspaceId || !state) {
+        throw new Error(t("toasts.connectors.noWorkspace"));
+      }
+      return connectorsClient.pollCredentialFlow(
+        workspaceId,
+        state.connectorType,
+        { flowId },
+      );
+    },
+    [workspaceId, t],
+  );
+
+  // Best-effort cancel of the server-side flow; failures are swallowed so the
+  // dialog always closes.
+  const handleCancelLoginFlow = useCallback(
+    async (flowId: string) => {
+      const state = loginFlowStateRef.current;
+      if (!workspaceId || !state) return;
+      try {
+        await connectorsClient.cancelCredentialFlow(
+          workspaceId,
+          state.connectorType,
+          flowId,
+        );
+      } catch {
+        // The flow expires on its own if the cancel does not land.
+      }
+    },
+    [workspaceId],
+  );
+
+  // The flow reached `connected`: the backend has created (add) or rotated
+  // (reconnect) the connector. Refresh the list; for a new connector trigger the
+  // first sync exactly as the WebDAV add flow does.
+  const handleLoginFlowConnected = useCallback(
+    async (connector: SourceConnector) => {
+      const state = loginFlowStateRef.current;
+      // The connector's own name, as the WebDAV add and rotate paths report it.
+      const name = connector.name;
+      trackConnectorConnected({ connectorType: connector.connectorType });
+      clearConnectorReadiness(connector.id);
+      await refreshConnectors();
+      if (state?.mode === "reconnect") {
+        if (connectorSettingsConnectorId === connector.id) {
+          await refreshConnectorSettingsActivity(connector.id);
+        }
+        toast.success(t("toasts.connectors.reconnected", { name }));
+        return;
+      }
+      toast.success(t("toasts.connectors.connectedFallback", { name }));
+      await handleSyncConnector(mapConnectorToUi(connector, t, displayLocale));
+    },
+    [
+      clearConnectorReadiness,
+      connectorSettingsConnectorId,
+      displayLocale,
+      handleSyncConnector,
+      refreshConnectorSettingsActivity,
+      refreshConnectors,
+      t,
+    ],
+  );
+
   const handleToggleConnectorStatus = useCallback(
     async (connector: ConnectorItem) => {
       if (!workspaceId) return;
@@ -1742,6 +1892,13 @@ export function useConnectors(input: {
     rotateCredentialConnector,
     setRotateCredentialConnector,
     handleRotateCredential,
+    loginFlowState,
+    setLoginFlowState,
+    handleAddLoginFlow,
+    handleStartLoginFlow,
+    handlePollLoginFlow,
+    handleCancelLoginFlow,
+    handleLoginFlowConnected,
     handleToggleConnectorStatus,
     handleSaveConnectorSettings,
     handleConfirmDisconnectConnector,

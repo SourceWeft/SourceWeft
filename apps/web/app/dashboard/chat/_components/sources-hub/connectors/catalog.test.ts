@@ -613,3 +613,107 @@ describe("webdav catalog entry", () => {
     });
   }
 });
+
+describe("nextcloud catalog entry", () => {
+  const nextcloud = connectorCatalog.find((item) => item.id === "nextcloud")!;
+
+  test("is hidden until the backend registers the type", () => {
+    expect(
+      connectorCatalogForAvailableTypes(["notion", "webdav"]).map((i) => i.id),
+    ).not.toContain("nextcloud");
+    expect(
+      connectorCatalogForAvailableTypes(["notion", "nextcloud"]).map(
+        (i) => i.id,
+      ),
+    ).toContain("nextcloud");
+  });
+
+  test("is the add-only login-flow entry", () => {
+    expect(nextcloud).toMatchObject({
+      id: "nextcloud",
+      name: "Nextcloud",
+      category: "Knowledge & Docs",
+      requiresBackendRegistration: true,
+      isIndexable: true,
+      supportsActions: false,
+      supportsPeriodicSync: true,
+      supportsWebhook: false,
+      addMode: "login_flow",
+    });
+    expect(nextcloud.icon).toBeDefined();
+    expect(nextcloud.postOAuthMode).toBeUndefined();
+    // No Nextcloud artwork is shipped, so the lucide icon shows instead.
+    expect(nextcloud.logoIconName).toBeUndefined();
+  });
+
+  test("never shows as connected, however many connectors exist", () => {
+    const connectors = ["n1", "n2"].map((id) => ({
+      id,
+      name: `Nextcloud ${id}`,
+      status: "active" as const,
+      meta: "",
+      raw: {
+        id,
+        connectorType: "nextcloud",
+        status: "active",
+        configJson: {
+          server: "https://cloud.example.com",
+          endpoint: "https://cloud.example.com/remote.php/dav/files/alice/",
+          roots: ["/"],
+        },
+        lastError: null,
+        lastIndexedAt: null,
+      } as unknown as SourceConnector,
+    }));
+    expect(getCatalogConnector(nextcloud, connectors)).toBeNull();
+  });
+
+  for (const catalogName of ["en", "zh-CN"] as const) {
+    const messages = (catalogName === "en" ? en : zhCN) as unknown as {
+      dashboardSourcesHub: {
+        connectors: {
+          detail: Record<string, string>;
+          nextcloud: {
+            serverLabel: string;
+            dialog: Record<string, string>;
+            reconnect: Record<string, string>;
+            errors: Record<string, string>;
+          };
+        };
+      };
+    };
+
+    const ERROR_KEYS = [
+      "unreachable",
+      "notNextcloud",
+      "invalidResponse",
+      "blockedAddress",
+      "notSupported",
+      "tooManyFlows",
+      "reconnectMismatch",
+      "alreadyConnected",
+      "notAllowed",
+      "notReady",
+      "permissionLost",
+      "pathNotFound",
+      "pathForbidden",
+      "expired",
+      "timedOut",
+      "failed",
+    ];
+
+    test(`${catalogName} has the Nextcloud copy keys`, () => {
+      const { connectors } = messages.dashboardSourcesHub;
+      const copy = connectors.nextcloud;
+      expect(copy.serverLabel?.trim()).toBeTruthy();
+      expect(copy.dialog.connect?.trim()).toBeTruthy();
+      expect(copy.dialog.waitingTitle?.trim()).toBeTruthy();
+      expect(copy.dialog.openAgain?.trim()).toBeTruthy();
+      expect(copy.reconnect.title?.trim()).toBeTruthy();
+      expect(connectors.detail.availableLoginFlow?.trim()).toBeTruthy();
+      for (const key of ERROR_KEYS) {
+        expect(copy.errors[key]?.trim(), key).toBeTruthy();
+      }
+    });
+  }
+});

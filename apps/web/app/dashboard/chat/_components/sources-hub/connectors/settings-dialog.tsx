@@ -78,6 +78,7 @@ import { SelectionItems } from "./selection-items";
 import { commitSelection } from "./selection";
 import { selectionPresenterFor } from "./selection-presenters";
 import {
+  isDavFilesConnector,
   webdavRootsToSelectionItems,
   webdavSelectionItemsToRoots,
 } from "./webdav-roots";
@@ -337,11 +338,12 @@ export function ConnectorSettingsDialog({
     typeof connector.raw.configJson.feedUrl === "string"
       ? redactUrlQuery(connector.raw.configJson.feedUrl)
       : "";
-  // The shared selection list reads `configJson.items`, which WebDAV does not
-  // store (its selection is `configJson.roots`). Present the roots to the list
-  // as selection items; saving converts them back in `handleChangeSelectionItems`.
+  // The shared selection list reads `configJson.items`, which a DAV files
+  // connector (WebDAV, Nextcloud) does not store (its selection is
+  // `configJson.roots`). Present the roots to the list as selection items;
+  // saving converts them back in `handleChangeSelectionItems`.
   const selectionConnector =
-    connector.raw.connectorType === "webdav"
+    isDavFilesConnector(connector.raw.connectorType)
       ? {
           ...connector,
           raw: {
@@ -435,19 +437,31 @@ export function ConnectorSettingsDialog({
     const hasIndexing = Boolean(
       selectionPresenterFor(currentConnector.raw.connectorType).indexing,
     );
-    // WebDAV stores its selection as `configJson.roots` (trailing-slash
-    // collection paths), not the generic `configJson.items`. Bridge the shared
-    // picker's items back to roots in this one connector's path; every other
-    // type keeps writing `items` unchanged. An invalid or empty selection is
-    // refused without saving, so the backend never reconciles against nothing.
-    if (currentConnector.raw.connectorType === "webdav") {
+    // A DAV files connector (WebDAV, Nextcloud) stores its selection as
+    // `configJson.roots` (trailing-slash collection paths), not the generic
+    // `configJson.items`. Bridge the shared picker's items back to roots in this
+    // path; every other type keeps writing `items` unchanged. An invalid or
+    // empty selection is refused without saving, so the backend never reconciles
+    // against nothing.
+    if (isDavFilesConnector(currentConnector.raw.connectorType)) {
       const roots = webdavSelectionItemsToRoots(items);
       if (!roots.ok) {
         toast.error(t("connectors.webdav.dialog.invalidRoots"));
         return Promise.resolve(false);
       }
-      const rawEndpoint = currentConnector.raw.configJson.endpoint;
+      const config = currentConnector.raw.configJson;
+      const rawEndpoint = config.endpoint;
       const endpoint = typeof rawEndpoint === "string" ? rawEndpoint : "";
+      // WebDAV's config is exactly `{ endpoint, roots }`. Nextcloud also keeps
+      // `server` (canonical links) and `userId` (the DAV files user); preserve
+      // them so the update does not drop required config. WebDAV has neither, so
+      // its saved shape is unchanged.
+      const nextConfig: Record<string, unknown> = {
+        endpoint,
+        roots: roots.roots,
+      };
+      if (typeof config.server === "string") nextConfig.server = config.server;
+      if (typeof config.userId === "string") nextConfig.userId = config.userId;
       return commitSelection({
         save: () =>
           onSaveSettings(currentConnector, {
@@ -456,7 +470,7 @@ export function ConnectorSettingsDialog({
               currentConnector.raw.periodicIndexingEnabled,
             indexingFrequencyMinutes:
               currentConnector.raw.indexingFrequencyMinutes,
-            configJson: { endpoint, roots: roots.roots },
+            configJson: nextConfig,
           }),
         sync: () => onSyncConnector(currentConnector),
       });

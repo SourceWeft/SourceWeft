@@ -18,6 +18,22 @@
 
 import type { ConnectorSelectionItem } from "@sourceweft/sdk";
 
+/**
+ * The connector types whose selection is stored as `configJson.roots`
+ * (trailing-slash DAV collection paths) rather than the generic
+ * `configJson.items`, and which therefore share this bridge module, the typed
+ * add dialog and the roots↔items mapping. WebDAV and Nextcloud are both read
+ * through the same DAV files tree, so they behave identically here; every other
+ * connector keeps using `configJson.items` unchanged. One predicate replaces the
+ * former `connectorType === "webdav"` checks so Nextcloud is covered without
+ * touching WebDAV's behaviour.
+ */
+const DAV_FILES_CONNECTOR_TYPES = new Set<string>(["webdav", "nextcloud"]);
+
+export function isDavFilesConnector(connectorType: string): boolean {
+  return DAV_FILES_CONNECTOR_TYPES.has(connectorType);
+}
+
 /** Matches `MAX_ROOTS` in the WebDAV package. */
 export const WEBDAV_MAX_ROOTS = 20;
 /** Matches `MAX_ROOT_LENGTH` in the WebDAV package. */

@@ -2,12 +2,24 @@ import { describe, expect, test } from "vitest";
 
 import {
   canonicalizeWebdavRoots,
+  isDavFilesConnector,
   normalizeWebdavRoot,
   parseWebdavRootsInput,
   webdavRootsToSelectionItems,
   webdavSelectionItemsToRoots,
   WEBDAV_MAX_ROOTS,
 } from "./webdav-roots";
+
+describe("isDavFilesConnector", () => {
+  test("covers both DAV files connectors and nothing else", () => {
+    expect(isDavFilesConnector("webdav")).toBe(true);
+    expect(isDavFilesConnector("nextcloud")).toBe(true);
+    expect(isDavFilesConnector("dropbox")).toBe(false);
+    expect(isDavFilesConnector("google_drive")).toBe(false);
+    expect(isDavFilesConnector("rss")).toBe(false);
+    expect(isDavFilesConnector("")).toBe(false);
+  });
+});
 
 describe("normalizeWebdavRoot", () => {
   test("adds a leading and trailing slash and collapses doubles", () => {

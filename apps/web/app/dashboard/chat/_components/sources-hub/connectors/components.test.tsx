@@ -38,6 +38,7 @@ async function card(input: {
 }) {
   const handlers = {
     onAddCredential: vi.fn(),
+    onAddLoginFlow: vi.fn(),
     onAddFeed: vi.fn(),
     onCancelConnector: vi.fn(),
     onConfigure: vi.fn(),
@@ -164,6 +165,7 @@ test("an add-only RSS card offers Add feed and never starts OAuth", async () => 
   const onAddFeed = vi.fn();
   const handlers = {
     onAddCredential: vi.fn(),
+    onAddLoginFlow: vi.fn(),
     onCancelConnector: vi.fn(),
     onConfigure: vi.fn(),
     onConnectConnector: vi.fn(),
@@ -198,6 +200,7 @@ test("an add-only WebDAV card offers Connect and calls onAddCredential, never OA
   const onAddCredential = vi.fn();
   const handlers = {
     onAddFeed: vi.fn(),
+    onAddLoginFlow: vi.fn(),
     onCancelConnector: vi.fn(),
     onConfigure: vi.fn(),
     onConnectConnector: vi.fn(),
@@ -221,6 +224,42 @@ test("an add-only WebDAV card offers Connect and calls onAddCredential, never OA
   await act(async () => action.click());
 
   expect(onAddCredential).toHaveBeenCalledWith(webdav);
+  expect(handlers.onAddFeed).not.toHaveBeenCalled();
+  expect(handlers.onConnectConnector).not.toHaveBeenCalled();
+  expect(handlers.onCreateConnector).not.toHaveBeenCalled();
+  expect(handlers.onReconnectConnector).not.toHaveBeenCalled();
+});
+
+test("an add-only Nextcloud card offers Connect and calls onAddLoginFlow, never OAuth", async () => {
+  const nextcloud = connectorCatalog.find((entry) => entry.id === "nextcloud")!;
+  const onAddLoginFlow = vi.fn();
+  const handlers = {
+    onAddCredential: vi.fn(),
+    onAddFeed: vi.fn(),
+    onCancelConnector: vi.fn(),
+    onConfigure: vi.fn(),
+    onConnectConnector: vi.fn(),
+    onCreateConnector: vi.fn(),
+    onDisconnect: vi.fn(),
+    onReconnectConnector: vi.fn(),
+  };
+  const mounted = await mountWithIntl(
+    createElement(ConnectorCatalogCard, {
+      item: nextcloud,
+      connector: null,
+      status: { kind: "available", label: "Available", detail: "Ready" },
+      onAddLoginFlow,
+      ...handlers,
+    }),
+  );
+  const buttons = Array.from(mounted.container.querySelectorAll("button"));
+  const action = buttons[buttons.length - 1]!;
+
+  expect(action.textContent).toBe("Connect");
+  await act(async () => action.click());
+
+  expect(onAddLoginFlow).toHaveBeenCalledWith(nextcloud);
+  expect(handlers.onAddCredential).not.toHaveBeenCalled();
   expect(handlers.onAddFeed).not.toHaveBeenCalled();
   expect(handlers.onConnectConnector).not.toHaveBeenCalled();
   expect(handlers.onCreateConnector).not.toHaveBeenCalled();

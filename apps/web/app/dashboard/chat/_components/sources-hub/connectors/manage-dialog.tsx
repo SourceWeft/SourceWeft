@@ -104,6 +104,7 @@ export function ManageConnectorsDialog({
   initialTab,
   isLoading,
   loadingError,
+  onAddLoginFlow,
   onCancelConnector,
   onConnectConnector,
   onCopyWebhook,
@@ -131,6 +132,7 @@ export function ManageConnectorsDialog({
   initialTab: ManageConnectorsTab;
   isLoading: boolean;
   loadingError: string | null;
+  onAddLoginFlow: (item: ConnectorCatalogItem) => void;
   onCancelConnector: (item: ConnectorCatalogItem) => void;
   onConnectConnector: (
     item: ConnectorCatalogItem,
@@ -371,6 +373,7 @@ export function ManageConnectorsDialog({
                                 item={item}
                                 key={item.id}
                                 onAddCredential={setPendingCredential}
+                                onAddLoginFlow={onAddLoginFlow}
                                 onAddFeed={setPendingFeed}
                                 onCancelConnector={onCancelConnector}
                                 onConfigure={() => {
