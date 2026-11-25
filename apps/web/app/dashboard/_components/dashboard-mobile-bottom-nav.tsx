@@ -45,6 +45,11 @@ export function DashboardMobileBottomNav() {
   const pathname = usePathname();
   const { openMain, openMe, view } = useDashboardMobileNav();
   const isMeActive = view === "me" || view === "observability";
+  // Highlight the tapped tab at once; the route may take a moment to resolve.
+  const [pendingHref, setPendingHref] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    setPendingHref(null);
+  }, [pathname]);
 
   return (
     // Anchored to the shell rather than the layout viewport: the shell is sized in
@@ -54,7 +59,9 @@ export function DashboardMobileBottomNav() {
       <div className="grid grid-cols-5 gap-1">
         {items.map((item) => {
           const Icon = item.icon;
-          const active = view === "main" && item.match(pathname);
+          const active =
+            view === "main" &&
+            (pendingHref ? pendingHref === item.href : item.match(pathname));
           return (
             <Link
               className={cn(
@@ -63,7 +70,10 @@ export function DashboardMobileBottomNav() {
               )}
               href={item.href}
               key={item.href}
-              onClick={openMain}
+              onClick={() => {
+                setPendingHref(item.href);
+                openMain();
+              }}
             >
               <Icon className="h-4 w-4" />
               <span className="truncate">{t(item.labelKey)}</span>
