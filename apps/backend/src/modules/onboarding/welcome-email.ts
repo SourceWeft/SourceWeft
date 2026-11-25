@@ -125,9 +125,15 @@ export async function sendWelcomeEmail(
     return "skipped";
   }
 
-  const locale: Locale = isLocale(payload.locale)
-    ? payload.locale
-    : DEFAULT_LOCALE;
+  let locale: Locale = DEFAULT_LOCALE;
+  if (isLocale(payload.locale)) {
+    locale = payload.locale;
+  } else if (payload.locale !== undefined && payload.locale !== null) {
+    logger.warn("welcome_email_locale_unsupported", {
+      userId,
+      locale: String(payload.locale).slice(0, 20),
+    });
+  }
 
   await mailService.sendTemplate({
     to: row.email,

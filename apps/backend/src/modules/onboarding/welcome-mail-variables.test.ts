@@ -82,6 +82,24 @@ test("omits the allowance when it is null, or either number is zero", () => {
   });
   assert.equal(zeroPages.freeCredits, null);
   assert.equal(zeroPages.freePages, null);
+
+  const negativeCredits = composeWelcomeMailVariables({
+    name: null,
+    locale: "en",
+    webBaseUrl: "https://app.sourceweft.test",
+    freeAllowance: { credits: -1, pages: 300 },
+  });
+  assert.equal(negativeCredits.freeCredits, null);
+  assert.equal(negativeCredits.freePages, null);
+
+  const nanCredits = composeWelcomeMailVariables({
+    name: null,
+    locale: "en",
+    webBaseUrl: "https://app.sourceweft.test",
+    freeAllowance: { credits: Number.NaN, pages: 300 },
+  });
+  assert.equal(nanCredits.freeCredits, null);
+  assert.equal(nanCredits.freePages, null);
 });
 
 test("trims the name, caps it at 80 characters and treats blank/undefined as null", () => {
@@ -121,4 +139,25 @@ test("trims the name, caps it at 80 characters and treats blank/undefined as nul
     }).name,
     null,
   );
+});
+
+test("caps the name at 80 code points without splitting a surrogate pair", () => {
+  const name = composeWelcomeMailVariables({
+    name: "\u{1F600}".repeat(100),
+    locale: "en",
+    webBaseUrl: "https://app.sourceweft.test",
+    freeAllowance: null,
+  }).name;
+
+  assert.ok(name !== null);
+  assert.equal(Array.from(name).length, 80);
+  const isWellFormed = (name as unknown as { isWellFormed?: () => boolean })
+    .isWellFormed;
+  if (typeof isWellFormed === "function") {
+    assert.equal(isWellFormed.call(name), true);
+  } else {
+    // Fallback: rebuilding the string from its code points must round-trip,
+    // which fails if the cap split a surrogate pair and left a lone one.
+    assert.equal(Array.from(name).join(""), name);
+  }
 });

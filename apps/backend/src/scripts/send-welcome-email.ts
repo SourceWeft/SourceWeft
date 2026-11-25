@@ -13,6 +13,8 @@ type Args = {
 const USAGE = [
   "Usage: pnpm --filter @sourceweft/backend run mail:welcome -- --email user@example.com [--name Alice] [--locale en|zh-CN|zh-TW] [--dry-run]",
   "",
+  "This script loads the backend configuration (the same environment as the API) to build the links and free allowance, including for --dry-run.",
+  "",
   "Options:",
   "  --email <email>    Recipient email address.",
   "  --name <name>      Optional recipient display name.",
@@ -75,9 +77,8 @@ async function main() {
     }
   }
 
-  const { buildWelcomeMailVariables } = await import(
-    "../modules/onboarding/welcome-email"
-  );
+  const { buildWelcomeMailVariables } =
+    await import("../modules/onboarding/welcome-email");
   const variables = buildWelcomeMailVariables({
     name: args.name,
     locale: args.locale,

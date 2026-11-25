@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   getBillingDeploymentCapabilities: vi.fn(),
   loggerError: vi.fn(),
   loggerInfo: vi.fn(),
+  loggerWarn: vi.fn(),
   mailDeliveryConfigured: vi.fn(),
   resolveMailLocale: vi.fn(),
   sendTemplate: vi.fn(),
@@ -48,7 +49,7 @@ vi.mock("../../shared/logger", () => ({
   logger: {
     debug: vi.fn(),
     info: mocks.loggerInfo,
-    warn: vi.fn(),
+    warn: mocks.loggerWarn,
     error: mocks.loggerError,
   },
 }));
@@ -65,6 +66,7 @@ beforeEach(() => {
   mocks.getBillingDeploymentCapabilities.mockReset();
   mocks.loggerError.mockReset();
   mocks.loggerInfo.mockReset();
+  mocks.loggerWarn.mockReset();
   mocks.mailDeliveryConfigured.mockReset();
   mocks.resolveMailLocale.mockReset();
   mocks.sendTemplate.mockReset();
@@ -206,7 +208,10 @@ test("never throws when resolving the mail locale fails", async () => {
 
 test("sends auth.welcome in the job's locale to the user's current address", async () => {
   // User row: { email: "a@example.test", name: "Alice", emailVerified: true }
-  assert.equal(await sendWelcomeEmail({ userId: "u1", locale: "zh-CN" }), "sent");
+  assert.equal(
+    await sendWelcomeEmail({ userId: "u1", locale: "zh-CN" }),
+    "sent",
+  );
   const call = mocks.sendTemplate.mock.calls[0]![0];
   assert.equal(call.to, "a@example.test");
   assert.equal(call.templateId, "auth.welcome");
@@ -217,14 +222,53 @@ test("sends auth.welcome in the job's locale to the user's current address", asy
 
 test("falls back to English when the job has no usable locale", async () => {
   await sendWelcomeEmail({ userId: "u1" });
-  await sendWelcomeEmail({ userId: "u1", locale: "fr" });
   assert.equal(mocks.sendTemplate.mock.calls[0]![0].locale, "en");
+  assert.equal(mocks.loggerWarn.mock.calls.length, 0);
+
+  await sendWelcomeEmail({ userId: "u1", locale: "fr" });
   assert.equal(mocks.sendTemplate.mock.calls[1]![0].locale, "en");
+  assert.equal(mocks.loggerWarn.mock.calls.length, 1);
+  assert.equal(
+    mocks.loggerWarn.mock.calls[0]?.[0],
+    "welcome_email_locale_unsupported",
+  );
+  assert.deepEqual(mocks.loggerWarn.mock.calls[0]?.[1], {
+    userId: "u1",
+    locale: "fr",
+  });
+});
+
+test("rejects with a userId-mentioning message for a non-string or empty userId", async () => {
+  await assert.rejects(
+    sendWelcomeEmail({ userId: 123, locale: "en" }),
+    /userId/,
+  );
+  await assert.rejects(
+    sendWelcomeEmail({ userId: "", locale: "en" }),
+    /userId/,
+  );
+});
+
+test("skips a user row with an empty email without calling sendTemplate", async () => {
+  mocks.databaseQuery.mockResolvedValueOnce({
+    rows: [{ email: "", name: "Alice", emailVerified: true }],
+  });
+  assert.equal(
+    await sendWelcomeEmail({ userId: "u1", locale: "en" }),
+    "skipped",
+  );
+  assert.equal(mocks.sendTemplate.mock.calls.length, 0);
+  assert.equal(mocks.loggerInfo.mock.calls.length, 1);
+  assert.equal(mocks.loggerInfo.mock.calls[0]?.[0], "welcome_email_skipped");
+  assert.equal(mocks.loggerInfo.mock.calls[0]?.[1]?.reason, "user_missing");
 });
 
 test("skips a user that no longer exists", async () => {
   mocks.databaseQuery.mockResolvedValueOnce({ rows: [] });
-  assert.equal(await sendWelcomeEmail({ userId: "gone", locale: "en" }), "skipped");
+  assert.equal(
+    await sendWelcomeEmail({ userId: "gone", locale: "en" }),
+    "skipped",
+  );
   assert.equal(mocks.sendTemplate.mock.calls.length, 0);
 });
 
@@ -232,7 +276,10 @@ test("skips a user whose email is not verified", async () => {
   mocks.databaseQuery.mockResolvedValueOnce({
     rows: [{ email: "a@example.test", name: "Alice", emailVerified: false }],
   });
-  assert.equal(await sendWelcomeEmail({ userId: "u1", locale: "en" }), "skipped");
+  assert.equal(
+    await sendWelcomeEmail({ userId: "u1", locale: "en" }),
+    "skipped",
+  );
   assert.equal(mocks.sendTemplate.mock.calls.length, 0);
 });
 

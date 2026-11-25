@@ -29,7 +29,9 @@ function normalizeName(name: string | null | undefined): string | null {
   if (!trimmed) {
     return null;
   }
-  return trimmed.slice(0, WELCOME_EMAIL_NAME_MAX_LENGTH);
+  // Slice by code point, not UTF-16 unit, so an 80-unit cut can never split
+  // a surrogate pair (e.g. an emoji) in half.
+  return Array.from(trimmed).slice(0, WELCOME_EMAIL_NAME_MAX_LENGTH).join("");
 }
 
 function formatFreeAllowance(
@@ -38,8 +40,8 @@ function formatFreeAllowance(
 ): { freeCredits: string | null; freePages: string | null } {
   if (
     !freeAllowance ||
-    freeAllowance.credits === 0 ||
-    freeAllowance.pages === 0
+    !(freeAllowance.credits > 0) ||
+    !(freeAllowance.pages > 0)
   ) {
     return { freeCredits: null, freePages: null };
   }
