@@ -422,8 +422,52 @@ test("poll re-rejects a poll endpoint on another origin without sending it", asy
   assert.equal(calls.length, 0);
 });
 
-test("poll is unreachable when the OCS endpoint returns 5xx", async () => {
-  const { flow } = flowFor({ ocs: { status: 502 } });
+test("poll is unreachable when the OCS endpoint returns 5xx, and revokes the just-issued password", async () => {
+  const { flow, calls } = flowFor({ ocs: { status: 502 } });
+  const started = await flow.start({ serverUrl: SERVER, config: {} });
+  await rejectsWithCode(
+    flow.poll({ pending: started.pending }),
+    "NEXTCLOUD_UNREACHABLE",
+  );
+  // The app password Nextcloud already issued is revoked best-effort so no
+  // orphan "SourceWeft" app password is left on the user's server.
+  const del = calls.find(
+    (c) =>
+      c.method === "DELETE" && c.url.endsWith("/ocs/v2.php/core/apppassword"),
+  );
+  assert.ok(del);
+  assert.equal(new URL(del.url).origin, new URL(SERVER).origin);
+  assert.ok(del.headers["authorization"]?.startsWith("Basic "));
+  assert.equal(del.headers["ocs-apirequest"], "true");
+});
+
+test("a user-lookup failure after approval revokes the just-issued app password before failing", async () => {
+  const cases: Array<{ ocs: FakeConfig["ocs"]; code: string }> = [
+    { ocs: { status: 503 }, code: "NEXTCLOUD_UNREACHABLE" },
+    { ocs: { status: 429 }, code: "NEXTCLOUD_UNREACHABLE" },
+    { ocs: { body: "not json" }, code: "NEXTCLOUD_LOGIN_FLOW_INVALID" },
+    {
+      ocs: { body: JSON.stringify({ ocs: { data: { id: "a/b" } } }) },
+      code: "NEXTCLOUD_LOGIN_FLOW_INVALID",
+    },
+  ];
+  for (const { ocs, code } of cases) {
+    const { flow, calls } = flowFor({ ocs });
+    const started = await flow.start({ serverUrl: SERVER, config: {} });
+    await rejectsWithCode(flow.poll({ pending: started.pending }), code);
+    const del = calls.find(
+      (c) =>
+        c.method === "DELETE" && c.url.endsWith("/ocs/v2.php/core/apppassword"),
+    );
+    assert.ok(del, `no cleanup DELETE for ${code}`);
+    assert.equal(new URL(del.url).origin, new URL(SERVER).origin);
+    assert.ok(del.headers["authorization"]?.startsWith("Basic "));
+    assert.equal(del.headers["ocs-apirequest"], "true");
+  }
+});
+
+test("a cleanup DELETE that itself fails does not mask the original user-lookup error", async () => {
+  const { flow } = flowFor({ ocs: { status: 503 }, del: { throw: "network" } });
   const started = await flow.start({ serverUrl: SERVER, config: {} });
   await rejectsWithCode(
     flow.poll({ pending: started.pending }),

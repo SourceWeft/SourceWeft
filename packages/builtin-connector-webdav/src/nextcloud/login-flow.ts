@@ -234,36 +234,57 @@ export function createNextcloudCredentialFlow(
           parsed?.appPassword,
           MAX_APP_PASSWORD_LENGTH,
         );
-        // The returned server must be the same origin the flow began with, so a
-        // server cannot re-point the connector elsewhere. Everything is then
-        // built from the server WE normalised (`base`), never the returned path,
-        // so a same-origin path trick cannot change where the connector talks.
-        let returned: URL;
+        // Nextcloud has now issued the app password (returned exactly once).
+        // Every later step — the returned-origin check, the OCS user-id lookup,
+        // and endpoint construction — can still fail (a hostile echo, a 5xx/429,
+        // a non-200, a malformed id). On any such failure, best-effort revoke the
+        // password BEFORE surfacing the fixed error, so no unused "SourceWeft"
+        // app password is orphaned on the user's server (the backend has not
+        // claimed the flow row yet, so it would otherwise linger until expiry).
         try {
-          returned = new URL(returnedServer);
-        } catch {
-          throw new NextcloudLoginFlowError("NEXTCLOUD_LOGIN_FLOW_INVALID");
-        }
-        if (returned.origin !== server.origin) invalid();
+          // The returned server must be the same origin the flow began with, so
+          // a server cannot re-point the connector elsewhere. Everything is then
+          // built from the server WE normalised (`base`), never the returned
+          // path, so a same-origin path trick cannot change where it talks.
+          let returned: URL;
+          try {
+            returned = new URL(returnedServer);
+          } catch {
+            throw new NextcloudLoginFlowError("NEXTCLOUD_LOGIN_FLOW_INVALID");
+          }
+          if (returned.origin !== server.origin) invalid();
 
-        const userId = await resolveFilesUserId(
-          scope,
-          { server: base, loginName, appPassword },
-          limits,
-        );
-        const credential: ConnectorCredentialInput = {
-          username: loginName,
-          secret: appPassword,
-        };
-        return {
-          status: "authorized",
-          credential,
-          config: {
-            server: base,
-            endpoint: nextcloudEndpoint(base, userId),
-            userId,
-          },
-        };
+          const userId = await resolveFilesUserId(
+            scope,
+            { server: base, loginName, appPassword },
+            limits,
+          );
+          const credential: ConnectorCredentialInput = {
+            username: loginName,
+            secret: appPassword,
+          };
+          return {
+            status: "authorized",
+            credential,
+            config: {
+              server: base,
+              endpoint: nextcloudEndpoint(base, userId),
+              userId,
+            },
+          };
+        } catch (error) {
+          try {
+            await deleteAppPassword(
+              scope,
+              { server: base, username: loginName, secret: appPassword },
+              limits,
+            );
+          } catch {
+            // Best-effort: a failed revoke must never mask the original error,
+            // and nothing here is logged.
+          }
+          throw error;
+        }
       } finally {
         await scope.close();
       }
