@@ -1,19 +1,84 @@
 ---
 subject: Welcome to SourceWeft
-heading: Start with one source
-preview: Add a source, ask a question, and check the citations.
+heading: Hand the work to agents, keep control
+preview: Ask in a chat, schedule it, or hand it to the assistant. Every result shows its sources.
 action: Open your workspace
 url: {{dashboardUrl}}
 ---
 
-{{#if greeting}}
+{{#if name}}
 <p style="margin: 0 0 18px; color: #374151; font-size: 15px; line-height: 26px">
-  {{greeting}}
+  Hi {{name}},
 </p>
 {{/if}}
 <p style="margin: 0 0 18px; color: #374151; font-size: 15px; line-height: 26px">
-  SourceWeft helps you find answers in your own sources. Start with a document
-  you know well:
+  SourceWeft is a workspace for autonomous agents. They plan and complete tasks
+  from your own sources, and every conclusion links back to the original
+  passage.
+</p>
+{{#if freeCredits}}
+<p
+  style="
+    margin: 0 0 12px;
+    color: #111827;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 22px;
+  "
+>
+  Your free allowance is ready
+</p>
+<table
+  role="presentation"
+  cellpadding="0"
+  cellspacing="0"
+  border="0"
+  width="100%"
+  style="margin: 0 0 12px; background-color: #f3f4f6; border-radius: 6px"
+>
+  <tr>
+    <td
+      style="
+        padding: 16px 12px 16px 20px;
+        width: 50%;
+        vertical-align: top;
+        color: #374151;
+        font-size: 15px;
+        line-height: 22px;
+      "
+    >
+      <strong style="color: #111827; font-size: 18px">{{freeCredits}}</strong>
+      credits each month for chats and task runs
+    </td>
+    <td
+      style="
+        padding: 16px 20px 16px 12px;
+        width: 50%;
+        vertical-align: top;
+        color: #374151;
+        font-size: 15px;
+        line-height: 22px;
+      "
+    >
+      <strong style="color: #111827; font-size: 18px">{{freePages}}</strong>
+      pages each month for document parsing
+    </td>
+  </tr>
+</table>
+<p style="margin: 0 0 18px; color: #6b7280; font-size: 13px; line-height: 22px">
+  It resets every month. No payment method needed.
+</p>
+{{/if}}
+<p
+  style="
+    margin: 0 0 12px;
+    color: #111827;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 22px;
+  "
+>
+  Three ways to hand off work
 </p>
 <ol style="margin: 0 0 20px; padding-left: 24px">
   <li
@@ -25,7 +90,13 @@ url: {{dashboardUrl}}
       line-height: 26px;
     "
   >
-    <strong>Add a source</strong><br />Upload a document or paste a link.
+    <strong>Ask in a chat</strong><br />State the goal. The agent plans the
+    work, runs sub-agents in parallel, and returns a report, slides, or a
+    table.<br /><a
+      href="{{chatUrl}}"
+      style="color: #374151; text-decoration: underline"
+      >Start a chat</a
+    >
   </li>
   <li
     style="
@@ -36,8 +107,12 @@ url: {{dashboardUrl}}
       line-height: 26px;
     "
   >
-    <strong>Ask a question</strong><br />Try “What are the main points in this
-    source?”
+    <strong>Schedule it</strong><br />Save a prompt to run on a schedule. Each
+    run puts its result in a new chat.<br /><a
+      href="{{scheduledUrl}}"
+      style="color: #374151; text-decoration: underline"
+      >Create a scheduled task</a
+    >
   </li>
   <li
     style="
@@ -48,19 +123,102 @@ url: {{dashboardUrl}}
       line-height: 26px;
     "
   >
-    <strong>Check the citations</strong><br />Open the cited passages to see
-    where the answer comes from.
+    <strong>Hand it to the workspace assistant</strong><br />Once enabled, ask
+    for work in the shared feed. The assistant opens a ticket for each request,
+    works on them in parallel, and reports back.<br /><a
+      href="{{assistantUrl}}"
+      style="color: #374151; text-decoration: underline"
+      >Open the assistant</a
+    >
   </li>
 </ol>
+<p
+  style="
+    margin: 0 0 12px;
+    color: #111827;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 22px;
+  "
+>
+  You stay in control
+</p>
+<ul style="margin: 0 0 20px; padding-left: 24px">
+  <li
+    style="
+      margin: 0 0 12px;
+      padding-left: 4px;
+      color: #374151;
+      font-size: 15px;
+      line-height: 26px;
+    "
+  >
+    <strong>Traceable.</strong> Answers cite their sources, and the assistant
+    shows the reason for every decision.
+  </li>
+  <li
+    style="
+      margin: 0 0 12px;
+      padding-left: 4px;
+      color: #374151;
+      font-size: 15px;
+      line-height: 26px;
+    "
+  >
+    <strong>Asks when unsure.</strong> When information is missing, the agent
+    asks you instead of guessing.
+  </li>
+  <li
+    style="
+      margin: 0 0 12px;
+      padding-left: 4px;
+      color: #374151;
+      font-size: 15px;
+      line-height: 26px;
+    "
+  >
+    <strong>Approval before changes.</strong> Risky actions need your approval.
+    Unattended runs are read-only.
+  </li>
+</ul>
+<p
+  style="
+    margin: 0 0 12px;
+    color: #111827;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 22px;
+  "
+>
+  Use it anywhere
+</p>
+<p style="margin: 0 0 12px; color: #374151; font-size: 15px; line-height: 26px">
+  One account and workspace on the web, in your phone's browser, and in the
+  desktop app for macOS, Windows, and Linux. The desktop app can also run tasks
+  on your computer and work in local folders. iOS and Android apps are coming
+  soon.
+</p>
 <p style="margin: 0 0 18px; color: #374151; font-size: 15px; line-height: 26px">
-  The SourceWeft team
+  <a href="{{downloadUrl}}" style="color: #374151; text-decoration: underline"
+    >Download the desktop app</a
+  >
 </p>
 <p
   class="muted"
-  style="margin: 18px 0 0; color: #6b7280; font-size: 13px; line-height: 22px"
+  style="margin: 0 0 12px; color: #6b7280; font-size: 13px; line-height: 22px"
 >
-  {{#if docsUrl}}<a href="{{docsUrl}}" style="color: #374151">Help docs</a
-  >{{/if}} {{#if discordUrl}}<a href="{{discordUrl}}" style="color: #374151"
+  You can also extend agents with Skills, MCP tools, and connectors such as
+  cloud drives and email.
+</p>
+<p
+  class="muted"
+  style="margin: 0 0 18px; color: #6b7280; font-size: 13px; line-height: 22px"
+>
+  {{#if communityUrl}}<a href="{{communityUrl}}" style="color: #374151"
     >Community</a
-  >{{/if}}
+  >{{/if}} {{#if githubUrl}}&middot;
+  <a href="{{githubUrl}}" style="color: #374151">GitHub</a>{{/if}}
+</p>
+<p style="margin: 0; color: #374151; font-size: 15px; line-height: 26px">
+  First step: add a source you know well, then hand off your first task.
 </p>
