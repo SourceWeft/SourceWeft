@@ -116,6 +116,21 @@ test("the drafts checkbox and credential fields appear only for the login choice
   expect(passwordField().getAttribute("autocomplete")).toBe("new-password");
 });
 
+test("a reachable site discloses that nothing is indexed until a sync is started", async () => {
+  await mountDialog();
+  typeInto(urlField(), SITE);
+  await flush(3);
+  await check();
+  const text = bodyText();
+  expect(text).toContain("Site reachable");
+  // Truthful copy (R14): creating the connector does not index anything, and an
+  // empty selection means all published posts and pages.
+  expect(text).toContain("Nothing is indexed until you");
+  expect(text).toContain("all the site's published posts and pages");
+  // The auto-sync checkbox is clear that it only schedules future syncs.
+  expect(text).toContain("Adding the connector does not index anything");
+});
+
 test("the public path checks and creates the wordpress connector with an empty selection", async () => {
   const { onCheck, onAdd, onOpenChange } = await mountDialog();
   typeInto(urlField(), `  ${SITE}  `);

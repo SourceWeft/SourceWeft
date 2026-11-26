@@ -1665,10 +1665,13 @@ export function useConnectors(input: {
 
   // Create a WordPress connector. The public choice creates `wordpress` with no
   // credential; the login choice creates `wordpress_login` with the Application
-  // Password and the drafts/private flag. An empty selection means every
-  // published post and page, so the connector is ready and a first sync starts;
-  // the member can narrow the selection from its settings afterwards. Rejects on
-  // any create failure so the dialog stays open and shows the reason.
+  // Password and the drafts/private flag. Creating a connector never indexes
+  // anything: an empty selection means every published post and page (up to the
+  // cap), but a sync that large must be a deliberate choice, so — like the
+  // Discourse add flow — this opens the new connector's settings (the selection
+  // browser) and leaves the first sync to the member's own "Sync now". The
+  // "Sync automatically" choice still only sets scheduled periodic syncs. Rejects
+  // on any create failure so the dialog stays open and shows the reason.
   const handleAddSite = useCallback(
     async (input: SiteAddInput) => {
       if (!workspaceId) {
@@ -1701,16 +1704,16 @@ export function useConnectors(input: {
       });
       trackConnectorConnected({ connectorType });
       await refreshConnectors();
+      openConnectorSettings(
+        mapConnectorToUi(created.connector, t, displayLocale),
+      );
       toast.success(
         t("toasts.connectors.connectedFallback", {
           name: created.connector.name,
         }),
       );
-      await handleSyncConnector(
-        mapConnectorToUi(created.connector, t, displayLocale),
-      );
     },
-    [displayLocale, handleSyncConnector, refreshConnectors, workspaceId, t],
+    [displayLocale, openConnectorSettings, refreshConnectors, workspaceId, t],
   );
 
   // Pre-create readiness check for a credential connector. A WebDAV input runs

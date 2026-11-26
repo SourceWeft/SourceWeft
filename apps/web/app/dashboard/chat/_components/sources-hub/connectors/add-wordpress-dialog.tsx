@@ -208,9 +208,10 @@ function AddWordpressForm({
         periodicIndexingEnabled: autoSync,
       };
       await onAdd(input);
-      // The create succeeded; the dialog is closing, but drop the secret from
-      // state immediately so it never lingers after the submit.
+      // The create succeeded; the dialog is closing, but drop the secret and the
+      // checked result from state immediately so neither lingers after the submit.
       setSecret("");
+      setChecked(null);
       onOpenChange(false);
     } catch (error) {
       // The create failed with the secret already in flight: clear it so a retry

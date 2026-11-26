@@ -940,9 +940,24 @@ describe("wordpress catalog entry", () => {
       expect(copy.appPasswordHint?.trim()).toBeTruthy();
       expect(copy.includeUnpublishedWarning?.trim()).toBeTruthy();
       expect(copy.wordpressComNote?.trim()).toBeTruthy();
-      for (const key of ["title", "check", "add", "invalidUrl"]) {
+      for (const key of [
+        "title",
+        "check",
+        "add",
+        "invalidUrl",
+        "reachableHint",
+        "autoSyncHint",
+      ]) {
         expect(copy.dialog[key]?.trim(), key).toBeTruthy();
       }
+      // The hints must be truthful: nothing is indexed on create, and an empty
+      // selection indexes all published posts and pages (R14).
+      expect(copy.dialog.reachableHint).toMatch(
+        catalogName === "en" ? /start a sync/i : /同步/,
+      );
+      expect(copy.dialog.autoSyncHint).toMatch(
+        catalogName === "en" ? /does not index/i : /不会索引/,
+      );
       expect(copy.rotate.save?.trim()).toBeTruthy();
       for (const reason of WORDPRESS_READINESS_REASONS) {
         expect(copy.readiness[reason]?.trim(), reason).toBeTruthy();

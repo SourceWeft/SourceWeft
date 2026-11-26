@@ -2191,11 +2191,10 @@ test("handleCheckSite with no workspace toasts and does not call the API", async
   expect(result.ready).toBe(false);
 });
 
-test("handleAddSite creates a public wordpress connector with no credential and starts a sync", async () => {
+test("handleAddSite creates a public wordpress connector, opens its settings and does not sync", async () => {
   const created = wordpressConnector();
   create.mockResolvedValue({ connector: created });
   list.mockResolvedValue({ items: [created] });
-  sync.mockResolvedValue({});
   await mountHook(baseInput("ws-site-add"));
 
   await act(async () => {
@@ -2217,19 +2216,20 @@ test("handleAddSite creates a public wordpress connector with no credential and 
     indexingFrequencyMinutes: 360,
   });
   expect("credential" in create.mock.calls[0]![1]).toBe(false);
-  // An empty selection is ready, so the connector syncs right away.
-  expect(sync).toHaveBeenCalledWith("ws-site-add", "wp-1");
+  // Creating a connector never indexes anything: the member chooses and starts
+  // the first sync from its settings, so a large site is never indexed blindly.
+  expect(sync).not.toHaveBeenCalled();
+  expect(api().connectorSettingsConnector?.id).toBe("wp-1");
   expect(toastSuccess).toHaveBeenCalledWith("My blog connected.");
 });
 
-test("handleAddSite creates wordpress_login with the credential and drafts flag", async () => {
+test("handleAddSite creates wordpress_login with the credential and drafts flag, and does not sync", async () => {
   const created = wordpressConnector({
     id: "wp-login-1",
     connectorType: "wordpress_login",
   });
   create.mockResolvedValue({ connector: created });
   list.mockResolvedValue({ items: [created] });
-  sync.mockResolvedValue({});
   await mountHook(baseInput("ws-site-login-add"));
 
   await act(async () => {
@@ -2256,6 +2256,10 @@ test("handleAddSite creates wordpress_login with the credential and drafts flag"
     periodicIndexingEnabled: true,
     indexingFrequencyMinutes: 360,
   });
+  // The "Sync automatically" choice only enables scheduled periodic syncs; no
+  // immediate sync runs on create.
+  expect(sync).not.toHaveBeenCalled();
+  expect(api().connectorSettingsConnector?.id).toBe("wp-login-1");
 });
 
 test("handleAddSite rethrows a 409 without toasting", async () => {
