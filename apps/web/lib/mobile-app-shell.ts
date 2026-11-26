@@ -8,6 +8,8 @@ import { reloadForStaleBuild } from "./stale-build-reload";
 export const SHELL_CACHE_TIMING = "sw-shell-cache";
 /** What the service worker posts when the page on screen is from before a deploy. */
 export const SHELL_STALE_MESSAGE = "sourceweft-shell-stale";
+/** What the service worker posts to ask which address the page is on now. */
+export const SHELL_ADDRESS_MESSAGE = "sourceweft-shell-address";
 
 function isIosApp() {
   if (typeof window === "undefined") return false;
@@ -20,8 +22,10 @@ function isIosApp() {
  * launch shows the page without waiting for the network. Only the iOS app
  * registers it: the website and other hosts keep their plain network loads.
  *
- * The worker normally reloads a page it served from before a deploy itself;
- * it posts a message instead when it may not navigate the page.
+ * The worker normally reloads a page it served from before a deploy itself.
+ * It first asks the page which address it is on, because it only knows the one
+ * the page was opened with: answering keeps an open conversation on screen
+ * after the reload. It posts the stale message when it may not navigate the page.
  */
 export function registerMobileServiceWorker() {
   if (!isIosApp()) return;
@@ -31,11 +35,13 @@ export function registerMobileServiceWorker() {
   }
   navigator.serviceWorker.addEventListener("message", (event) => {
     const data: unknown = event.data;
-    if (
-      data &&
-      typeof data === "object" &&
-      (data as { type?: unknown }).type === SHELL_STALE_MESSAGE
-    ) {
+    const type =
+      data && typeof data === "object"
+        ? (data as { type?: unknown }).type
+        : undefined;
+    if (type === SHELL_ADDRESS_MESSAGE) {
+      event.ports[0]?.postMessage(window.location.href);
+    } else if (type === SHELL_STALE_MESSAGE) {
       reloadForStaleBuild();
     }
   });
