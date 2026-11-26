@@ -1595,7 +1595,7 @@ export function useConnectors(input: {
       markConnectorNotReady(
         created.connector.id,
         "selection_required",
-        t(`connectors.${input.connectorType}.readiness.selection_required`),
+        t("connectors.discourse.readiness.selection_required"),
       );
       openConnectorSettings(
         mapConnectorToUi(created.connector, t, displayLocale),

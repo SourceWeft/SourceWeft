@@ -3673,7 +3673,7 @@
         "nameLabel": "Name (optional)",
         "refreshLabel": "Keeping topics up to date",
         "refreshLight": "Light",
-        "refreshLightHint": "Picks up new replies, deleted posts, and changes to titles and categories. Fast.",
+        "refreshLightHint": "Picks up new replies, deletions, and changes to titles, categories and tags. Fast.",
         "refreshDeep": "Deep",
         "refreshDeepHint": "Also picks up edits to older posts. Slower, because every topic is read again.",
         "dialog": {
@@ -3687,7 +3687,7 @@
           "add": "Add forum",
           "autoSync": "Sync automatically",
           "autoSyncHint": "Check for new and changed posts on a schedule. Off by default; you can sync manually anytime.",
-          "invalidUrl": "Enter the forum's address starting with https://, without a username, port, query or #fragment. IP addresses and localhost are not allowed.",
+          "invalidUrl": "Enter the forum's address starting with https://, without a username, port, query or #fragment. IP addresses and localhost are not allowed. A host name with non-ASCII characters must be written in its ASCII (punycode) form.",
           "checkFailed": "Could not check the forum. Try again.",
           "nameConflict": "A connector with this name already exists in this workspace. Change the name, or use the existing one.",
           "addFailed": "Failed to add the forum."
@@ -3940,7 +3940,7 @@
           },
           "discourse": {
             "itemsTitle": "Categories and topics",
-            "itemsDescription": "Choose the categories and topics to index. A category includes its subcategories and their topics. Everything selected is kept in sync on the connector's schedule.",
+            "itemsDescription": "Choose the categories and topics to index. A category includes its subcategories and their topics. Everything selected is kept in sync on the connector's schedule when automatic sync is on.",
             "choose": "Choose categories and topics",
             "empty": "Nothing selected yet. Choose categories or topics to start indexing.",
             "kinds": {
