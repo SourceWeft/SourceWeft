@@ -113,6 +113,82 @@ test("every request asks the host fetch not to follow redirects", async () => {
   assert.ok(fake.requests.every((request) => request.redirect === "manual"));
 });
 
+test("a category list follows the forum's own slug redirect (a real forum answers c/<id>.json with a 301)", async () => {
+  for (const basePath of [undefined, "/forum"]) {
+    const forum = { ...sampleForum({ basePath }), categoryRedirect: true };
+    const { fake, client, sleeps } = harness(forum);
+    const prefix = basePath ?? "";
+    const parent = await client.categoryPage(10, 0);
+    assert.ok(!isNotFound(parent));
+    assert.equal(parent.topics.length, 3);
+    await client.categoryPage(11, 1);
+    assert.deepEqual(
+      fake.requests.map((r) => `${r.path}?${new URLSearchParams(r.query)}`),
+      [
+        `${prefix}/c/10.json?page=0`,
+        `${prefix}/c/general/10.json?page=0`,
+        `${prefix}/c/11.json?page=1`,
+        `${prefix}/c/general/support/11.json?page=1`,
+      ],
+    );
+    assert.ok(fake.requests.every((r) => r.redirect === "manual"));
+    // Following the redirect is not a retry: only the request gap is waited.
+    assert.ok(sleeps.every((ms) => ms <= MIN_REQUEST_GAP_MS), String(sleeps));
+  }
+});
+
+test("only the slug redirect of a category list is followed; every other redirect is refused", async () => {
+  const forum = { ...sampleForum(), categoryRedirect: true };
+  const { fake, client } = harness(forum);
+
+  const refused: Array<[string, string]> = [
+    ["another origin", "https://other.example.org/c/general/10.json?page=0"],
+    ["another host spelling", "https://forum.example.com.evil.example/c/general/10.json?page=0"],
+    ["userinfo", "https://u:p@forum.example.com/c/general/10.json?page=0"],
+    ["http", "http://forum.example.com/c/general/10.json?page=0"],
+    ["another id", "/c/general/11.json?page=0"],
+    ["another endpoint", "/site.json?page=0"],
+    ["a topic", "/t/1.json?page=0"],
+    ["outside /c/", "/admin/c/general/10.json?page=0"],
+    ["dot segments", "/c/../site.json?page=0"],
+    ["encoded dot segments", "/c/%2e%2e/10.json?page=0"],
+    ["another query", "/c/general/10.json?page=1"],
+    ["no query", "/c/general/10.json"],
+    ["a fragment", "/c/general/10.json?page=0#x"],
+    ["no slug", "/c/10.json?page=0"],
+    ["an empty location", ""],
+  ];
+  for (const [label, location] of refused) {
+    const before = fake.requests.length;
+    fake.failNext({ status: 301, headers: { location } });
+    assert.equal(
+      await codeOf(client.categoryPage(10, 0)),
+      "DISCOURSE_BAD_RESPONSE",
+      label,
+    );
+    assert.equal(fake.requests.length, before + 1, `${label}: nothing requested`);
+  }
+
+  // Only a category list is ever redirected: not site.json, a topic or a search.
+  fake.failNext({
+    status: 301,
+    headers: { location: "/c/general/10.json?page=0" },
+  });
+  assert.equal(await codeOf(client.site()), "DISCOURSE_BAD_RESPONSE");
+  fake.failNext({ status: 301, headers: { location: "/t/topic-1/1.json" } });
+  assert.equal(await codeOf(client.topic(1)), "DISCOURSE_BAD_RESPONSE");
+});
+
+test("redirects are bounded: a third hop is refused", async () => {
+  const { fake, client } = harness();
+  fake.failNext(
+    { status: 301, headers: { location: "/c/a/10.json?page=0" } },
+    3,
+  );
+  assert.equal(await codeOf(client.categoryPage(10, 0)), "DISCOURSE_BAD_RESPONSE");
+  assert.equal(fake.requests.length, 3);
+});
+
 test("an invalid base is refused at construction", () => {
   const fake = startFakeDiscourse(sampleForum());
   for (const base of [

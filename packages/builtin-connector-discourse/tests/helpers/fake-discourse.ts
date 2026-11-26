@@ -75,6 +75,12 @@ export type FakeForum = {
    * that requires login.
    */
   loginRequired?: boolean;
+  /**
+   * Like a real Discourse, answer `c/<id>.json` with a 301 to
+   * `c/<slug>/<id>.json` (`c/<parent>/<slug>/<id>.json` for a subcategory),
+   * keeping the query. Off by default so most tests count one request per read.
+   */
+  categoryRedirect?: boolean;
 };
 
 export type RecordedRequest = {
@@ -233,11 +239,31 @@ export function startFakeDiscourse(initial: FakeForum): FakeDiscourse {
       });
     }
 
-    const category = /^c\/([1-9][0-9]*)\.json$/.exec(rest);
+    const category = /^c\/(?:[A-Za-z0-9_%-]+\/)*([1-9][0-9]*)\.json$/.exec(rest);
     if (category) {
       const id = Number(category[1]);
       const found = forum.categories.find((c) => c.id === id);
       if (!found) return json({}, 404);
+      if (forum.categoryRedirect && rest === `c/${id}.json`) {
+        const chain: string[] = [];
+        for (
+          let c: FakeCategory | undefined = found;
+          c && chain.length < 10;
+          c =
+            c.parent_category_id == null
+              ? undefined
+              : forum.categories.find((x) => x.id === c!.parent_category_id)
+        ) {
+          chain.unshift(c.slug);
+        }
+        const search = new URLSearchParams(request.query).toString();
+        return new Response(null, {
+          status: 301,
+          headers: {
+            location: `${prefix}/c/${chain.join("/")}/${id}.json${search === "" ? "" : `?${search}`}`,
+          },
+        });
+      }
       if (found.restricted) return invalidAccess();
       // Like a real Discourse, a category lists its subcategories' topics
       // too, most recently bumped first (ties keep their order).

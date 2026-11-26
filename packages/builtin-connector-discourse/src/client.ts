@@ -107,6 +107,9 @@ const MAX_FORBIDDEN_BODY_BYTES = 65_536;
 /** A 429 body is only read for `extras.wait_seconds`; this is plenty. */
 const MAX_RATE_LIMIT_BODY_BYTES = 65_536;
 const RETRY_STATUSES = new Set([429, 502, 503, 504]);
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+/** Redirects followed for one read; a real forum needs one. */
+const MAX_REDIRECTS = 2;
 
 /** The host's policy error is duck-typed: this package cannot import backend code. */
 function isEndpointNotAllowed(error: unknown): boolean {
@@ -222,6 +225,48 @@ function requirePage(value: unknown, min: number): number {
 
 function bad(): DiscourseError {
   return new DiscourseError("DISCOURSE_BAD_RESPONSE");
+}
+
+/**
+ * Where a category list may be redirected: Discourse answers `c/<id>.json`
+ * with a 301 to `c/<slug>/<id>.json` (`c/<parent>/<slug>/<id>.json` for a
+ * subcategory). The target must be on the same origin, under the same base
+ * path, for the same id and with the same query; nothing else is followed.
+ */
+function categoryRedirect(
+  location: string | null,
+  current: string,
+  base: string,
+  path: string,
+): string | null {
+  const id = /^c\/([1-9][0-9]{0,9})\.json$/.exec(path)?.[1];
+  if (id === undefined || location === null || location.length > 2048) {
+    return null;
+  }
+  let from: URL;
+  let to: URL;
+  try {
+    from = new URL(current);
+    to = new URL(location, from);
+  } catch {
+    return null;
+  }
+  const prefix = new URL(base).pathname.replace(/\/$/, "");
+  if (
+    to.origin !== from.origin ||
+    to.username !== "" ||
+    to.password !== "" ||
+    to.hash !== "" ||
+    to.search !== from.search ||
+    !to.pathname.startsWith(`${prefix}/c/`)
+  ) {
+    return null;
+  }
+  const rest = to.pathname.slice(prefix.length + 1);
+  const shape = new RegExp(
+    `^c/(?:[A-Za-z0-9_%-]{1,200}/){1,5}${id}\\.json$`,
+  );
+  return shape.test(rest) ? to.toString() : null;
 }
 
 /**
@@ -361,11 +406,15 @@ export function createDiscourseTransport(
     query: Record<string, string | number | string[]> | undefined,
     nonJson: DiscourseErrorCode,
   ): Promise<unknown> {
-    const url = buildUrl(path, query);
+    let url = buildUrl(path, query);
+    let redirects = 0;
     const missing = NOT_FOUND_PATHS.some((pattern) => pattern.test(path));
     const isSite = SITE_PATH.test(path);
 
-    for (let attempt = 0; ; attempt += 1) {
+    let attempt = 0;
+    for (;;) {
+      // A followed redirect does not use up a retry.
+      let followed = false;
       if (external?.aborted) {
         throw new DiscourseError("DISCOURSE_FORUM_UNREACHABLE");
       }
@@ -454,8 +503,22 @@ export function createDiscourseTransport(
           if (status >= 400) {
             throw new DiscourseError("DISCOURSE_FORUM_UNREACHABLE");
           }
-          // A redirect or another success code: never followed, never trusted.
-          throw bad();
+          // Another success code or an unexpected redirect: never trusted.
+          if (REDIRECT_STATUSES.has(status) && redirects < MAX_REDIRECTS) {
+            const next = categoryRedirect(
+              response.headers.get("location"),
+              url,
+              base,
+              path,
+            );
+            if (next !== null) {
+              url = next;
+              redirects += 1;
+              followed = true;
+              // Falls out of the try and reads the new address at once.
+            }
+          }
+          if (!followed) throw bad();
         }
       } catch (error) {
         if (error instanceof DiscourseError) throw error;
@@ -478,7 +541,10 @@ export function createDiscourseTransport(
         // The gap is measured from the end of the response, body included.
         lastRequestAt = now();
       }
-      await wait(waitMs);
+      if (!followed) {
+        await wait(waitMs);
+        attempt += 1;
+      }
     }
   }
 
