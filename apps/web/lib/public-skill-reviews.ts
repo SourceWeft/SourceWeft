@@ -7,6 +7,7 @@ import {
 } from "@sourceweft/contracts";
 
 import { apiBaseUrl } from "./api-base-url";
+import { catalogRequestSignal } from "./catalog-request-timeout";
 
 /**
  * A public skill's first page of reviews, read anonymously for the server
@@ -26,7 +27,11 @@ async function fetchPublicSkillReviews(
 ): Promise<ListSkillReviewsResponse | null> {
   const response = await fetch(
     `${apiBaseUrl}/v1/skills/${encodeURIComponent(slug)}/reviews?sort=newest&limit=${PUBLIC_SKILL_REVIEWS_PAGE_SIZE}`,
-    { credentials: "omit", headers: { accept: "application/json" } },
+    {
+      credentials: "omit",
+      headers: { accept: "application/json" },
+      signal: catalogRequestSignal(),
+    },
   );
   // Not public (or not there): no reviews to show, and nothing to retry.
   if (response.status === 404) return null;

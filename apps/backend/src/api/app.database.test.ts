@@ -40,3 +40,30 @@ test("every API response carries the baseline security headers and no framing he
   assert.equal(response.headers.get("x-frame-options"), null);
   assert.equal(response.headers.get("content-security-policy"), null);
 });
+
+// Issue #767: the readiness endpoint sits beside the liveness one and leaves
+// it as it was, a fixed answer that reads nothing.
+test("GET /v1/health keeps its fixed liveness body next to the readiness endpoint", async () => {
+  const app = createApp();
+
+  const health = await app.request("http://localhost/v1/health");
+  const body = (await health.json()) as Record<string, unknown>;
+  assert.equal(health.status, 200);
+  assert.deepEqual(Object.keys(body).sort(), [
+    "commit",
+    "service",
+    "status",
+    "timestamp",
+  ]);
+  assert.equal(body.status, "ok");
+  assert.equal(body.service, "backend-api");
+
+  const ready = await app.request("http://localhost/v1/health/ready");
+  const report = (await ready.json()) as Record<string, unknown>;
+  assert.equal(ready.status, 200);
+  assert.equal(report.status, "ok");
+  assert.deepEqual(Object.keys(report.checks as object), [
+    "database",
+    "catalog",
+  ]);
+});

@@ -7,6 +7,7 @@ import {
 } from "@sourceweft/contracts";
 
 import { apiBaseUrl } from "./api-base-url";
+import { catalogRequestSignal } from "./catalog-request-timeout";
 
 /**
  * A public skill's sandbox run stats (§17.5), read anonymously for the public
@@ -29,7 +30,10 @@ const cachedRunStats = unstable_cache(
   async (slug: string): Promise<SkillRunStatsPublic> => {
     const response = await fetch(
       `${apiBaseUrl}/v1/skills/${encodeURIComponent(slug)}/run-stats`,
-      { headers: { accept: "application/json" } },
+      {
+        headers: { accept: "application/json" },
+        signal: catalogRequestSignal(),
+      },
     );
     if (!response.ok) {
       throw new Error(`Run stats request failed with ${response.status}`);

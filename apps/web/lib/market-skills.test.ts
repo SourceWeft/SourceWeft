@@ -10,6 +10,7 @@ const client = vi.hoisted(() => ({
 const cacheCalls = vi.hoisted(
   () => [] as { keys: string[]; options: { revalidate?: number } }[],
 );
+const clientOptions = vi.hoisted(() => [] as Record<string, unknown>[]);
 
 vi.mock("server-only", () => ({}));
 vi.mock("./internal-api-base-url", () => ({
@@ -35,7 +36,9 @@ vi.mock("@sourceweft/market-sdk", () => {
     }
   }
   class MarketClient {
-    constructor(readonly options: { baseUrl: string }) {}
+    constructor(readonly options: { baseUrl: string }) {
+      clientOptions.push(options);
+    }
     getSkill = client.getSkill;
     getSkillCollection = client.getSkillCollection;
     listSkillCategories = client.listSkillCategories;
@@ -47,6 +50,7 @@ vi.mock("@sourceweft/market-sdk", () => {
 
 import { MarketClientError } from "@sourceweft/market-sdk";
 
+import { CATALOG_REQUEST_TIMEOUT_MS } from "./catalog-request-timeout";
 import {
   getPublicSkill,
   getPublicSkillCollection,
@@ -231,5 +235,16 @@ describe("locale", () => {
     expect(client.getSkillCollection).toHaveBeenCalledWith("starter", {
       locale: "zh-CN",
     });
+  });
+});
+
+describe("request timeout", () => {
+  it("gives every catalog read the fixed timeout", async () => {
+    client.getSkill.mockResolvedValue({ skill: {} });
+    clientOptions.length = 0;
+    await getPublicSkill("timeout-check");
+    expect(clientOptions).toEqual([
+      { baseUrl: "https://api.test", timeoutMs: CATALOG_REQUEST_TIMEOUT_MS },
+    ]);
   });
 });

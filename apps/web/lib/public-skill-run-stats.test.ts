@@ -72,3 +72,12 @@ test.each([
   arrange();
   await expect(getPublicSkillRunStats("deck")).resolves.toBeNull();
 });
+
+// Issue #767: a stalled API must not hold the skill page's render open.
+test("gives the read the catalog request timeout", async () => {
+  reply(200, available);
+  await getPublicSkillRunStats("pdf");
+  const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+  expect(init.signal).toBeInstanceOf(AbortSignal);
+  expect(init.signal!.aborted).toBe(false);
+});

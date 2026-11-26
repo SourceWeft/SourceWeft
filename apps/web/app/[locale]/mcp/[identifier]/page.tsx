@@ -133,6 +133,26 @@ async function loadMcp(identifier: string) {
 }
 
 /**
+ * The README, AI overview, score and version history: most of the page's
+ * content. As for the manifest (Issue #767): gone is a 404, and any other
+ * failure, a timeout included, must surface as 5xx instead of a 200 page
+ * with those sections missing.
+ */
+async function loadMcpDetail(
+  identifier: string,
+  locale: Parameters<typeof getPublicMcpDetail>[1],
+) {
+  try {
+    return await getPublicMcpDetail(identifier, locale);
+  } catch (error) {
+    if (isMarketNotFound(error)) {
+      notFound();
+    }
+    throw error;
+  }
+}
+
+/**
  * The brand of a product group as a heading word: the slug label with each
  * hyphenated part capitalised, "notion" → "Notion", "claw-link" → "Claw-Link".
  * Deterministic, so every member page names the group the same way.
@@ -226,7 +246,7 @@ export async function generateMetadata({
     const [result, detail, t, tTemplate] = await Promise.all([
       loadMcp(decodedIdentifier),
       // The same cached read as the page body's.
-      getPublicMcpDetail(decodedIdentifier, mcpOverviewLocale(pageLocale)),
+      loadMcpDetail(decodedIdentifier, mcpOverviewLocale(pageLocale)),
       getTranslations({ locale: pageLocale, namespace: "mcp.detail" }),
       getTranslations({ locale: pageLocale, namespace: "mcp.template" }),
     ]);
@@ -336,11 +356,11 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
     // The related read needs the manifest's categories and the detail's
     // product group, so it starts as soon as those two cached reads resolve,
     // alongside auth and categories instead of after them (#389). A manifest
-    // failure (notFound / market outage) rejects this branch before any
-    // related read starts, with the same semantics as before.
+    // or detail failure (notFound / market outage) rejects this branch before
+    // any related read starts.
     Promise.all([
       loadMcp(decodedIdentifier),
-      getPublicMcpDetail(decodedIdentifier, overviewLocale),
+      loadMcpDetail(decodedIdentifier, overviewLocale),
     ]).then(async ([loaded, detail]) => {
       const group = productGroupView(
         detail.relatedProduct,

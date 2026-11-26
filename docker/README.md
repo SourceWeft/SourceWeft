@@ -124,6 +124,13 @@ login, file upload and model response.
 
 ## Health checks
 
+For an external monitor, the API also answers `GET /v1/health/ready`: it pings
+the database and reads one public catalog entry, each under a time budget, and
+returns 200 with each check's duration, or 503 naming the checks that failed.
+Give the monitor its own request timeout (10 seconds is enough): a process
+that is fully stalled cannot answer at all. The container health checks do not
+use this endpoint.
+
 The API answers `GET /v1/health` on port 3001 and the Web server `GET /` on
 port 3000. The worker and scheduler have no HTTP port; they renew a heartbeat
 while healthy, and this command checks it (exit 0 when healthy):

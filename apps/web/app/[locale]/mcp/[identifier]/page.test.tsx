@@ -1670,3 +1670,68 @@ describe("public MCP detail page agent prompt", () => {
     expect(await render()).not.toContain("Use with an agent");
   });
 });
+
+// Issue #767: a page whose content cannot be read fails; it is never served
+// as a 200 page without its README, AI overview and score.
+describe("public MCP detail page when the market cannot be read", () => {
+  it("404s an identifier the market does not have", async () => {
+    market.getPublicMcpManifest.mockRejectedValue({ status: 404 });
+    await expect(render()).rejects.toMatchObject({
+      digest: expect.stringContaining("404"),
+    });
+  });
+
+  it("5xxs a manifest outage", async () => {
+    const outage = Object.assign(new Error("down"), { status: 503 });
+    market.getPublicMcpManifest.mockRejectedValue(outage);
+    await expect(render()).rejects.toBe(outage);
+  });
+
+  it("5xxs when the manifest loads but the detail read fails or times out", async () => {
+    const timeout = Object.assign(new Error("timed out"), {
+      code: "MARKET_REQUEST_TIMEOUT",
+      status: 504,
+    });
+    market.getPublicMcpDetail.mockRejectedValue(timeout);
+    await expect(render()).rejects.toBe(timeout);
+    // The related list is not asked for once the page has failed.
+    expect(market.listPublicMcp).not.toHaveBeenCalled();
+  });
+
+  it("404s when the manifest loads but the detail is gone", async () => {
+    market.getPublicMcpDetail.mockRejectedValue({ status: 404 });
+    await expect(render()).rejects.toMatchObject({
+      digest: expect.stringContaining("404"),
+    });
+  });
+
+  it("still renders without the tool change log, which is an extra", async () => {
+    market.getPublicMcpDetail.mockResolvedValue({
+      readme: readme("ok"),
+      toolsRevision: {
+        source: "owner",
+        revision: 2,
+        observedAt: "2026-10-24T10:00:00.000Z",
+        lastConfirmedAt: "2026-10-24T10:00:00.000Z",
+      },
+      versions: [],
+    });
+    // What the soft reader answers on an outage.
+    market.getPublicMcpToolRevisions.mockResolvedValue(null);
+    const html = await render();
+    expect(market.getPublicMcpToolRevisions).toHaveBeenCalledWith(IDENTIFIER);
+    expect(readmeSection(html)).toBeDefined();
+  });
+
+  it("keeps a fallback title in the metadata while the page itself fails", async () => {
+    market.getPublicMcpDetail.mockRejectedValue(new Error("down"));
+    await expect(
+      generateMetadata({
+        params: Promise.resolve({
+          identifier: encodeURIComponent(IDENTIFIER),
+          locale: "en",
+        }),
+      }),
+    ).resolves.toEqual({ title: expect.any(String) });
+  });
+});
