@@ -59,8 +59,9 @@ function assertCredentialUsername(credential: ConnectorCredentialInput): void {
 
 /**
  * The readiness reason a selection-driven connector reports while nothing is
- * selected. It blocks sync (every sync is skipped with it) but never creating
- * or editing the connector, because the selection is made after it exists.
+ * selected. For a `none`-auth connector that declares a selection it blocks
+ * sync (every sync is skipped with it) but not creating or editing the
+ * connector, because the selection is made after it exists.
  */
 const SELECTION_REQUIRED_REASON = "selection_required";
 
@@ -155,13 +156,24 @@ export class ConnectorService {
 
   private async requireConfigReady(
     input: Parameters<ConnectorService["evaluateConfigReadiness"]>[0],
+    options: {
+      /** Set only by the `none`-auth create and edit paths of a connector whose
+       * manifest declares a `selection`: such a connector starts with nothing
+       * selected and the person picks what to index after it exists, so "no
+       * selection yet" is not a configuration fault. The sync readiness gate
+       * still skips every sync until a selection exists. Every other caller,
+       * connector and reason is rejected. */
+      allowSelectionPending?: boolean;
+    } = {},
   ) {
     const readiness = await this.evaluateConfigReadiness(input);
-    // A connector driven by a selection starts with nothing selected and the
-    // person picks what to index after it exists, so "no selection yet" is not
-    // a configuration fault. The sync readiness gate still skips every sync
-    // until a selection exists.
-    if (!readiness.ready && readiness.reason !== SELECTION_REQUIRED_REASON) {
+    if (
+      !readiness.ready &&
+      !(
+        options.allowSelectionPending &&
+        readiness.reason === SELECTION_REQUIRED_REASON
+      )
+    ) {
       throw new ConnectorError(
         400,
         "CONNECTOR_CONFIG_NOT_READY",
@@ -409,14 +421,17 @@ export class ConnectorService {
       );
     }
     if (isNone) {
-      await this.requireConfigReady({
-        teamId: workspace.organizationId,
-        workspaceId: workspace.id,
-        connectorType: input.connectorType,
-        connectorId: "pending",
-        connectorName: input.name,
-        configJson,
-      });
+      await this.requireConfigReady(
+        {
+          teamId: workspace.organizationId,
+          workspaceId: workspace.id,
+          connectorType: input.connectorType,
+          connectorId: "pending",
+          connectorName: input.name,
+          configJson,
+        },
+        { allowSelectionPending: manifest.selection !== undefined },
+      );
     }
 
     if (isCredential) {
@@ -768,14 +783,17 @@ export class ConnectorService {
       );
     }
     if (input.configJson !== undefined && manifest.auth?.kind === "none") {
-      await this.requireConfigReady({
-        teamId: workspace.organizationId,
-        workspaceId: workspace.id,
-        connectorType: current.connectorType,
-        connectorId: current.id,
-        connectorName: input.name ?? current.name,
-        configJson: nextConfig,
-      });
+      await this.requireConfigReady(
+        {
+          teamId: workspace.organizationId,
+          workspaceId: workspace.id,
+          connectorType: current.connectorType,
+          connectorId: current.id,
+          connectorName: input.name ?? current.name,
+          configJson: nextConfig,
+        },
+        { allowSelectionPending: manifest.selection !== undefined },
+      );
     }
     const connector = await updateSourceConnectorRecord({
       teamId: workspace.organizationId,

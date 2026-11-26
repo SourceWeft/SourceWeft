@@ -11,7 +11,7 @@ import type {
 /**
  * Seam check for a `none`-auth connector that is driven by a selection
  * (`configJson.items`): an empty selection, the readiness gate, reconciliation
- * of a complete or incomplete scan, the sync scope hash, and the selection
+ * of a complete scan or one with nothing to reconcile, the sync scope hash, and the selection
  * actions.
  *
  * The backend never imports a capability package, so this file drives the real
@@ -177,7 +177,50 @@ const syntheticAdapter = {
   executeAction,
 } as unknown as ConnectorAdapter;
 
-const registry = new ConnectorRegistry([syntheticAdapter]);
+/** The same synthetic forum under other manifests, to prove the
+ * `selection_required` exemption is scoped to `none` auth AND a declared
+ * selection. */
+function variantAdapter(
+  type: string,
+  auth: Record<string, unknown>,
+  withSelection: boolean,
+) {
+  const manifest = {
+    ...syntheticManifest,
+    type,
+    auth,
+    ...(withSelection ? {} : { selection: undefined }),
+  } as unknown as ConnectorManifest;
+  return {
+    getManifest: () => manifest,
+    checkSyncReadiness,
+    ...(auth.kind === "credential"
+      ? { credentialIdentity: () => "identity:forum" }
+      : {}),
+    async *discover() {},
+    extract: async ({ item }: { item: unknown }) => ({ item }),
+    executeAction,
+  } as unknown as ConnectorAdapter;
+}
+
+const PLAIN_NONE_TYPE = "synthetic-plain-none";
+const CREDENTIAL_SELECTION_TYPE = "synthetic-credential-selection";
+const CREDENTIAL_PLAIN_TYPE = "synthetic-credential-plain";
+
+const registry = new ConnectorRegistry([
+  syntheticAdapter,
+  variantAdapter(PLAIN_NONE_TYPE, { kind: "none" }, false),
+  variantAdapter(
+    CREDENTIAL_SELECTION_TYPE,
+    { kind: "credential", scheme: "api_key" },
+    true,
+  ),
+  variantAdapter(
+    CREDENTIAL_PLAIN_TYPE,
+    { kind: "credential", scheme: "api_key" },
+    false,
+  ),
+]);
 const service = new ConnectorService(registry);
 
 type ConnectorRow = SourceConnectorRecord & {
@@ -581,7 +624,7 @@ describe("reconciliation of a scan", () => {
     assert.equal(lastRunPatch("succeeded") !== undefined, true);
   });
 
-  test("an incomplete scan (no items, no reconcile, no checkpoint) archives nothing and commits no checkpoint", async () => {
+  test("a scan with nothing to reconcile (no items, no reconcile, no checkpoint) archives nothing and commits no checkpoint", async () => {
     seedConnector(SELECTED);
     scanYielding({
       items: [],
@@ -770,6 +813,68 @@ describe("a selection connector with nothing selected yet", () => {
       assert.equal(patchError.details?.reason, reason);
       assert.equal(repo.createSourceConnectorRecord.mock.calls.length, 0);
       assert.equal(repo.updateSourceConnectorRecord.mock.calls.length, 0);
+    },
+  );
+
+  test("a none connector WITHOUT a declared selection still refuses selection_required on create and PATCH", async () => {
+    seedConnector(SELECTED, { connectorType: PLAIN_NONE_TYPE });
+    checkSyncReadiness.mockResolvedValue({
+      ready: false,
+      reason: "selection_required",
+      message: "Choose what to index first.",
+    });
+
+    const createError = await rejection(
+      service.createConnector({
+        workspaceId: "workspace",
+        userId: "user",
+        connectorType: PLAIN_NONE_TYPE,
+        name: "Plain",
+        configJson: EMPTY,
+      }),
+    );
+    assert.equal(createError.statusCode, 400);
+    assert.equal(createError.code, "CONNECTOR_CONFIG_NOT_READY");
+    assert.equal(createError.details?.reason, "selection_required");
+
+    const patchError = await rejection(
+      service.updateConnector({
+        workspaceId: "workspace",
+        userId: "user",
+        connectorId: "conn_1",
+        configJson: EMPTY,
+      }),
+    );
+    assert.equal(patchError.code, "CONNECTOR_CONFIG_NOT_READY");
+    assert.equal(patchError.details?.reason, "selection_required");
+    assert.equal(repo.createSourceConnectorRecord.mock.calls.length, 0);
+    assert.equal(repo.updateSourceConnectorRecord.mock.calls.length, 0);
+  });
+
+  test.each([CREDENTIAL_SELECTION_TYPE, CREDENTIAL_PLAIN_TYPE])(
+    "a credential connector (%s) still refuses selection_required on create",
+    async (connectorType) => {
+      checkSyncReadiness.mockResolvedValue({
+        ready: false,
+        reason: "selection_required",
+        message: "Choose what to index first.",
+      });
+
+      const error = await rejection(
+        service.createConnector({
+          workspaceId: "workspace",
+          userId: "user",
+          connectorType,
+          name: "Credentialed",
+          configJson: EMPTY,
+          credential: { username: "users/1", secret: "s3cret-value" },
+        }),
+      );
+
+      assert.equal(error.statusCode, 400);
+      assert.equal(error.code, "CONNECTOR_CONFIG_NOT_READY");
+      assert.equal(error.details?.reason, "selection_required");
+      assert.equal(repo.createCredentialConnectorRecord.mock.calls.length, 0);
     },
   );
 
