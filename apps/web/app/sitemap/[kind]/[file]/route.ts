@@ -2,6 +2,8 @@ import {
   catalogSitemapKindSchema,
   catalogSitemapPrefixSchema,
 } from "@sourceweft/market-sdk";
+import { listPublishedBlogSitemapEntries } from "../../../../lib/blog-db";
+import { blogSitemapEntries } from "../../../../lib/sitemap-blog";
 import { getPublicSitemapShard } from "../../../../lib/sitemap-catalog";
 import { buildStaticSitemap } from "../../../../lib/sitemap-static";
 import { catalogSitemapEntries } from "../../../../lib/sitemap-entries";
@@ -24,9 +26,13 @@ export async function GET(
       headers: { "Cache-Control": "no-store" },
     });
   try {
-    if (kind === "static") {
+    if (kind === "static" || kind === "blog") {
       if (!/^(0|[1-9][0-9]{0,4})\.xml$/.test(file)) return missing();
-      const pages = splitStaticSitemap(await buildStaticSitemap());
+      const pages = splitStaticSitemap(
+        kind === "static"
+          ? await buildStaticSitemap()
+          : blogSitemapEntries(await listPublishedBlogSitemapEntries()),
+      );
       const xml = pages[Number(file.slice(0, -4))];
       return xml === undefined ? missing() : sitemapResponse(xml);
     }

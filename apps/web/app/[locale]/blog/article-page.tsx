@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   ArrowRight,
   CalendarDays,
+  ChevronRight,
   Clock3,
   LinkIcon,
 } from "lucide-react";
@@ -16,11 +17,14 @@ import {
   absoluteBlogPostUrl,
   blogPostPath,
   getBlogArticleSiblings,
+  listPublishedBlogPostsInLocale,
   listRelatedBlogPosts,
   getPublishedBlogPost,
   type BlogPostDetail,
   type BlogPostSummary,
 } from "../../../lib/blog-db";
+import { blogFeedAlternate } from "../../../lib/blog-feed";
+import { adjacentBlogPosts } from "../../../lib/blog-links";
 import { CopyShareUrlButton } from "./copy-share-url-button";
 import { SourceWeftFooter } from "../../_landing/components/sourceweft-footer";
 import { SourceWeftHeader } from "../../_landing/components/sourceweft-header";
@@ -64,11 +68,16 @@ export async function generateBlogArticleMetadata(input: {
     ]),
   );
   const imageUrl = post.ogImagePublicUrl || post.coverPublicUrl || OG_IMAGE.url;
+  const feedTitle = (
+    await getTranslations({ locale: postLocale, namespace: "blog.meta" })
+  )("ogTitle");
 
   return {
     alternates: {
       canonical: canonicalUrl,
       ...(Object.keys(languages).length > 1 ? { languages } : {}),
+      // The feed of the article's own language, like the canonical above.
+      types: blogFeedAlternate(postLocale, feedTitle),
     },
     description,
     openGraph: {
@@ -305,6 +314,133 @@ function BlogPostingJsonLd({ post }: { post: BlogPostDetail }) {
   return <JsonLd data={jsonLd} />;
 }
 
+type Crumb = { href: string; name: string; url: string };
+
+// One list feeds both the visible trail and the structured data, so the two
+// cannot name different pages. Visible links keep the reader's language; the
+// structured data uses the article's own language, like the canonical URL.
+function articleCrumbs(input: {
+  blogLabel: string;
+  browsingLocale: Locale;
+  homeLabel: string;
+  post: BlogPostDetail;
+}): Crumb[] {
+  const postLocale = uiLocale(input.post.locale);
+  const crumb = (path: string, name: string): Crumb => ({
+    href: addLocalePrefix(path, input.browsingLocale),
+    name,
+    url: `${SITE_URL}${addLocalePrefix(path, postLocale)}`,
+  });
+  return [
+    crumb("/", input.homeLabel),
+    crumb("/blog", input.blogLabel),
+    crumb(blogPostPath(input.post.slug), input.post.title),
+  ];
+}
+
+function BreadcrumbJsonLd({ crumbs }: { crumbs: Crumb[] }) {
+  return (
+    <JsonLd
+      data={{
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        itemListElement: crumbs.map((crumb, index) => ({
+          "@type": "ListItem",
+          item: crumb.url,
+          name: crumb.name,
+          position: index + 1,
+        })),
+      }}
+    />
+  );
+}
+
+function Breadcrumb({ crumbs, label }: { crumbs: Crumb[]; label: string }) {
+  return (
+    <nav aria-label={label} className="mb-9">
+      <ol className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-zinc-500 dark:text-zinc-400">
+        {crumbs.map((crumb, index) => {
+          const current = index === crumbs.length - 1;
+          return (
+            <li
+              key={crumb.href}
+              className={`flex items-center gap-2 ${current ? "min-w-0" : ""}`}
+            >
+              {index > 0 ? (
+                <ChevronRight aria-hidden className="size-3.5 shrink-0" />
+              ) : null}
+              {current ? (
+                <span
+                  aria-current="page"
+                  className="truncate text-zinc-700 dark:text-zinc-200"
+                >
+                  {crumb.name}
+                </span>
+              ) : (
+                <Link
+                  href={crumb.href}
+                  className="transition-colors hover:text-zinc-950 dark:hover:text-white"
+                >
+                  {crumb.name}
+                </Link>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </nav>
+  );
+}
+
+async function AdjacentArticles({
+  newer,
+  older,
+}: {
+  newer: BlogPostSummary | null;
+  older: BlogPostSummary | null;
+}) {
+  if (!newer && !older) {
+    return null;
+  }
+  const t = await getTranslations("blog");
+  const linkClassName =
+    "group flex flex-col gap-2 rounded-lg border border-zinc-300 bg-white/48 p-5 transition-colors hover:border-zinc-950/40 hover:bg-white/82 dark:border-white/10 dark:bg-white/[0.03] dark:hover:border-white/35 dark:hover:bg-white/[0.055]";
+  const labelClassName =
+    "inline-flex items-center gap-1.5 text-xs font-semibold uppercase text-zinc-400";
+  const titleClassName =
+    "text-base font-semibold leading-snug text-zinc-950 dark:text-white";
+  return (
+    <nav
+      aria-label={t("article.moreArticles")}
+      className="mt-10 grid gap-4 sm:grid-cols-2"
+    >
+      {older ? (
+        <Link href={older.urlPath} className={linkClassName}>
+          <span className={labelClassName}>
+            <ArrowLeft aria-hidden className="size-3.5" />
+            {t("article.olderArticle")}
+          </span>
+          <span className={titleClassName}>{older.title}</span>
+        </Link>
+      ) : (
+        <span aria-hidden className="hidden sm:block" />
+      )}
+      {newer ? (
+        <Link
+          href={newer.urlPath}
+          className={`${linkClassName} sm:items-end sm:text-right`}
+        >
+          <span className={labelClassName}>
+            {t("article.newerArticle")}
+            <ArrowRight aria-hidden className="size-3.5" />
+          </span>
+          <span className={titleClassName}>{newer.title}</span>
+        </Link>
+      ) : null}
+    </nav>
+  );
+}
+
 export async function BlogArticlePageContent(input: {
   slug: string;
   locale: Locale;
@@ -315,9 +451,11 @@ export async function BlogArticlePageContent(input: {
     notFound();
   }
 
-  const [t, initialAuthState, relatedPosts] = await Promise.all([
+  const postLocale = uiLocale(post.locale);
+  const [t, initialAuthState, localePosts, relatedPosts] = await Promise.all([
     getTranslations("blog"),
     resolveInitialLandingAuthState(),
+    listPublishedBlogPostsInLocale(postLocale),
     listRelatedBlogPosts({
       articleId: post.articleId,
       locale: post.locale,
@@ -327,23 +465,33 @@ export async function BlogArticlePageContent(input: {
   ]);
 
   const shareUrl = getShareUrl(post);
-  const backHref = addLocalePrefix("/blog", input.locale);
+  const crumbs = articleCrumbs({
+    blogLabel: t("article.breadcrumbBlog"),
+    browsingLocale: input.locale,
+    homeLabel: t("article.breadcrumbHome"),
+    post,
+  });
+  // Neighbours come from the article's own language, so their links are built
+  // for that language's list; keep the reader's language in the URL instead.
+  const adjacent = adjacentBlogPosts(localePosts, post);
+  const inBrowsingLocale = (neighbour: BlogPostSummary | null) =>
+    neighbour
+      ? {
+          ...neighbour,
+          urlPath: addLocalePrefix(blogPostPath(neighbour.slug), input.locale),
+        }
+      : null;
 
   return (
     <main className="min-h-svh bg-[#f7f4ed] text-zinc-950 dark:bg-zinc-950 dark:text-white">
       <BlogPostingJsonLd post={post} />
+      <BreadcrumbJsonLd crumbs={crumbs} />
       <SourceWeftHeader authState={initialAuthState} />
       <section className="border-b border-zinc-300 dark:border-white/10">
         <div
           className={`mx-auto pb-10 pt-24 lg:pb-14 lg:pt-28 ${marketingContainerClassName}`}
         >
-          <Link
-            href={backHref}
-            className="mb-9 inline-flex items-center gap-2 text-sm text-zinc-500 transition-colors hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-white"
-          >
-            <ArrowLeft className="size-4" />
-            {t("article.backToBlog")}
-          </Link>
+          <Breadcrumb crumbs={crumbs} label={t("article.breadcrumbLabel")} />
           <div className="mx-auto max-w-4xl text-center">
             {post.tags.length > 0 ? (
               <div className="mb-7 flex flex-wrap items-center justify-center gap-3">
@@ -373,6 +521,10 @@ export async function BlogArticlePageContent(input: {
           </div>
           <CopyShareUrlButton url={shareUrl} />
         </div>
+        <AdjacentArticles
+          newer={inBrowsingLocale(adjacent.newer)}
+          older={inBrowsingLocale(adjacent.older)}
+        />
       </section>
 
       <ArticleFooter relatedPosts={relatedPosts} />

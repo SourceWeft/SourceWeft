@@ -14,6 +14,7 @@ import { marketingContainerClassName } from "../../_landing/components/marketing
 import { resolveInitialLandingAuthState } from "../../_landing/auth-state-server";
 import { OG_IMAGE, SITE_NAME } from "../../seo";
 import { routing } from "../../../i18n/routing";
+import { blogFeedAlternate } from "../../../lib/blog-feed";
 import { buildAlternates } from "../../../lib/i18n/metadata";
 import {
   EmptyBlogState,
@@ -38,7 +39,7 @@ export async function generateMetadata({
   return {
     title,
     description,
-    alternates,
+    alternates: { ...alternates, types: blogFeedAlternate(locale, t("ogTitle")) },
     openGraph: {
       description,
       images: [OG_IMAGE],

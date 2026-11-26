@@ -11,6 +11,7 @@ import {
   listPublishedBlogTags,
   type BlogPostSummary,
 } from "../../../../../lib/blog-db";
+import { blogFeedAlternate } from "../../../../../lib/blog-feed";
 import { toUrlSlug } from "../../../../../lib/slug";
 import { SourceWeftFooter } from "../../../../_landing/components/sourceweft-footer";
 import { SourceWeftHeader } from "../../../../_landing/components/sourceweft-header";
@@ -59,9 +60,12 @@ export async function generateMetadata({
   const title = t("metaTitle", { tag });
   const description = t("description", { count: posts.length, tag });
   const url = `${SITE_URL}${addLocalePrefix(blogTagPath(tag), locale)}`;
+  const feedTitle = (await getTranslations({ locale, namespace: "blog.meta" }))(
+    "ogTitle",
+  );
 
   return {
-    alternates: { canonical: url },
+    alternates: { canonical: url, types: blogFeedAlternate(locale, feedTitle) },
     description,
     openGraph: {
       description,

@@ -12,10 +12,12 @@ import { useTranslations } from "next-intl";
 export function SkillAiOverviewView({
   overview,
   requestedLocale,
+  className,
 }: {
   overview: MarketSkillAiOverview;
   // The language asked for; a note shows when the overview fell back.
   requestedLocale?: string;
+  className?: string;
 }) {
   const t = useTranslations("dashboardSkillOverview.block");
   const fellBack =
@@ -23,6 +25,7 @@ export function SkillAiOverviewView({
 
   return (
     <CatalogAiOverview
+      className={className}
       data-testid="skill-ai-overview"
       overview={overview}
       labels={{

@@ -7,6 +7,7 @@ import { getTranslations, setRequestLocale } from "next-intl/server";
 import { notFound } from "next/navigation";
 
 import LandingV1 from "../_landing/v1";
+import { LatestArticlesSection } from "./blog/_components/blog-link-sections";
 import type { LandingAuthState } from "../_landing/components/use-landing-auth-state";
 import { MobileHomeGate } from "../mobile-home-gate";
 import { routing } from "../../i18n/routing";
@@ -14,6 +15,7 @@ import { buildAlternates } from "../../lib/i18n/metadata";
 
 type LandingPageProps = {
   initialAuthState?: LandingAuthState;
+  latestArticles: ReactNode;
   marketStats: ReactNode;
 };
 
@@ -53,6 +55,7 @@ export default async function RootPage({ params }: PageProps<"/[locale]">) {
   return (
     <MobileHomeGate>
       <LandingPage
+        latestArticles={<LatestArticlesSection />}
         marketStats={
           <Suspense fallback={<MarketStatsView loading />}>
             <MarketStats />

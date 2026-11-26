@@ -514,9 +514,11 @@ export function PricingSection({
 
 export default function LandingV1({
   initialAuthState,
+  latestArticles,
   marketStats,
 }: {
   initialAuthState?: LandingAuthState;
+  latestArticles: ReactNode;
   marketStats: ReactNode;
 }) {
   const authState = useLandingAuthState(initialAuthState);
@@ -529,6 +531,7 @@ export default function LandingV1({
         <SocialProof />
         <FeaturesSection />
         <HowItWorks />
+        {latestArticles}
         <PricingSection authState={authState} />
       </main>
       <SourceWeftFooter authState={authState} />

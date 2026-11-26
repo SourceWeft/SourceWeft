@@ -3,6 +3,7 @@ import {
   marketSkillLocale,
 } from "../../../../../lib/market-skills";
 import { SkillAiOverviewView } from "../../../../dashboard/skills/_components/community/skill-ai-overview-view";
+import { MethodLink } from "../../../about/method/method-link";
 import type { PublicSkillSlotProps } from "./slot-props";
 
 /**
@@ -28,9 +29,16 @@ export async function PublicSkillOverview({
   }
   if (!overview) return null;
   return (
-    <SkillAiOverviewView
-      overview={overview}
-      requestedLocale={requested}
-    />
+    <>
+      <SkillAiOverviewView
+        className="mb-0"
+        overview={overview}
+        requestedLocale={requested}
+      />
+      <MethodLink
+        className="mb-4 mt-2 text-zinc-500 dark:text-zinc-400"
+        topic="overview"
+      />
+    </>
   );
 }

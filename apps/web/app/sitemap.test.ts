@@ -1,8 +1,12 @@
 import { beforeEach, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
+  blog: vi.fn(),
   index: vi.fn(),
   shard: vi.fn(),
   static: vi.fn(),
+}));
+vi.mock("../lib/blog-db", () => ({
+  listPublishedBlogSitemapEntries: mocks.blog,
 }));
 vi.mock("../lib/sitemap-catalog", () => ({
   getPublicSitemapIndex: mocks.index,
@@ -15,6 +19,7 @@ import { SITE_URL } from "./seo";
 import { catalogSitemapEntries } from "../lib/sitemap-entries";
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.blog.mockResolvedValue([]);
   mocks.index.mockResolvedValue({ shards: [] });
   mocks.static.mockResolvedValue([{ url: SITE_URL + "/" }]);
 });
@@ -88,4 +93,62 @@ it("rejects invalid paths and missing static shards without a catalog query", as
       ).status,
     ).toBe(404);
   expect(mocks.shard).not.toHaveBeenCalled();
+});
+
+const article = (locale: "en" | "zh-CN", slug: string) => ({
+  articleId: "what-is-mcp",
+  canonicalUrl: null,
+  locale,
+  publishedAt: new Date("2026-11-20T00:00:00.000Z"),
+  slug,
+  updatedAt: new Date("2026-11-22T08:30:00.000Z"),
+  urlPath: locale === "en" ? `/blog/${slug}` : `/${locale}/blog/${slug}`,
+});
+it("references a blog sitemap from the index only while articles are published", async () => {
+  const empty = await (await index()).text();
+  expect(empty).not.toContain("sitemap-blog-");
+
+  mocks.blog.mockResolvedValue([article("en", "what-is-mcp")]);
+  const xml = await (await index()).text();
+  expect(xml.match(/<sitemap>/g)).toHaveLength(2);
+  expect(xml).toContain(`<loc>${SITE_URL}/sitemap-static-0.xml</loc>`);
+  expect(xml).toContain(`<loc>${SITE_URL}/sitemap-blog-0.xml</loc>`);
+});
+it("serves the blog sitemap with each article's own update date and translations", async () => {
+  mocks.blog.mockResolvedValue([
+    article("en", "what-is-mcp"),
+    article("zh-CN", "what-is-mcp-zh-cn"),
+  ]);
+  const response = await shard(new Request("https://test"), {
+    params: Promise.resolve({ kind: "blog", file: "0.xml" }),
+  });
+  const xml = await response.text();
+  expect(response.status).toBe(200);
+  expect(response.headers.get("content-type")).toContain("application/xml");
+  expect(xml.match(/<url>/g)).toHaveLength(2);
+  expect(xml).toContain(`<loc>${SITE_URL}/blog/what-is-mcp</loc>`);
+  expect(xml).toContain(`<loc>${SITE_URL}/zh-CN/blog/what-is-mcp-zh-cn</loc>`);
+  expect(xml.match(/<lastmod>2026-11-22T08:30:00.000Z<\/lastmod>/g)).toHaveLength(2);
+  expect(xml).toContain(
+    `<xhtml:link rel="alternate" hreflang="zh-CN" href="${SITE_URL}/zh-CN/blog/what-is-mcp-zh-cn"/>`,
+  );
+  // The static sitemap is built without the articles, and is not consulted.
+  expect(mocks.static).not.toHaveBeenCalled();
+  expect(
+    (
+      await shard(new Request("https://test"), {
+        params: Promise.resolve({ kind: "blog", file: "1.xml" }),
+      })
+    ).status,
+  ).toBe(404);
+});
+it("answers 503 for the blog sitemap when the articles cannot be read", async () => {
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  mocks.blog.mockRejectedValue(new Error("offline"));
+  const child = await shard(new Request("https://test"), {
+    params: Promise.resolve({ kind: "blog", file: "0.xml" }),
+  });
+  expect(child.status).toBe(503);
+  expect((await index()).status).toBe(503);
+  log.mockRestore();
 });

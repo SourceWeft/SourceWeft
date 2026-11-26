@@ -12,6 +12,7 @@ import { mcpOverviewLocale } from "../../../../../lib/mcp-ai-overview";
 
 import { resolveInitialLandingAuthState } from "../../../../_landing/auth-state-server";
 import { SourceWeftFooter } from "../../../../_landing/components/sourceweft-footer";
+import { BlogGuidesSection } from "../../../blog/_components/blog-link-sections";
 import { SourceWeftHeader } from "../../../../_landing/components/sourceweft-header";
 import { marketingContainerClassName } from "../../../../_landing/components/marketing-container";
 import { formatList, formatNumber } from "@sourceweft/i18n/format";
@@ -269,6 +270,8 @@ export default async function PublicMcpCategoryPage({
         }
         total={facets.total}
       />
+
+      <BlogGuidesSection categorySlug={category.slug} directory="mcp" />
 
       <SourceWeftFooter authState={authState} />
     </main>

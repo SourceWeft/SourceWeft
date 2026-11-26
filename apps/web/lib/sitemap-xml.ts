@@ -8,7 +8,7 @@ const URLSET =
   '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">\n';
 const END = "</urlset>";
 
-function escapeXml(value: string): string {
+export function escapeXml(value: string): string {
   // XML 1.0 forbids these code points; matching them is intentional.
   // eslint-disable-next-line no-control-regex
   if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/u.test(value))

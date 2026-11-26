@@ -55,6 +55,7 @@ export type BlogSitemapEntry = {
   locale: BlogLocale;
   slug: string;
   urlPath: string;
+  canonicalUrl: string | null;
   updatedAt: Date | null;
   publishedAt: Date | null;
 };
@@ -194,6 +195,26 @@ export async function listPublishedBlogPosts(
     .map((row) => mapSummaryRow(row, browsingLocale));
 }
 
+// Only the rows written in `locale`, with no default-language fallback: what a
+// per-language feed lists and what "previous / next article" walks through.
+export async function listPublishedBlogPostsInLocale(locale: Locale) {
+  return (await cachedBlogPostRows(locale)).map((row) =>
+    mapSummaryRow(row, locale),
+  );
+}
+
+// For link blocks on pages that are not part of the blog (home, directories):
+// those pages must keep rendering when the blog tables cannot be read, so a
+// failed read is logged and the block is left out.
+export async function listBlogPostsForLinkBlock(browsingLocale: Locale) {
+  try {
+    return await listPublishedBlogPosts(browsingLocale);
+  } catch (error) {
+    console.error("Blog link block unavailable", error);
+    return [];
+  }
+}
+
 const cachedBlogTagRows = unstable_cache(
   async (locales: string[]) => (await queryPublishedBlogTagRows(locales)).rows,
   ["blog-published-tags"],
@@ -323,6 +344,7 @@ type BlogSitemapRow = {
   article_id: string;
   locale: string;
   slug: string;
+  canonical_url: string | null;
   updated_at: Date | string | null;
   published_at: Date | string | null;
 };
@@ -336,7 +358,7 @@ const cachedBlogSitemapRows = unstable_cache(
 async function queryBlogSitemapRows() {
   return getPool().query<BlogSitemapRow>(
     `
-      select article_id, locale, slug, updated_at, published_at
+      select article_id, locale, slug, canonical_url, updated_at, published_at
       from blog_posts
       where sync_enabled = true
         and status = 'published'
@@ -359,6 +381,7 @@ export async function listPublishedBlogSitemapEntries() {
           locale: row.locale as BlogLocale,
           slug: row.slug,
           urlPath: addLocalePrefix(blogPostPath(row.slug), row.locale as Locale),
+          canonicalUrl: row.canonical_url,
           updatedAt: normalizeDate(row.updated_at),
           publishedAt: normalizeDate(row.published_at),
         }) satisfies BlogSitemapEntry,

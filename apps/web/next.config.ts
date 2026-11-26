@@ -143,8 +143,15 @@ const nextConfig: NextConfig = {
     // lives below /sitemap and is excluded from locale negotiation.
     return [
       {
-        source: "/sitemap-:kind(mcp|skills|static)-:file",
+        source: "/sitemap-:kind(mcp|skills|static|blog)-:file",
         destination: "/sitemap/:kind/:file",
+      },
+      // Files with an extension skip the proxy, so the default language's feed
+      // is mapped onto its locale segment here; `/zh-CN/blog/feed.xml` and
+      // `/zh-TW/blog/feed.xml` already match the route as they are.
+      {
+        source: "/blog/feed.xml",
+        destination: "/en/blog/feed.xml",
       },
     ];
   },

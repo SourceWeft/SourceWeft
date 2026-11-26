@@ -56,7 +56,8 @@
       "changelog": "Changelog",
       "privacy": "Privacy",
       "terms": "Terms",
-      "download": "Download"
+      "download": "Download",
+      "method": "About & method"
     },
     "copyright": "© {year} SourceWeft. All rights reserved.",
     "builtBy": "Built by SourceWeft"
@@ -301,12 +302,17 @@
       "body": "No posts have been published yet. Check back soon for product essays, implementation guides, and research operating patterns."
     },
     "article": {
-      "backToBlog": "Back to blog",
       "shareableUrl": "Shareable URL",
       "readNext": "Read next",
       "keepReading": "Keep reading",
       "relatedEssays": "Related essays",
-      "allPosts": "All posts"
+      "allPosts": "All posts",
+      "breadcrumbLabel": "Breadcrumb",
+      "breadcrumbHome": "Home",
+      "breadcrumbBlog": "Blog",
+      "moreArticles": "More articles",
+      "olderArticle": "Older article",
+      "newerArticle": "Newer article"
     },
     "tag": {
       "back": "Back to blog",
@@ -316,6 +322,20 @@
       "description": "{count, plural, one {# SourceWeft essay} other {# SourceWeft essays}} tagged #{tag}: product notes, implementation guides, and research workflows.",
       "emptyText": "No published essays carry this tag yet.",
       "browseAll": "Browse all essays"
+    },
+    "home": {
+      "eyebrow": "From the blog",
+      "heading": "Latest articles",
+      "viewAll": "All articles"
+    },
+    "guides": {
+      "eyebrow": "Guides",
+      "heading": {
+        "mcp": "Guides to choosing and using MCP servers",
+        "skills": "Guides to finding and installing agent skills",
+        "method": "Guides to checking a server or skill before you install it"
+      },
+      "viewAll": "All articles"
     }
   },
   "mcp": {
@@ -7530,6 +7550,124 @@
       "table": "Table",
       "infographic": "Infographic",
       "image": "Image"
+    }
+  },
+  "method": {
+    "meta": {
+      "title": "About & method",
+      "description": "How SourceWeft builds its MCP server and agent skill directories: where the data comes from, how AI overviews are written and checked, how the listing score is calculated, how publishers are verified, and who to contact."
+    },
+    "hero": {
+      "eyebrow": "About & method",
+      "heading": "How the MCP and skills directories are built",
+      "intro": "SourceWeft lists MCP servers and agent skills that other people publish. This page describes where each listing's data comes from, what is written by an AI model, what our checks cover, and what they do not.",
+      "updated": "Describes the site as of 26 November 2026."
+    },
+    "contents": "On this page",
+    "sources": {
+      "title": "Where the data comes from",
+      "mcpTitle": "MCP servers",
+      "mcp": [
+        "Listings are read from the official MCP Registry (registry.modelcontextprotocol.io) on a recurring schedule. Only the latest version of each server is listed.",
+        "The GitHub MCP Registry adds details such as stars, license and display name to servers that are already listed. It never adds a listing.",
+        "A signed-in member can also submit a public GitHub repository. A submission cannot replace a listing that came from the registry.",
+        "README files are fetched from the server's GitHub repository and fetched again every 7 days, or every 30 days when the repository has no README.",
+        "The tool list on a page is what the server's endpoint returned to a client without credentials. Servers shipped as npm or PyPI packages can be started in an isolated sandbox to list their tools."
+      ],
+      "skillsTitle": "Agent skills",
+      "skills": [
+        "Every public skill comes from a public GitHub repository, submitted by a member or by SourceWeft's own import tool. Both go through the same checks.",
+        "Each version is pinned to one commit on the repository's default branch. A commit that exists only in a fork is refused.",
+        "A SHA-256 hash is recorded for every file of a version. The SourceWeft CLI checks each file against those hashes and installs nothing if one differs.",
+        "The same content at a newer commit is not a new version.",
+        "If the repository is later deleted on GitHub, the listing stays. If its author removes it from SourceWeft, it is not listed again unless the author restores it."
+      ]
+    },
+    "overviews": {
+      "title": "How AI overviews are written and checked",
+      "intro": "The block labelled \"AI-generated overview\" on a server or skill page is written by an AI model. No person reviews an overview before it is published, and it can be wrong or incomplete.",
+      "items": [
+        "For an MCP server the model receives the registry description, facts from the manifest, the server's own instructions, an excerpt of the README, and tool descriptions.",
+        "For a skill the model receives SKILL.md and the list of file paths. The contents of other files are not sent.",
+        "The model is told to treat this material as third-party content to describe, to state only what it supports, and not to promote or rate the entry.",
+        "English, Simplified Chinese and Traditional Chinese are written separately from the same input and published together, or not at all.",
+        "An answer is rejected and requested again, up to three attempts, when it does not have the required structure, a field is empty or far too long, a category is not in our list, or a category is not backed by a passage of the input.",
+        "Links, HTML and Markdown are removed, so an overview is shown as plain text.",
+        "An MCP overview is written again when the registry description, the manifest facts, the server's instructions or the README change.",
+        "A SourceWeft admin can regenerate or hide an overview after it is published."
+      ]
+    },
+    "score": {
+      "title": "How the MCP listing score is calculated",
+      "intro": "The score on an MCP server page measures how complete the listing is. It is not a rating of the server and not a statement that the server is safe. Installs and reviews are not part of it, and neither is who publishes the server.",
+      "columns": {
+        "check": "Check",
+        "points": "Points",
+        "required": "Required"
+      },
+      "requiredWhen": {
+        "remote": "When the server has a remote endpoint",
+        "tools": "When the endpoint lists tools without credentials, or the package passed sandbox validation",
+        "always": "Always",
+        "never": "No"
+      },
+      "notes": [
+        "The percentage is the points of the checks met divided by the points of the checks that apply, rounded to a whole number.",
+        "\"Reached in the last 30 days\" is met when the endpoint answered a probe, or the package passed sandbox validation, in the last 30 days.",
+        "The description check is met by a description of at least 40 characters, an AI overview, or a description written by a verified owner.",
+        "The license check does not apply to a server that is only offered as a hosted service, so it is left out of that server's percentage."
+      ]
+    },
+    "scan": {
+      "title": "How skills are scanned",
+      "intro": "Skills have no score. Every version goes through an automated scan of its files. A match is a pattern in the text; it does not mean the skill is malicious, and the scan is not a security audit.",
+      "items": [
+        "A version is refused when it fetches and runs remote code, decodes and runs encoded commands, or contains text that tries to override the assistant's instructions.",
+        "Other findings are advisory and are shown on the skill's page as \"Automated scan notes\", for example reading credential files or environment variables, making outbound network calls, or asking for code-execution tools.",
+        "A version that was not held back becomes public on its own after a 10-minute wait. A skill that ships an executable binary waits for a SourceWeft admin instead.",
+        "When a new version of a public skill adds scan notes or scripts, the skill stays public and the version is queued for an admin to look at."
+      ]
+    },
+    "publishers": {
+      "title": "How publishers are verified",
+      "intro": "Verification says who controls a listing. It does not say that a server's tools or a skill's instructions are safe.",
+      "mcpTitle": "MCP servers",
+      "mcp": [
+        "The official MCP Registry checks that a server's namespace belongs to a domain or a GitHub account. SourceWeft shows that result and does not repeat the check.",
+        "A member can claim a server through GitHub: for a personal account, their linked GitHub account must be that account; for an organization, they must have the admin role in it, read with their own GitHub authorization.",
+        "A member can also claim a server through its domain, with a DNS TXT record at _sourceweft-claim or a file at /.well-known/sourceweft-claim.",
+        "A verified owner can set the listing's icon, summary, description, documentation, homepage and repository links, license and language, and can mark the server as deprecated. These edits are shown only while the claim is valid."
+      ],
+      "skillsTitle": "Agent skills",
+      "skills": [
+        "\"Verified\" on a skill is granted by a SourceWeft admin for the content of one version. A new version removes it until an admin looks again.",
+        "\"Featured\" marks skills from a short list of major vendors' own repositories. It is about who publishes the skill, not about its content.",
+        "The owner of a personal GitHub repository can claim it when their linked GitHub account is the repository's owner. A claim gives control of the listing, including removing it.",
+        "An organization's repository cannot be claimed by its members directly. A SourceWeft admin grants the claim after the organization contacts support."
+      ]
+    },
+    "reports": {
+      "title": "Reporting and removal",
+      "items": [
+        "Every skill page has a report form. A report never changes a skill by itself; a SourceWeft admin decides what to do.",
+        "If you hold rights in a listed skill and want it removed, write to the support address below with the skill's name or URL. We remove it and do not list it again.",
+        "MCP server pages have no report form. Write to the support address about a server listing."
+      ]
+    },
+    "responsibility": {
+      "title": "Who is responsible",
+      "body": "SourceWeft operates this site and the two directories. Listed servers and skills belong to their authors; SourceWeft does not write them and does not guarantee that they are accurate, safe, or fit for your purpose.",
+      "contactLabel": "Contact",
+      "sourceLabel": "Source code",
+      "sourceBody": "SourceWeft is open source under the Apache License 2.0, so the rules described on this page can be read in the repository.",
+      "legalLabel": "Legal",
+      "terms": "Terms",
+      "privacy": "Privacy"
+    },
+    "links": {
+      "overview": "How AI overviews are written and checked",
+      "score": "How this score is calculated",
+      "scan": "How the scan works"
     }
   }
 }
