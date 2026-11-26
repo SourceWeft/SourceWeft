@@ -44,8 +44,9 @@ export type ConnectorCatalogItem = {
    * adds another one. `feed_url` asks for a feed URL; `credential` asks for an
    * endpoint, a username and an app password (WebDAV); `login_flow` sends the
    * member to the provider's own browser login and the backend collects the
-   * credential (Nextcloud). */
-  addMode?: "feed_url" | "credential" | "login_flow";
+   * credential (Nextcloud); `api_key` asks for a library ID and a read-only API
+   * key (Zotero). */
+  addMode?: "feed_url" | "credential" | "login_flow" | "api_key";
   isIndexable: boolean;
   supportsPeriodicSync: boolean;
   supportsActions: boolean;
@@ -98,7 +99,46 @@ export type ConnectorCredentialInputValues = {
  * and never echoes the secret. */
 export type CredentialCheckResult = ConnectorReadinessState & {
   ready: boolean;
+  /** Adapter-specific facts of the check (Zotero reports `notesAccess`). Only
+   * present when the server returned any. */
+  metadata?: Record<string, unknown>;
 };
+
+/** The WebDAV credential check input: an endpoint and its username/password. */
+export type WebdavCredentialCheckInput = {
+  endpoint: string;
+  username: string;
+  secret: string;
+};
+
+/** A credential check for any connector type, built by that type's dialog: the
+ * connector's config and the credential to test. */
+export type GenericCredentialCheckInput = {
+  connectorType: string;
+  configJson: Record<string, unknown>;
+  credential: ConnectorCredentialInputValues;
+};
+
+/** The WebDAV create input: endpoint, credential and the folders to index. */
+export type WebdavCredentialAddInput = {
+  name: string;
+  endpoint: string;
+  username: string;
+  secret: string;
+  roots: string[];
+  periodicIndexingEnabled: boolean;
+};
+
+/** A create for any credential connector type, built by that type's dialog. */
+export type GenericCredentialAddInput = GenericCredentialCheckInput & {
+  name: string;
+  periodicIndexingEnabled: boolean;
+};
+
+export type CredentialCheckInput =
+  WebdavCredentialCheckInput | GenericCredentialCheckInput;
+export type CredentialAddInput =
+  WebdavCredentialAddInput | GenericCredentialAddInput;
 
 /**
  * Per-connector-type facts derived from its manifest (see

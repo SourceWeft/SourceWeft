@@ -90,6 +90,9 @@ x-sourceweft-env: &sourceweft-env
   # Restart api, worker and scheduler together after changing it; off hides it.
   # Also gates the Nextcloud connector (Login Flow v2), which ships in the same package.
   WEBDAV_CONNECTOR_ENABLED: ${WEBDAV_CONNECTOR_ENABLED:-false}
+  # Zotero (auth kind "credential"): a stored API key, no OAuth app.
+  # Restart api, worker and scheduler together after changing it; off hides it.
+  ZOTERO_CONNECTOR_ENABLED: ${ZOTERO_CONNECTOR_ENABLED:-false}
   BLOG_ASSET_MAX_BYTES: ${BLOG_ASSET_MAX_BYTES:-15728640}
   SOURCEWEFT_SANDBOX_ENABLED: ${SOURCEWEFT_SANDBOX_ENABLED:-false}
   SOURCEWEFT_SANDBOX_TOOL_APPROVAL_ENABLED: ${SOURCEWEFT_SANDBOX_TOOL_APPROVAL_ENABLED:-false}

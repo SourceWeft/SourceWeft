@@ -6,6 +6,7 @@ import {
   Folder,
   FolderGit2,
   FolderKanban,
+  FolderTree,
   Globe,
   LibraryBig,
   SquareKanban,
@@ -203,6 +204,36 @@ describe("selectionPresenters.confluence", () => {
     expect(presenter.kindIcons.site).toBe(Globe);
     expect(presenter.kindIcons.space).toBe(LibraryBig);
     expect(presenter.kindIcons.page).toBe(FileText);
+  });
+});
+
+describe("selectionPresenters.zotero", () => {
+  const presenter = selectionPresenters.zotero!;
+  const collection = {
+    id: "ABCD2345",
+    kind: "collection",
+    name: "Papers",
+    detail: null,
+    selectable: true,
+    expandable: true,
+    disabledReason: null,
+    size: null,
+    modifiedAt: null,
+  } as never;
+
+  test("registers an icon for collection", () => {
+    expect(presenter.kindIcons.collection).toBe(FolderTree);
+  });
+
+  test("is indexed: a selected collection is a container that maps to no source", () => {
+    expect(presenter.indexing?.externalIdFor(collection)).toBeNull();
+    expect(
+      presenter.indexing?.containerIndexedCount({
+        item: collection,
+        described: null,
+        sources: [],
+      }),
+    ).toBeNull();
   });
 });
 

@@ -124,7 +124,8 @@ const noneAuthManifestSchema = z.object({
 /**
  * A connector authorized by a username and secret the member enters directly
  * (e.g. WebDAV Basic auth), stored as an encrypted account. It has no OAuth
- * exchange or refresh. `scheme` names how the credential is presented.
+ * exchange or refresh. `scheme` names how the credential is presented: `basic`
+ * is HTTP Basic, `api_key` is a single provider API key header.
  *
  * `flow: "login_flow"` marks a connector whose credential is obtained through a
  * server-driven browser login (the adapter implements
@@ -132,7 +133,7 @@ const noneAuthManifestSchema = z.object({
  */
 const credentialAuthManifestSchema = z.object({
   kind: z.literal("credential"),
-  scheme: z.literal("basic"),
+  scheme: z.enum(["basic", "api_key"]),
   flow: z.literal("login_flow").optional(),
 });
 

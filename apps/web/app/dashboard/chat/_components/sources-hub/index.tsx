@@ -1543,7 +1543,9 @@ export function SourcesHub({
       />
 
       <RotateCredentialDialog
+        configJson={rotateCredentialConnector?.raw.configJson ?? null}
         connectorName={rotateCredentialConnector?.name ?? ""}
+        connectorType={rotateCredentialConnector?.raw.connectorType ?? null}
         initialUsername={
           rotateCredentialConnector?.raw.credentialDisplayName ?? null
         }

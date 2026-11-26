@@ -3488,7 +3488,8 @@
         "connectedConfigure": "OAuth 已連接。設定此連接器以啟用同步。",
         "available": "可透過 {name} OAuth 進行連接。",
         "availableAddFeed": "新增公開 RSS 或 Atom 訂閱源的網址。",
-        "availableLoginFlow": "在瀏覽器中登入 {name} 以進行連接。"
+        "availableLoginFlow": "在瀏覽器中登入 {name} 以進行連接。",
+        "availableAddApiKey": "使用唯讀 API 金鑰新增 Zotero 文庫。"
       },
       "syncBlock": {
         "pagesLimit": "頁數額度已用完。上次同步索引了 {count} 條內容後暫停，額度恢復後會自動繼續同步。",
@@ -3618,6 +3619,52 @@
           "failed": "無法完成連接，請重試。"
         },
         "disconnectNote": "SourceWeft 會嘗試移除它建立的應用專用密碼，但如果沒有成功，你可以在 Nextcloud 的「設定 > 安全」中將其刪除。"
+      },
+      "zotero": {
+        "libraryTypeLabel": "文庫類型",
+        "libraryTypePersonal": "個人文庫",
+        "libraryTypeGroup": "群組文庫",
+        "libraryIdLabel": "文庫 ID",
+        "libraryIdHintPersonal": "你的個人 userID，顯示在 zotero.org/settings/keys 頁面上，是一串數字，不是使用者名稱。",
+        "libraryIdHintGroup": "群組網址中的數字，例如 zotero.org/groups/2205533/team_name 中的 2205533。",
+        "apiKeyLabel": "API 金鑰",
+        "apiKeyHint": "請在 zotero.org/settings/keys 建立唯讀金鑰：允許存取文庫和筆記，不要授予寫入權限。若是群組文庫，金鑰需要擁有該群組的讀取權限。",
+        "nameLabel": "名稱（選填）",
+        "dialog": {
+          "title": "連接 Zotero 文庫",
+          "description": "輸入 Zotero 文庫 ID 和唯讀 API 金鑰。SourceWeft 會先檢查金鑰，再為你的文庫建立索引並保持同步。連接後可以只選擇部分分類。",
+          "check": "檢查金鑰",
+          "checking": "檢查中…",
+          "connected": "文庫已驗證",
+          "add": "新增文庫",
+          "autoSync": "自動同步",
+          "autoSyncHint": "定期檢查新增和變更的條目。預設關閉；你隨時可以手動同步。",
+          "invalidLibraryId": "請輸入純數字的文庫 ID（最多 12 位，且不能以 0 開頭）。",
+          "invalidApiKey": "請輸入不含空格的 API 金鑰。",
+          "checkFailed": "無法連接到 Zotero，請重試。",
+          "notesAccessWarning": "此金鑰無法讀取筆記，因此筆記和批註不會被索引。建立帶有筆記存取權限的金鑰即可包含它們。",
+          "nameConflict": "此工作區中已存在同名連接器。請更改名稱，或使用已有的連接器。",
+          "accountConflict": "此文庫已在此工作區中連接。",
+          "credentialNotAllowed": "此部署不允許連接該文庫。",
+          "addFailed": "新增文庫失敗。"
+        },
+        "readiness": {
+          "reauth_required": "Zotero 拒絕了此 API 金鑰。請檢查金鑰後重試。",
+          "library_not_accessible": "此金鑰無法讀取該文庫。請在 zotero.org/settings/keys 為金鑰授予該文庫（群組文庫則為該群組）的讀取權限。",
+          "library_not_found": "Zotero 找不到該文庫。請檢查文庫類型和 ID。",
+          "rate_limited": "Zotero 目前正在限制請求。請稍等片刻後重試。",
+          "unreachable": "無法連接到 Zotero，請稍後重試。",
+          "blocked_endpoint": "此部署不允許連接 Zotero。",
+          "config_invalid": "文庫類型或 ID 無效。"
+        },
+        "rotate": {
+          "title": "重新連接 Zotero",
+          "description": "請為 {name}（{library}）輸入新的唯讀 API 金鑰。新金鑰將替換已儲存的金鑰。",
+          "keyLabel": "API 金鑰",
+          "save": "重新連接",
+          "failed": "無法更新 API 金鑰，請重試。",
+          "libraryUnknown": "此連接器缺少文庫資訊，無法在這裡替換金鑰。"
+        }
       },
       "gmail": {
         "modeTitle": "選擇 Gmail 用途",
@@ -3839,6 +3886,20 @@
             "browser": {
               "description": "依次點開站點和空間可以看到頁面，然後勾選要包含的空間和頁面。",
               "root": "Confluence 站點"
+            }
+          },
+          "zotero": {
+            "itemsTitle": "分類",
+            "itemsDescription": "選擇要索引的 Zotero 分類。所選分類（包括其子分類）中的條目會按連接器的同步排程保持同步。",
+            "choose": "選擇分類",
+            "empty": "尚未選擇任何分類，因此會索引整個文庫。選擇分類即可只索引這些內容。",
+            "kinds": {
+              "collection": "分類"
+            },
+            "browser": {
+              "description": "開啟分類檢視其子分類，然後勾選要索引的分類。",
+              "root": "文庫",
+              "emptyContainer": "此分類沒有子分類。"
             }
           }
         }

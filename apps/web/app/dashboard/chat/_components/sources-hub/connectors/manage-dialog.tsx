@@ -38,6 +38,7 @@ import {
   connectorCatalogCategories,
   connectorCatalogForAvailableTypes,
 } from "./catalog";
+import { AddApiKeyDialog } from "./add-api-key-dialog";
 import { AddCredentialDialog } from "./add-credential-dialog";
 import { AddFeedDialog } from "./add-feed-dialog";
 import { GmailBrokerNoticeDialog } from "./gmail-broker-notice-dialog";
@@ -59,6 +60,8 @@ import type {
   ConnectorReadinessState,
   ConnectorWebhookConfig,
   ConnectorWebhookEventItem,
+  CredentialAddInput,
+  CredentialCheckInput,
   CredentialCheckResult,
   FeedCheckResult,
 } from "./types";
@@ -138,25 +141,16 @@ export function ManageConnectorsDialog({
     item: ConnectorCatalogItem,
     gmailMode?: GmailUsageMode,
   ) => void;
-  onCheckCredential: (input: {
-    endpoint: string;
-    username: string;
-    secret: string;
-  }) => Promise<CredentialCheckResult>;
+  onCheckCredential: (
+    input: CredentialCheckInput,
+  ) => Promise<CredentialCheckResult>;
   onCheckFeed: (feedUrl: string) => Promise<FeedCheckResult>;
   onCopyWebhook: (value: string) => void;
   onCreateConnector: (item: ConnectorCatalogItem) => void;
   onDisconnectConnector: (connector: ConnectorItem) => void;
   onOpenChange: (open: boolean) => void;
   onOpenSettings: (connector: ConnectorItem) => void;
-  onSubmitCredential: (input: {
-    name: string;
-    endpoint: string;
-    username: string;
-    secret: string;
-    roots: string[];
-    periodicIndexingEnabled: boolean;
-  }) => Promise<void>;
+  onSubmitCredential: (input: CredentialAddInput) => Promise<void>;
   onSubmitFeed: (input: { name: string; feedUrl: string }) => Promise<void>;
   onSyncConnector: (connector: ConnectorItem) => void;
   onToggleConnectorStatus: (connector: ConnectorItem) => void;
@@ -181,6 +175,10 @@ export function ManageConnectorsDialog({
   // Add-only credential catalog item (`addMode === "credential"`) whose
   // endpoint/credential dialog is open.
   const [pendingCredential, setPendingCredential] =
+    useState<ConnectorCatalogItem | null>(null);
+  // Add-only API-key catalog item (`addMode === "api_key"`) whose library ID
+  // and key dialog is open.
+  const [pendingApiKey, setPendingApiKey] =
     useState<ConnectorCatalogItem | null>(null);
   const activeConnectors = connectors.filter(
     (connector) => connector.status !== "disabled",
@@ -372,6 +370,7 @@ export function ManageConnectorsDialog({
                                 connector={connector}
                                 item={item}
                                 key={item.id}
+                                onAddApiKey={setPendingApiKey}
                                 onAddCredential={setPendingCredential}
                                 onAddLoginFlow={onAddLoginFlow}
                                 onAddFeed={setPendingFeed}
@@ -541,6 +540,14 @@ export function ManageConnectorsDialog({
           if (!nextOpen) setPendingCredential(null);
         }}
         open={pendingCredential !== null}
+      />
+      <AddApiKeyDialog
+        onAdd={onSubmitCredential}
+        onCheck={onCheckCredential}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setPendingApiKey(null);
+        }}
+        open={pendingApiKey !== null}
       />
       <GmailBrokerNoticeDialog
         item={pendingGmailBrokerNotice}

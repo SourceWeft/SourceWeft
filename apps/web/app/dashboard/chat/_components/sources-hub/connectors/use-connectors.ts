@@ -46,17 +46,32 @@ import type {
   ConnectorReadinessState,
   ConnectorWebhookConfig,
   ConnectorWebhookEventItem,
+  CredentialAddInput,
+  CredentialCheckInput,
   CredentialCheckResult,
   FeedCheckResult,
+  GenericCredentialAddInput,
+  GenericCredentialCheckInput,
 } from "./types";
 
-/** A catalog type whose add flow is a username/app-password credential
- * (WebDAV). Both the add card and the reconnect path branch on this. */
+/** A catalog type whose add flow collects a stored credential: a username and
+ * app password (WebDAV) or a library ID and API key (Zotero). Both the add
+ * card and the reconnect path branch on this; reconnecting replaces the
+ * credential in place. */
 function isCredentialConnectorType(connectorType: string): boolean {
-  return (
-    connectorCatalog.find((item) => item.id === connectorType)?.addMode ===
-    "credential"
-  );
+  const addMode = connectorCatalog.find(
+    (item) => item.id === connectorType,
+  )?.addMode;
+  return addMode === "credential" || addMode === "api_key";
+}
+
+/** True when a credential check or create input came from a dialog that
+ * supplies its own connector type, config and credential (Zotero). The WebDAV
+ * dialog sends its endpoint, username and password instead. */
+function isGenericCredentialInput(
+  input: CredentialCheckInput | CredentialAddInput,
+): input is GenericCredentialCheckInput | GenericCredentialAddInput {
+  return "connectorType" in input;
 }
 
 /** A catalog type whose add/reconnect flow is a server-driven browser login
@@ -69,7 +84,8 @@ function isLoginFlowConnectorType(connectorType: string): boolean {
   );
 }
 
-/** The one credential connector type the web knows how to add and rotate. */
+/** The WebDAV add input carries no connector type, so its handlers default to
+ * this one. */
 const WEBDAV_CONNECTOR_TYPE = "webdav";
 
 const CONNECTOR_OAUTH_URL_PARAMS = [
@@ -1530,28 +1546,39 @@ export function useConnectors(input: {
     [displayLocale, handleSyncConnector, refreshConnectors, workspaceId, t],
   );
 
-  // Pre-create readiness check for a WebDAV endpoint and credential. Runs the
-  // adapter's check against the whole-endpoint root and stores nothing; the
-  // secret travels in the request body only and is never cached here.
+  // Pre-create readiness check for a credential connector. A WebDAV input runs
+  // the adapter's check against the whole-endpoint root; a generic input (the
+  // Zotero dialog) brings its own connector type, config and credential. It
+  // stores nothing; the secret travels in the request body only and is never
+  // cached here.
   const handleCheckCredential = useCallback(
-    async (input: {
-      endpoint: string;
-      username: string;
-      secret: string;
-    }): Promise<CredentialCheckResult> => {
+    async (input: CredentialCheckInput): Promise<CredentialCheckResult> => {
       if (!workspaceId) {
         toast.error(t("toasts.connectors.noWorkspace"));
         return { ready: false, reason: "no_workspace", message: "" };
       }
-      const result = await connectorsClient.checkConfig(workspaceId, {
-        connectorType: WEBDAV_CONNECTOR_TYPE,
-        configJson: { endpoint: input.endpoint, roots: ["/"] },
-        credential: { username: input.username, secret: input.secret },
-      });
+      const result = await connectorsClient.checkConfig(
+        workspaceId,
+        isGenericCredentialInput(input)
+          ? {
+              connectorType: input.connectorType,
+              configJson: input.configJson,
+              credential: {
+                username: input.credential.username,
+                secret: input.credential.secret,
+              },
+            }
+          : {
+              connectorType: WEBDAV_CONNECTOR_TYPE,
+              configJson: { endpoint: input.endpoint, roots: ["/"] },
+              credential: { username: input.username, secret: input.secret },
+            },
+      );
       return {
         ready: result.ready,
         reason: result.reason ?? "",
         message: result.message ?? "",
+        ...(result.metadata ? { metadata: result.metadata } : {}),
       };
     },
     [workspaceId, t],
@@ -1561,30 +1588,36 @@ export function useConnectors(input: {
   // endpoint) so the add dialog stays open and shows the reason; a failed
   // first-sync start does not reject because the connector exists by then.
   const handleAddCredential = useCallback(
-    async (input: {
-      name: string;
-      endpoint: string;
-      username: string;
-      secret: string;
-      roots: string[];
-      periodicIndexingEnabled: boolean;
-    }) => {
+    async (input: CredentialAddInput) => {
       if (!workspaceId) {
         const message = t("toasts.connectors.noWorkspace");
         toast.error(message);
         throw new Error(message);
       }
+      const connectorType = isGenericCredentialInput(input)
+        ? input.connectorType
+        : WEBDAV_CONNECTOR_TYPE;
       const created = await connectorsClient.create(workspaceId, {
-        connectorType: WEBDAV_CONNECTOR_TYPE,
+        connectorType,
         name: input.name,
-        configJson: { endpoint: input.endpoint, roots: input.roots },
-        credential: { username: input.username, secret: input.secret },
+        ...(isGenericCredentialInput(input)
+          ? {
+              configJson: input.configJson,
+              credential: {
+                username: input.credential.username,
+                secret: input.credential.secret,
+              },
+            }
+          : {
+              configJson: { endpoint: input.endpoint, roots: input.roots },
+              credential: { username: input.username, secret: input.secret },
+            }),
         // Scheduled reconciliation is opt-in: default off unless the member
         // ticked "Sync automatically" in the add dialog.
         periodicIndexingEnabled: input.periodicIndexingEnabled,
         indexingFrequencyMinutes: 360,
       });
-      trackConnectorConnected({ connectorType: WEBDAV_CONNECTOR_TYPE });
+      trackConnectorConnected({ connectorType });
       await refreshConnectors();
       toast.success(
         t("toasts.connectors.connectedFallback", {

@@ -417,7 +417,7 @@ const noneConnectorAuthSchema = z.object({
 
 const credentialConnectorAuthSchema = z.object({
   kind: z.literal("credential"),
-  scheme: z.literal("basic"),
+  scheme: z.enum(["basic", "api_key"]),
   flow: z.literal("login_flow").optional(),
 });
 

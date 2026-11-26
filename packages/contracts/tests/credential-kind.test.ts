@@ -120,3 +120,26 @@ test("rotate request is the credential input and status exposes no secret", () =
     false,
   );
 });
+
+test("accepts a credential/api_key auth manifest and round-trips it", () => {
+  const auth = { kind: "credential", scheme: "api_key" };
+  const result = connectorManifestSchema.safeParse(baseManifest(auth));
+  assert.equal(result.success, true);
+  if (result.success) assert.deepEqual(result.data.auth, auth);
+});
+
+test("rejects a credential manifest with the token scheme", () => {
+  assert.equal(
+    connectorManifestSchema.safeParse(
+      baseManifest({ kind: "credential", scheme: "token" }),
+    ).success,
+    false,
+  );
+});
+
+test("api_key scheme still parses alongside the login_flow marker", () => {
+  const auth = { kind: "credential", scheme: "api_key", flow: "login_flow" };
+  const result = connectorManifestSchema.safeParse(baseManifest(auth));
+  assert.equal(result.success, true);
+  if (result.success) assert.deepEqual(result.data.auth, auth);
+});
