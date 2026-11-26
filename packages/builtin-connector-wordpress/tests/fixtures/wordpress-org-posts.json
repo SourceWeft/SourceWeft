@@ -1,0 +1,28 @@
+[
+  {
+    "id": 1,
+    "modified_gmt": "2021-06-04T11:57:33",
+    "status": "publish",
+    "type": "post",
+    "link": "https://wordpress.org/news/2003/04/welcome/",
+    "title": {
+      "rendered": "Welcome"
+    },
+    "author": 1,
+    "categories": [12],
+    "tags": []
+  },
+  {
+    "id": 2,
+    "modified_gmt": "2021-06-04T11:57:33",
+    "status": "publish",
+    "type": "post",
+    "link": "https://wordpress.org/news/2003/04/comments-and-template/",
+    "title": {
+      "rendered": "Comments and Template"
+    },
+    "author": 1,
+    "categories": [5],
+    "tags": []
+  }
+]

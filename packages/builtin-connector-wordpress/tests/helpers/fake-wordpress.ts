@@ -90,6 +90,8 @@ export type FakeWordPressOptions = {
   tags?: FakeTag[];
   users?: FakeUser[] | null;
   posts?: FakePost[];
+  /** What `/users/me` answers to the valid credential (default: id 1, empty capabilities). */
+  me?: { id: number; name: string; capabilities: Record<string, boolean> };
 };
 
 export type RecordedRequest = {
@@ -146,6 +148,19 @@ function json(
     status,
     headers: { "content-type": "application/json; charset=utf-8", ...headers },
   });
+}
+
+/** Keeps only the `_fields` the request asked for, as the real REST API does. */
+function pick(
+  request: { query: Record<string, string> },
+  object: Record<string, unknown>,
+): Record<string, unknown> {
+  const raw = request.query._fields;
+  if (raw === undefined || raw === "") return object;
+  const wanted = new Set(raw.split(",").map((f) => f.trim()));
+  return Object.fromEntries(
+    Object.entries(object).filter(([key]) => wanted.has(key)),
+  );
 }
 
 function html(body: string, headers: Record<string, string> = {}): Response {
@@ -267,8 +282,10 @@ export function createFakeWordPress(
         rendered: p.protected ? "" : (p.content ?? `<p>Body ${p.id}</p>`),
         protected: p.protected ?? false,
       },
-      categories: p.categories ?? [],
-      tags: p.tags ?? [],
+      // Pages carry no taxonomies in the real API.
+      ...(type === "post"
+        ? { categories: p.categories ?? [], tags: p.tags ?? [] }
+        : {}),
       author: p.author ?? 1,
     };
   }
@@ -341,7 +358,11 @@ export function createFakeWordPress(
     }
     items = [...items].sort((a, b) => a.id - b.id);
     const { page, total, perPage } = paginate(items, request);
-    return json(page.map(post), 200, listHeaders(total, perPage));
+    return json(
+      page.map((p) => pick(request, post(p))),
+      200,
+      listHeaders(total, perPage),
+    );
   }
 
   function serveSingle(
@@ -357,19 +378,21 @@ export function createFakeWordPress(
     if (status !== "publish" && !hasValidAuth(request)) {
       return json({ code: "rest_forbidden" }, 401);
     }
-    return json(post(found));
+    return json(pick(request, post(found)));
   }
 
   function serveCategories(request: RecordedRequest): Response {
     const items = [...state.categories].sort((a, b) => a.id - b.id);
     const { page, total, perPage } = paginate(items, request);
     return json(
-      page.map((c) => ({
-        id: c.id,
-        name: c.name,
-        parent: c.parent ?? 0,
-        slug: c.slug ?? `cat-${c.id}`,
-      })),
+      page.map((c) =>
+        pick(request, {
+          id: c.id,
+          name: c.name,
+          parent: c.parent ?? 0,
+          slug: c.slug ?? `cat-${c.id}`,
+        }),
+      ),
       200,
       listHeaders(total, perPage),
     );
@@ -384,11 +407,13 @@ export function createFakeWordPress(
     }
     const { page, total, perPage } = paginate(items, request);
     return json(
-      page.map((t) => ({
-        id: t.id,
-        name: t.name,
-        slug: t.slug ?? `tag-${t.id}`,
-      })),
+      page.map((t) =>
+        pick(request, {
+          id: t.id,
+          name: t.name,
+          slug: t.slug ?? `tag-${t.id}`,
+        }),
+      ),
       200,
       listHeaders(total, perPage),
     );
@@ -405,10 +430,17 @@ export function createFakeWordPress(
     }
     const { page, total, perPage } = paginate(items, request);
     return json(
-      page.map((u) => ({ id: u.id, name: u.name })),
+      page.map((u) => pick(request, { id: u.id, name: u.name })),
       200,
       listHeaders(total, perPage),
     );
+  }
+
+  function serveMe(request: RecordedRequest): Response {
+    if (!hasValidAuth(request))
+      return json({ code: "rest_not_logged_in" }, 401);
+    const me = options.me ?? { id: 1, name: "Me", capabilities: {} };
+    return json(pick(request, me));
   }
 
   function serveSearch(request: RecordedRequest): Response {
@@ -419,13 +451,15 @@ export function createFakeWordPress(
       .sort((a, b) => a.id - b.id);
     const { page, total, perPage } = paginate(items, request);
     return json(
-      page.map((p) => ({
-        id: p.id,
-        title: p.title ?? `Item ${p.id}`,
-        url: p.link ?? `${siteBase}/?p=${p.id}`,
-        type: p.type ?? "post",
-        subtype: p.type ?? "post",
-      })),
+      page.map((p) =>
+        pick(request, {
+          id: p.id,
+          title: p.title ?? `Item ${p.id}`,
+          url: p.link ?? `${siteBase}/?p=${p.id}`,
+          type: "post",
+          subtype: p.type ?? "post",
+        }),
+      ),
       200,
       listHeaders(total, perPage),
     );
@@ -519,6 +553,8 @@ export function createFakeWordPress(
       );
     }
     switch (route) {
+      case "/wp/v2/users/me":
+        return serveMe(request);
       case "/wp/v2/posts":
         return servePosts("post", request);
       case "/wp/v2/pages":
