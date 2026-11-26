@@ -198,4 +198,36 @@ describe("htmlToMarkdown", () => {
     assert.match(cut, /line \d+$/);
     assert.equal(cut, cut.trimEnd());
   });
+
+  it("keeps a blockquote after a pending list, heading or emphasis marker", () => {
+    const cases: [string, string][] = [
+      ["<ul><li><blockquote>a</blockquote></li></ul>", "- > a"],
+      ["<h1><blockquote>a</blockquote></h1>", "# > a"],
+      ["<ul><li><b><blockquote>a</blockquote></b></li></ul>", "- > **a**"],
+      ["<blockquote>a<b></blockquote>z", "**> a\n\nz"],
+      [
+        "<ul><li><blockquote>a<br>b</blockquote>after</li><li>n</li></ul>",
+        "- > a\n> b\nafter\n- n",
+      ],
+      [
+        "<h2><blockquote><p>a</p><blockquote>b</blockquote></blockquote>t</h2>",
+        "## > a\n>\n> > b\n\nt",
+      ],
+      [
+        "<blockquote><ul><li><blockquote>deep</blockquote></li></ul></blockquote>",
+        "> - > deep",
+      ],
+      [
+        "<blockquote><h2><blockquote>a<br>b</blockquote></h2></blockquote>",
+        "> ## > a\n> > b",
+      ],
+      [
+        "<ol><li><blockquote><ul><li><blockquote>deep</blockquote></li></ul></blockquote></li></ol>",
+        "1. >    - > deep",
+      ],
+    ];
+    for (const [html, expected] of cases) {
+      assert.equal(htmlToMarkdown(html), expected, html);
+    }
+  });
 });

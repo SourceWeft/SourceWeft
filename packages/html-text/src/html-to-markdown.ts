@@ -318,6 +318,9 @@ function renderPieces(
   const blankPrefix = prefix.trimEnd();
   for (const piece of pieces) {
     if (typeof piece !== "string") {
+      // A quote that starts after a marker on the same line (`- > text`)
+      // carries one `> ` of its own; later lines get the full prefix.
+      if (!state.lineStart) sink.push("> ");
       renderPieces(piece.frame.out, depth + 1, sink, state);
       continue;
     }
@@ -638,14 +641,11 @@ export function htmlToMarkdown(
     if (frame.out.length === 0) return;
     blockBreak();
     const parent = top();
-    const block = new QuoteBlock(frame);
-    if (parent.pending !== null || emph.length > 0) {
-      // A marker is waiting for text: it goes in front of the quote's text.
-      push(block.toString());
-    } else {
-      parent.out.push(block);
-      parent.newlines = 0;
-    }
+    // A list or heading marker (or emphasis marker) waiting for text is
+    // written as its own piece, ahead of the quote.
+    if (parent.pending !== null || emph.length > 0) push("");
+    parent.out.push(new QuoteBlock(frame));
+    parent.newlines = 0;
     blockBreak();
   }
 

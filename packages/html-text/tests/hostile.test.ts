@@ -201,4 +201,55 @@ describe("htmlToMarkdown hostile input", () => {
       assert.throws(() => htmlToMarkdown("<p>x</p>", { maxChars }), RangeError);
     }
   });
+
+  // A heading or list marker waits for text when the quote closes; the quote
+  // is still written in one pass, not re-rendered at every level.
+  const pendingShapes = [
+    {
+      opener: "<h1><blockquote>",
+      first: "# > ".repeat(20) + "w",
+      // Paragraphs sit in the innermost quote, a blank quote line between.
+      separator: "> ".repeat(20).trimEnd(),
+    },
+    {
+      opener: "<ul><li><blockquote>",
+      first:
+        Array.from(
+          { length: 20 },
+          (_, level) => `${" ".repeat(2 * Math.min(level, 5))}- > `,
+        ).join("") + "w",
+      // Inside a list, blocks are separated by a single newline.
+      separator: null,
+    },
+  ];
+  for (const { opener, first, separator } of pendingShapes) {
+    for (const closed of [true, false]) {
+      const kind = closed ? "closed" : "unclosed";
+      it(`renders 20 x ${opener} around 240k paragraphs quickly (${kind})`, () => {
+        const closer = closed ? "</blockquote>".repeat(20) : "";
+        const html = opener.repeat(20) + "<p>w</p>".repeat(240_000) + closer;
+        assert.ok(html.length < 2_000_000);
+        const { value, ms } = timed(() =>
+          htmlToMarkdown(html, { maxChars: 50_000_000 }),
+        );
+        assert.ok(ms < 1000, `took ${ms}ms`);
+        const body = `${"> ".repeat(20)}w`;
+        const lines = value.split("\n");
+        assert.equal(
+          lines.length,
+          separator === null ? 240_000 : 2 * 240_000 - 1,
+        );
+        assert.equal(lines[0], first);
+        const step = separator === null ? 1 : 2;
+        for (let k = 1; k < lines.length; k += step) {
+          if (separator !== null) {
+            if (lines[k] !== separator) assert.fail(`separator line ${k}`);
+            if (lines[k + 1] !== body) assert.fail(`body line ${k + 1}`);
+          } else if (lines[k] !== body) {
+            assert.fail(`body line ${k}`);
+          }
+        }
+      });
+    }
+  }
 });
