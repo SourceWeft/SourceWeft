@@ -20,7 +20,8 @@
       "icons/icon.ico"
     ],
     "iOS": {
-      "developmentTeam": ""
+      "developmentTeam": "",
+      "minimumSystemVersion": "15.0"
     },
     "android": {
       "minSdkVersion": 24,
