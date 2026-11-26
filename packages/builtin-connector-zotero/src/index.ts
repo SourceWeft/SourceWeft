@@ -37,3 +37,17 @@ export {
   type CreateZoteroClientInput,
 } from "./client";
 export { ZOTERO_USER_AGENT } from "./limits";
+export {
+  parseCollection,
+  buildCollectionTree,
+  parseItem,
+  groupLibrary,
+  inScope,
+  contentHashOf,
+  toConnectorItem,
+  noteText,
+  type ZoteroCollection,
+  type CollectionTree,
+  type ZoteroObject,
+  type ZoteroItemGroup,
+} from "./model";
