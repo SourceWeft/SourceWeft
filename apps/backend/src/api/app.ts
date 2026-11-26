@@ -25,6 +25,7 @@ import { registerDashboardRoutes } from "./routes/dashboard";
 import { registerLocalDeviceRoutes } from "./routes/local-devices";
 import { registerLocalNetworkRoutes } from "./routes/local-network";
 import { healthResponse } from "./routes/health";
+import { registerHealthReadyRoute } from "./routes/health-ready";
 import { registerJobRoutes } from "./routes/jobs";
 import { registerPublicShareRoutes } from "./routes/public-shares";
 import { registerSitemapRoutes } from "./routes/sitemaps";
@@ -79,6 +80,7 @@ export function createApp() {
   app.get("/v1/health", (c) => {
     return ApiResponse.success(c, healthResponse(), 200);
   });
+  registerHealthReadyRoute(app);
 
   app.use("/v1/*", performanceLoggingMiddleware);
 

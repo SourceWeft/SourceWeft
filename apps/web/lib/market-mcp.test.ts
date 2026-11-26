@@ -9,6 +9,11 @@ const client = vi.hoisted(() => ({
 const cacheCalls = vi.hoisted(
   () => [] as { keys: string[]; options: { revalidate?: number } }[],
 );
+// The callbacks as the data cache gets them, by cache key.
+const cachedCallbacks = vi.hoisted(
+  () => new Map<string, (...args: unknown[]) => unknown>(),
+);
+const clientOptions = vi.hoisted(() => [] as Record<string, unknown>[]);
 
 vi.mock("server-only", () => ({}));
 vi.mock("./internal-api-base-url", () => ({
@@ -22,6 +27,7 @@ vi.mock("next/cache", () => ({
     options: { revalidate?: number },
   ) => {
     cacheCalls.push({ keys, options });
+    cachedCallbacks.set(keys[0]!, callback);
     return callback;
   },
 }));
@@ -34,7 +40,9 @@ vi.mock("@sourceweft/market-sdk", () => {
     }
   }
   class MarketClient {
-    constructor(readonly options: { baseUrl: string }) {}
+    constructor(readonly options: { baseUrl: string }) {
+      clientOptions.push(options);
+    }
     getMcp = client.getMcp;
     listMcp = client.listMcp;
     listMcpCategories = client.listMcpCategories;
@@ -43,6 +51,7 @@ vi.mock("@sourceweft/market-sdk", () => {
   return { MarketClient, MarketClientError };
 });
 
+import { CATALOG_REQUEST_TIMEOUT_MS } from "./catalog-request-timeout";
 import {
   getPublicMcpDetail,
   getPublicMcpToolRevisions,
@@ -187,21 +196,47 @@ describe("getPublicMcpDetail", () => {
     await expect(getPublicMcpToolRevisions("io.github.o/r")).resolves.toBeNull();
   });
 
-  it("goes without all of them when the detail cannot be read", async () => {
-    client.getMcp.mockRejectedValue(new Error("market down"));
-    await expect(getPublicMcpDetail("x", "zh-TW")).resolves.toEqual({
-      aiOverview: null,
-      overviewLocales: [],
-      localizedSummary: null,
-      descriptionLanguage: null,
-      readme: null,
-      relatedProduct: null,
-      score: null,
-      // An outage never deindexes a page.
-      searchIndexable: true,
-      toolsRevision: null,
-      versions: [],
-    });
+  // Issue #767: a detail that cannot be read is the page's failure, not a
+  // page without its README, overview and score.
+  it("never swallows: a 404 and an outage both reach the page, and stay apart", async () => {
+    const gone = Object.assign(new Error("gone"), { status: 404 });
+    client.getMcp.mockRejectedValue(gone);
+    await expect(getPublicMcpDetail("x", "zh-TW")).rejects.toBe(gone);
+
+    const outage = new Error("market down");
+    client.getMcp.mockRejectedValue(outage);
+    await expect(getPublicMcpDetail("x", "zh-TW")).rejects.toBe(outage);
+  });
+
+  it("gives the data cache a rejection, never a fallback value, when a read fails", async () => {
+    const outage = new Error("market down");
+    client.getMcp.mockRejectedValue(outage);
+    client.listMcp.mockRejectedValue(outage);
+    client.listMcpToolRevisions.mockRejectedValue(outage);
+    // What `unstable_cache` stores is what its callback resolves to; a
+    // rejection stores nothing. That holds for the soft readers too: their
+    // fallback is added outside the cache.
+    await expect(
+      cachedCallbacks.get("public-mcp-detail")!("x", "en"),
+    ).rejects.toBe(outage);
+    await expect(
+      cachedCallbacks.get("public-mcp-tool-revisions")!("x"),
+    ).rejects.toBe(outage);
+    await expect(cachedCallbacks.get("public-mcp-list")!({})).rejects.toBe(
+      outage,
+    );
+  });
+});
+
+describe("request timeout", () => {
+  it("gives every catalog read the fixed timeout", async () => {
+    client.getMcp.mockResolvedValue({ item: {}, versions });
+    clientOptions.length = 0;
+    await getPublicMcpDetail("x", "en");
+    expect(CATALOG_REQUEST_TIMEOUT_MS).toBe(8_000);
+    expect(clientOptions).toEqual([
+      { baseUrl: "https://api.test", timeoutMs: CATALOG_REQUEST_TIMEOUT_MS },
+    ]);
   });
 });
 

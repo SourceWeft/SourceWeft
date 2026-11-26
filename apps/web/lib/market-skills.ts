@@ -15,13 +15,20 @@ import {
 } from "@sourceweft/market-sdk";
 
 import type { Locale } from "@sourceweft/i18n/locales";
+import {
+  CATALOG_REQUEST_TIMEOUT_MS,
+  failFastAfterTimeout,
+} from "./catalog-request-timeout";
 import { catalogLocale } from "./i18n/catalog-locale";
 import { internalApiBaseUrl } from "./internal-api-base-url";
 
 function marketClient() {
   // The public skill market is served by the backend at {backend}/v1/skills —
   // anonymous, so no service token.
-  return new MarketClient({ baseUrl: internalApiBaseUrl() });
+  return new MarketClient({
+    baseUrl: internalApiBaseUrl(),
+    timeoutMs: CATALOG_REQUEST_TIMEOUT_MS,
+  });
 }
 
 export function isMarketNotFound(error: unknown) {
@@ -111,8 +118,13 @@ const cachedSkill = unstable_cache(
 // an outage, and an outage must not deindex the page. `cache` dedupes the
 // generateMetadata + page render pair within one request.
 export const getPublicSkill = cache(
-  (slug: string, locale?: MarketSkillLocale): Promise<GetMarketSkillResponse> =>
-    cachedSkill(slug, locale),
+  failFastAfterTimeout(
+    "skill",
+    (
+      slug: string,
+      locale?: MarketSkillLocale,
+    ): Promise<GetMarketSkillResponse> => cachedSkill(slug, locale),
+  ),
 );
 
 const cachedListSkillCollections = unstable_cache(
@@ -146,9 +158,12 @@ const cachedSkillCollection = unstable_cache(
 
 // Never swallowed, like a skill's page: a 404 and an outage must stay apart.
 export const getPublicSkillCollection = cache(
-  (
-    slug: string,
-    locale?: MarketSkillLocale,
-  ): Promise<GetMarketSkillCollectionResponse> =>
-    cachedSkillCollection(slug, locale),
+  failFastAfterTimeout(
+    "skill-collection",
+    (
+      slug: string,
+      locale?: MarketSkillLocale,
+    ): Promise<GetMarketSkillCollectionResponse> =>
+      cachedSkillCollection(slug, locale),
+  ),
 );

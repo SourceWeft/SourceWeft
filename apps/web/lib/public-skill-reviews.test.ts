@@ -63,3 +63,11 @@ test("anything but a good answer is no reviews, never a broken page", async () =
   );
   expect(await getPublicSkillReviews("pdf")).toBeNull();
 });
+
+// Issue #767: a stalled API must not hold the skill page's render open.
+test("gives the read the catalog request timeout", async () => {
+  await getPublicSkillReviews("pdf");
+  const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+  expect(init.signal).toBeInstanceOf(AbortSignal);
+  expect(init.signal!.aborted).toBe(false);
+});

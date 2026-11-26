@@ -22,6 +22,10 @@ import {
 } from "@sourceweft/market-sdk";
 
 import type { Locale } from "@sourceweft/i18n/locales";
+import {
+  CATALOG_REQUEST_TIMEOUT_MS,
+  failFastAfterTimeout,
+} from "./catalog-request-timeout";
 import { internalApiBaseUrl } from "./internal-api-base-url";
 import { readMcpReadme } from "./mcp-readme";
 
@@ -31,7 +35,10 @@ function marketClient() {
   // The MCP catalog is now served by the backend (sourceweft-api retired), so
   // the public read API lives at {backend}/v1/mcp — no separate service or
   // service token.
-  return new MarketClient({ baseUrl: internalApiBaseUrl() });
+  return new MarketClient({
+    baseUrl: internalApiBaseUrl(),
+    timeoutMs: CATALOG_REQUEST_TIMEOUT_MS,
+  });
 }
 
 export function isMarketNotFound(error: unknown) {
@@ -121,7 +128,7 @@ export type PublicMcpDetail = {
   versions: GetMarketMcpResponse["versions"];
   readme: MarketMcpReadme | null;
   // The AI overview in the language asked for, English when there is none in
-  // it; null when there is none to show.
+  // it; null when the server has none to show.
   aiOverview: MarketMcpAiOverview | null;
   // The languages the server has a visible overview in, without fallback.
   overviewLocales: MarketMcpLocale[];
@@ -132,17 +139,17 @@ export type PublicMcpDetail = {
   // "und"), once the translation pass has looked at it.
   descriptionLanguage: string | null;
   // False when the page stays out of search (`noindex, follow`); true when
-  // the market says nothing or cannot be read, so an outage never deindexes.
+  // the market says nothing.
   searchIndexable: boolean;
   // The servers integrating the same product, the product's own server
-  // first (#367 W8); null when there is no such group or it cannot be read.
+  // first (#367 W8); null when there is no such group.
   relatedProduct: MarketMcpProductGroup | null;
   // The latest version's quality scorecard (Issue #367, W6); null when the
-  // market has none or cannot be read, and the page shows no Score section.
+  // market has none, and the page shows no Score section.
   score: MarketMcpScore | null;
   // The current revision of the source whose tool list the page shows (Issue
-  // #367, tool revisions); null when that list has no history or the market
-  // cannot be read, and the page shows no change log.
+  // #367, tool revisions); null when that list has no history, and the page
+  // shows no change log.
   toolsRevision: MarketMcpToolsRevision | null;
 };
 
@@ -175,31 +182,24 @@ const cachedMcpDetail = unstable_cache(
 );
 
 /**
- * The server's version history, README and AI overview in `locale`
- * (`GET /v1/mcp/:identifier`). All are extras on a page that the manifest
- * already makes: when they cannot be read, the page goes without them.
+ * The server's version history, README, AI overview and score in `locale`
+ * (`GET /v1/mcp/:identifier`): most of what the detail page says. Never
+ * swallowed (Issue #767): a page rendered without them is a 200 page with
+ * its content missing, which a crawler would index as it stands. The caller
+ * tells a 404 from an outage with `isMarketNotFound`, as for the manifest.
+ * The read rethrows inside the cache, so a failure is never stored.
+ *
+ * `cache` dedupes the generateMetadata + page render pair within one request,
+ * a failure included: after a timeout the error page's own metadata pass
+ * gets the same rejection at once instead of waiting out a second timeout.
  */
-export async function getPublicMcpDetail(
-  identifier: string,
-  locale: MarketMcpLocale,
-): Promise<PublicMcpDetail> {
-  try {
-    return await cachedMcpDetail(identifier, locale);
-  } catch {
-    return {
-      aiOverview: null,
-      overviewLocales: [],
-      localizedSummary: null,
-      descriptionLanguage: null,
-      readme: null,
-      relatedProduct: null,
-      score: null,
-      searchIndexable: true,
-      toolsRevision: null,
-      versions: [],
-    };
-  }
-}
+export const getPublicMcpDetail = cache(
+  failFastAfterTimeout(
+    "mcp-detail",
+    (identifier: string, locale: MarketMcpLocale): Promise<PublicMcpDetail> =>
+      cachedMcpDetail(identifier, locale),
+  ),
+);
 
 const cachedMcpToolRevisions = unstable_cache(
   async (identifier: string) => marketClient().listMcpToolRevisions(identifier),
@@ -230,6 +230,9 @@ const cachedMcpManifest = unstable_cache(
 
 // `cache` dedupes the generateMetadata + page render pair within one request.
 export const getPublicMcpManifest = cache(
-  (identifier: string): Promise<GetMarketMcpManifestResponse> =>
-    cachedMcpManifest(identifier),
+  failFastAfterTimeout(
+    "mcp-manifest",
+    (identifier: string): Promise<GetMarketMcpManifestResponse> =>
+      cachedMcpManifest(identifier),
+  ),
 );

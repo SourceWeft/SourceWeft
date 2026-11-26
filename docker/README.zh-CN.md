@@ -69,6 +69,8 @@ docker compose --env-file docker/.env -f docker/docker-compose.yml down
 
 ## 健康检查
 
+外部监控可以调用 API 的 `GET /v1/health/ready`：它会在各自的时间预算内执行一次数据库探测和一次公开目录读取，全部通过时返回 200 和每项检查的耗时，否则返回 503 并列出失败的检查。请给监控自身设置请求超时（10 秒即可）：进程完全卡死时无法作出任何响应。容器健康检查不使用这个接口。
+
 API 在 3001 端口响应 `GET /v1/health`，Web 在 3000 端口响应 `GET /`。worker 和 scheduler 没有 HTTP 端口：它们在健康时定期更新心跳，用下面的命令检查（健康时退出码为 0）：
 
 ```sh

@@ -24,7 +24,15 @@ export type MarketClientOptions = {
   baseUrl: string;
   getToken?: () => string | undefined | Promise<string | undefined>;
   fetch?: typeof fetch;
+  /**
+   * Abort a request, body read included, after this many milliseconds and
+   * throw a `MarketClientError` with code `MARKET_REQUEST_TIMEOUT`. No limit
+   * when omitted.
+   */
+  timeoutMs?: number;
 };
+
+export const MARKET_REQUEST_TIMEOUT_CODE = "MARKET_REQUEST_TIMEOUT";
 
 export class MarketClientError extends Error {
   readonly status: number;
@@ -64,11 +72,18 @@ export class MarketClient {
   private readonly baseUrl: string;
   private readonly getToken?: MarketClientOptions["getToken"];
   private readonly fetchImpl: typeof fetch;
+  private readonly timeoutMs?: number;
 
   constructor(options: MarketClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
     this.getToken = options.getToken;
     this.fetchImpl = options.fetch ?? fetch;
+    if (options.timeoutMs !== undefined) {
+      if (!Number.isFinite(options.timeoutMs) || options.timeoutMs <= 0) {
+        throw new RangeError("timeoutMs must be a positive number");
+      }
+      this.timeoutMs = options.timeoutMs;
+    }
   }
 
   getSitemapIndex() {
@@ -322,16 +337,36 @@ export class MarketClient {
       headers.set("authorization", `Bearer ${token}`);
     }
 
-    const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
-      ...init,
-      headers,
-    });
+    // One signal for the whole exchange: a server that sends headers and then
+    // stalls on the body is cut off by the same limit.
+    const signal =
+      this.timeoutMs === undefined
+        ? undefined
+        : AbortSignal.timeout(this.timeoutMs);
+    let response: Response;
+    let data: unknown;
+    try {
+      response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+        ...init,
+        headers,
+        ...(signal ? { signal } : {}),
+      });
 
-    if (!response.ok) {
-      throw await this.toError(response);
+      if (!response.ok) {
+        throw await this.toError(response);
+      }
+
+      data = (await response.json()) as unknown;
+    } catch (error) {
+      if (signal?.aborted && !(error instanceof MarketClientError)) {
+        throw new MarketClientError({
+          status: 504,
+          code: MARKET_REQUEST_TIMEOUT_CODE,
+          message: `Market request timed out after ${this.timeoutMs}ms`,
+        });
+      }
+      throw error;
     }
-
-    const data = (await response.json()) as unknown;
     // Validate the response against the shared contract so schema drift between
     // the market API and this client surfaces immediately instead of leaking a
     // malformed object downstream.
