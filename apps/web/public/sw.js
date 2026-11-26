@@ -31,6 +31,10 @@ const STATIC_LIMIT = 600;
 const SHELL_CACHE_TIMING = "sw-shell-cache";
 // Must match SHELL_STALE_MESSAGE in lib/mobile-app-shell.ts.
 const SHELL_STALE_MESSAGE = "sourceweft-shell-stale";
+// Must match SHELL_ADDRESS_MESSAGE in lib/mobile-app-shell.ts.
+const SHELL_ADDRESS_MESSAGE = "sourceweft-shell-address";
+// How long a page gets to say which address it is on before it is reloaded anyway.
+const ADDRESS_WAIT_MS = 1000;
 // Where the time of the last such reload is kept, so it survives the worker stopping.
 const STALE_RELOAD_MARK = "/__shell-stale-reload";
 const STALE_RELOAD_GAP_MS = 60_000;
@@ -196,13 +200,46 @@ async function dropStaleShell(clientId) {
 async function reloadPage(client) {
   try {
     if (typeof client.navigate === "function") {
-      await client.navigate(client.url);
+      await client.navigate(await currentAddress(client));
       return;
     }
   } catch {
     // Not a page this worker may navigate: ask the page instead.
   }
   client.postMessage({ type: SHELL_STALE_MESSAGE });
+}
+
+// The address the worker knows is the one the page was opened with; moving
+// around inside the app (opening a conversation) does not change it. So the
+// page is asked where it is now, and reloads there. A page that does not
+// answer in time, or answers with anything but an address on this site, is
+// reloaded at the address it was opened with.
+function currentAddress(client) {
+  return new Promise((resolve) => {
+    const opened = client.url;
+    const timer = setTimeout(() => resolve(opened), ADDRESS_WAIT_MS);
+    try {
+      const channel = new MessageChannel();
+      channel.port1.onmessage = (event) => {
+        clearTimeout(timer);
+        resolve(sameSiteAddress(event.data) ?? opened);
+      };
+      client.postMessage({ type: SHELL_ADDRESS_MESSAGE }, [channel.port2]);
+    } catch {
+      clearTimeout(timer);
+      resolve(opened);
+    }
+  });
+}
+
+function sameSiteAddress(value) {
+  if (typeof value !== "string") return undefined;
+  try {
+    const url = new URL(value);
+    return url.origin === self.location.origin ? url.href : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Drops the oldest static files once the cache holds more than STATIC_LIMIT. */

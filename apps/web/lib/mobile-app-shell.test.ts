@@ -35,7 +35,11 @@ function installBridge(platform: string, invoke = vi.fn()) {
   return invoke;
 }
 
-let workerMessage: ((event: { data: unknown }) => void) | undefined;
+type WorkerMessage = {
+  data: unknown;
+  ports?: { postMessage: (data: unknown) => void }[];
+};
+let workerMessage: ((event: WorkerMessage) => void) | undefined;
 
 function installServiceWorker() {
   const register = vi.fn(async () => ({}));
@@ -47,7 +51,7 @@ function installServiceWorker() {
       controller: null,
       addEventListener: (
         type: string,
-        listener: (event: { data: unknown }) => void,
+        listener: (event: WorkerMessage) => void,
       ) => {
         if (type === "message") workerMessage = listener;
       },
@@ -97,6 +101,22 @@ describe("registerMobileServiceWorker", () => {
     expect(state.reloadForStaleBuild).not.toHaveBeenCalled();
     workerMessage?.({ data: { type: "sourceweft-shell-stale" } });
     expect(state.reloadForStaleBuild).toHaveBeenCalledTimes(1);
+  });
+
+  test("tells the worker which address the page is on now, without reloading", () => {
+    installBridge("ios");
+    installServiceWorker();
+    registerMobileServiceWorker();
+    window.history.replaceState(null, "", "/dashboard/chat/thread-1");
+    const reply = vi.fn();
+    workerMessage?.({
+      data: { type: "sourceweft-shell-address" },
+      ports: [{ postMessage: reply }],
+    });
+    expect(reply).toHaveBeenCalledExactlyOnceWith(window.location.href);
+    expect(window.location.pathname).toBe("/dashboard/chat/thread-1");
+    expect(state.reloadForStaleBuild).not.toHaveBeenCalled();
+    window.history.replaceState(null, "", "/");
   });
 
   test("leaves the website and other hosts alone", () => {

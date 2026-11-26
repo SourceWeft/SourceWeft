@@ -42,9 +42,12 @@ function loadWorker(network: (request: Request) => Promise<Response>) {
     {
       url: string;
       navigate?: (url: string) => Promise<unknown>;
-      postMessage: (message: unknown) => void;
+      postMessage: (message: unknown, transfer?: ReplyPort[]) => void;
     }
   >();
+  // How long the worker said it would wait, for each timer it set. The timers
+  // fire on the next task, after any answer a page gives right away.
+  const waits: number[] = [];
   const self = {
     location: new URL(`${ORIGIN}/sw.js`),
     addEventListener: (type: string, listener: Listener) =>
@@ -66,6 +69,12 @@ function loadWorker(network: (request: Request) => Promise<Response>) {
     Set,
     Date,
     console,
+    MessageChannel: FakeMessageChannel,
+    setTimeout: (callback: () => void, ms: number) => {
+      waits.push(ms);
+      return setTimeout(callback, 0);
+    },
+    clearTimeout,
   });
 
   async function dispatch(
@@ -98,7 +107,19 @@ function loadWorker(network: (request: Request) => Promise<Response>) {
     await Promise.all(background);
   }
 
-  return { dispatch, install, fetch, stores, windows };
+  return { dispatch, install, fetch, stores, windows, waits };
+}
+
+type ReplyPort = { postMessage: (data: unknown) => void };
+
+// What the worker needs of a MessageChannel: an answer posted on port2
+// arrives at port1's handler.
+class FakeMessageChannel {
+  port1: { onmessage?: (event: { data: unknown }) => void } = {};
+  port2: ReplyPort = {
+    postMessage: (data) =>
+      queueMicrotask(() => this.port1.onmessage?.({ data })),
+  };
 }
 
 let served = 0;
@@ -257,7 +278,9 @@ test("refreshing a page caches the build files a new deploy names", async () => 
 
 // A deploy removes the previous build's files from the server. A page cached
 // before it then asks for script files that are gone.
-function staleShell(options: { navigate?: boolean } = {}) {
+// `address` is what the page answers when the worker asks where it is; a page
+// given none does not answer, like one whose scripts predate the question.
+function staleShell(options: { navigate?: boolean; address?: unknown } = {}) {
   const worker = loadWorker(async (request) => {
     const { pathname } = new URL(request.url);
     if (pathname.startsWith("/_next/static/chunks/gone")) {
@@ -268,7 +291,14 @@ function staleShell(options: { navigate?: boolean } = {}) {
       : page();
   });
   const navigate = vi.fn(async () => undefined);
-  const postMessage = vi.fn();
+  const postMessage = vi.fn((message: unknown, transfer?: ReplyPort[]) => {
+    if (
+      "address" in options &&
+      (message as { type?: unknown }).type === "sourceweft-shell-address"
+    ) {
+      transfer?.[0]?.postMessage(options.address);
+    }
+  });
   worker.windows.set("app", {
     url: `${ORIGIN}/dashboard/chat`,
     ...(options.navigate === false ? {} : { navigate }),
@@ -303,6 +333,40 @@ test("a build file the server no longer has drops the cached pages and reloads t
   // The reloaded page comes from the network, not from the cache.
   const reloaded = await worker.dispatch("/dashboard/chat");
   expect(reloaded?.headers.get("server-timing")).toBeNull();
+});
+
+test("the page reloads at the address it says it is on now", async () => {
+  const { worker, navigate } = staleShell({
+    address: `${ORIGIN}/dashboard/chat/thread-1`,
+  });
+  await worker.dispatch("/dashboard/chat");
+  await worker.dispatch("/_next/static/chunks/gone.js", "no-cors", "app");
+  expect(navigate).toHaveBeenCalledExactlyOnceWith(
+    `${ORIGIN}/dashboard/chat/thread-1`,
+  );
+});
+
+test("a page that does not answer reloads at the address it was opened with", async () => {
+  const { worker, navigate, postMessage } = staleShell();
+  await worker.dispatch("/dashboard/chat");
+  await worker.dispatch("/_next/static/chunks/gone.js", "no-cors", "app");
+  expect(postMessage).toHaveBeenCalledExactlyOnceWith(
+    { type: "sourceweft-shell-address" },
+    [expect.anything()],
+  );
+  expect(worker.waits).toEqual([1000]);
+  expect(navigate).toHaveBeenCalledExactlyOnceWith(`${ORIGIN}/dashboard/chat`);
+});
+
+test.each([
+  ["another site", "https://example.com/dashboard/chat/thread-1"],
+  ["not an address", "thread-1"],
+  ["not text", { href: `${ORIGIN}/dashboard/chat/thread-1` }],
+])("an answer that is %s is ignored", async (_name, address) => {
+  const { worker, navigate } = staleShell({ address });
+  await worker.dispatch("/dashboard/chat");
+  await worker.dispatch("/_next/static/chunks/gone.js", "no-cors", "app");
+  expect(navigate).toHaveBeenCalledExactlyOnceWith(`${ORIGIN}/dashboard/chat`);
 });
 
 test("a missing build file reloads the page at most once a minute", async () => {
