@@ -1,12 +1,18 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { FILE_VIEWER_ASSET_VERSION } from "../../packages/preview/src/asset-base.mjs";
+import { BUILD_SHA } from "./lib/app-version";
 import nextConfig from "./next.config";
 
 describe("next.config security headers", () => {
   it("sets the baseline security headers on every route and the framing and referrer policy on pages", async () => {
     const headers = (await nextConfig.headers!()).filter(
-      ({ headers: rule }) => !rule.some(({ key }) => key === "Cache-Control"),
+      ({ headers: rule }) =>
+        !rule.some(
+          ({ key }) => key === "Cache-Control" || key === "x-sourceweft-build",
+        ),
     );
 
     expect(headers).toEqual([
@@ -58,5 +64,25 @@ describe("next.config security headers", () => {
     expect(
       headers.filter(({ source }) => /^\/(_next|api)\//.test(source)),
     ).toEqual([]);
+  });
+
+  it("names the build on the pages the iOS app's service worker keeps", async () => {
+    const named = (await nextConfig.headers!()).filter(({ headers: rule }) =>
+      rule.some(({ key }) => key === "x-sourceweft-build"),
+    );
+    // The worker compares this header on exactly the pages it caches.
+    const worker = readFileSync(resolve(__dirname, "public/sw.js"), "utf8");
+    const kept = /const SHELL_PATHS = new Set\(\[([^\]]+)\]\)/.exec(
+      worker,
+    )?.[1];
+    expect(named.map(({ source }) => source).sort()).toEqual(
+      [...(kept ?? "").matchAll(/"([^"]+)"/g)].map((match) => match[1]).sort(),
+    );
+    expect(worker).toContain('const BUILD_HEADER = "x-sourceweft-build";');
+    for (const rule of named) {
+      expect(rule.headers).toEqual([
+        { key: "x-sourceweft-build", value: BUILD_SHA },
+      ]);
+    }
   });
 });

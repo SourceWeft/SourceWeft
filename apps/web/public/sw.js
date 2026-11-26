@@ -6,7 +6,9 @@
  * - the app shell pages (sign-in and the chat dashboard), served from the cache
  *   at once and refreshed in the background (stale-while-revalidate). These
  *   pages carry no account data: the signed-in state and all content load
- *   through the API afterwards, which this worker never touches;
+ *   through the API afterwards, which this worker never touches. When the
+ *   refreshed page is from another build, the page just opened reloads before
+ *   it has shown anything, so a launch after a deploy shows one page, not two;
  * - the build's static files under /_next/static, which never change at a URL
  *   (cache first), so a cached page still finds its scripts after a deploy;
  *   a file the server no longer has shows that the page on screen is from
@@ -35,6 +37,10 @@ const SHELL_STALE_MESSAGE = "sourceweft-shell-stale";
 const SHELL_ADDRESS_MESSAGE = "sourceweft-shell-address";
 // How long a page gets to say which address it is on before it is reloaded anyway.
 const ADDRESS_WAIT_MS = 1000;
+// How long a page just opened gets to show that it is already on screen.
+const SHOWN_WAIT_MS = 100;
+// The header next.config.ts puts on the shell pages: which build rendered them.
+const BUILD_HEADER = "x-sourceweft-build";
 // Where the time of the last such reload is kept, so it survives the worker stopping.
 const STALE_RELOAD_MARK = "/__shell-stale-reload";
 const STALE_RELOAD_GAP_MS = 60_000;
@@ -133,6 +139,15 @@ async function shellPage(event) {
         event.waitUntil(
           warmStaticFiles(response.clone()).catch(() => undefined),
         );
+        if (cached && fromAnotherBuild(cached, response)) {
+          // Before the page is asked to reload, so the reload cannot get the old page again.
+          await dropShellPages(cache);
+          event.waitUntil(
+            reloadBeforeShown(event.resultingClientId, cache).catch(
+              () => undefined,
+            ),
+          );
+        }
       }
       await cache.put(event.request, response.clone());
     }
@@ -142,6 +157,29 @@ async function shellPage(event) {
   if (!cached) return fresh;
   event.waitUntil(fresh.catch(() => undefined));
   return markedFromCache(cached);
+}
+
+// The server names its build on every shell page. A cached page without the
+// name is from before the server sent it, which is another build as well; when
+// neither has it there is nothing to compare.
+function fromAnotherBuild(cached, fresh) {
+  const before = cached.headers.get(BUILD_HEADER);
+  const now = fresh.headers.get(BUILD_HEADER);
+  return (before !== null || now !== null) && before !== now;
+}
+
+// The page that was just given the cached copy is from before a deploy. Left
+// alone it shows, asks the server for something, and is then loaded again by
+// Next.js: the person sees the app appear twice. The server's answer usually
+// arrives before the page has rendered, while its launch cover is still up, so
+// reloading it now is not seen. A page that answers is already on screen and
+// is left to Next.js; one that does not answer has not rendered yet.
+async function reloadBeforeShown(clientId, cache) {
+  const client = clientId ? await self.clients.get(clientId) : undefined;
+  if (!client || typeof client.navigate !== "function") return;
+  if ((await askAddress(client, SHOWN_WAIT_MS)) !== undefined) return;
+  if (!(await reloadAllowed(cache))) return;
+  await client.navigate(client.url);
 }
 
 /** Adds a Server-Timing entry the page reads to tell a cached launch from a network one. */
@@ -178,21 +216,31 @@ async function staticFile(event) {
 // At most once a minute, in case the new page's files are missing as well.
 async function dropStaleShell(clientId) {
   const cache = await caches.open(SHELL_CACHE);
-  let dropped = false;
-  for (const path of SHELL_PATHS) {
-    if (await cache.delete(path)) dropped = true;
-  }
-  if (!dropped) return;
-
-  const last = Number(await (await cache.match(STALE_RELOAD_MARK))?.text());
-  if (Date.now() - last < STALE_RELOAD_GAP_MS) return;
-  await cache.put(STALE_RELOAD_MARK, new Response(String(Date.now())));
+  if (!(await dropShellPages(cache))) return;
+  if (!(await reloadAllowed(cache))) return;
 
   const asking = clientId ? await self.clients.get(clientId) : undefined;
   const pages = asking
     ? [asking]
     : await self.clients.matchAll({ type: "window" });
   await Promise.all(pages.map(reloadPage));
+}
+
+/** Removes the cached pages; true when there was one. */
+async function dropShellPages(cache) {
+  let dropped = false;
+  for (const path of SHELL_PATHS) {
+    if (await cache.delete(path)) dropped = true;
+  }
+  return dropped;
+}
+
+/** True, and notes the time, unless this worker reloaded a page within the last minute. */
+async function reloadAllowed(cache) {
+  const last = Number(await (await cache.match(STALE_RELOAD_MARK))?.text());
+  if (Date.now() - last < STALE_RELOAD_GAP_MS) return false;
+  await cache.put(STALE_RELOAD_MARK, new Response(String(Date.now())));
+  return true;
 }
 
 // Navigating from here also reloads a page whose own scripts are too old to
@@ -214,20 +262,24 @@ async function reloadPage(client) {
 // page is asked where it is now, and reloads there. A page that does not
 // answer in time, or answers with anything but an address on this site, is
 // reloaded at the address it was opened with.
-function currentAddress(client) {
+async function currentAddress(client) {
+  return (await askAddress(client, ADDRESS_WAIT_MS)) ?? client.url;
+}
+
+/** The address the page says it is on, or nothing when it does not say within `waitMs`. */
+function askAddress(client, waitMs) {
   return new Promise((resolve) => {
-    const opened = client.url;
-    const timer = setTimeout(() => resolve(opened), ADDRESS_WAIT_MS);
+    const timer = setTimeout(() => resolve(undefined), waitMs);
     try {
       const channel = new MessageChannel();
       channel.port1.onmessage = (event) => {
         clearTimeout(timer);
-        resolve(sameSiteAddress(event.data) ?? opened);
+        resolve(sameSiteAddress(event.data));
       };
       client.postMessage({ type: SHELL_ADDRESS_MESSAGE }, [channel.port2]);
     } catch {
       clearTimeout(timer);
-      resolve(opened);
+      resolve(undefined);
     }
   });
 }

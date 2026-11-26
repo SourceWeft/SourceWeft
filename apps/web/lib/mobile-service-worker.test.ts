@@ -81,6 +81,7 @@ function loadWorker(network: (request: Request) => Promise<Response>) {
     path: string,
     mode: RequestMode = "navigate",
     clientId = "",
+    resultingClientId = "",
   ) {
     const request = new Request(`${ORIGIN}${path}`);
     Object.defineProperty(request, "mode", { value: mode });
@@ -89,13 +90,19 @@ function loadWorker(network: (request: Request) => Promise<Response>) {
     listeners.get("fetch")?.({
       request,
       clientId,
+      resultingClientId,
       respondWith: (response: Promise<Response>) => {
         responded = response;
       },
       waitUntil: (promise: Promise<unknown>) => background.push(promise),
     });
     const response = await responded;
-    await Promise.all(background);
+    // Work started with waitUntil may itself call waitUntil, as in a real worker.
+    for (let settled = 0; settled < background.length;) {
+      const pending = background.slice(settled);
+      settled = background.length;
+      await Promise.all(pending);
+    }
     return response;
   }
 
@@ -414,4 +421,131 @@ test("without a client id every open page is reloaded", async () => {
   await worker.dispatch("/dashboard/chat");
   await worker.dispatch("/_next/static/chunks/gone.js", "no-cors");
   expect(navigate).toHaveBeenCalledTimes(1);
+});
+
+// The server names its build on the shell pages. `server.build` is the build
+// it runs now: changing it is a deploy. `answers` is whether the page just
+// opened says where it is, which only a page already on screen does.
+function deployedShell(options: { answers?: boolean } = {}) {
+  const server: { build: string | null } = { build: "build-a" };
+  const worker = loadWorker(async (request) => {
+    const { pathname } = new URL(request.url);
+    if (pathname.startsWith("/_next/static/")) {
+      return new Response("file", { status: 200 });
+    }
+    return new Response(`page from ${server.build}`, {
+      status: 200,
+      headers: {
+        "content-type": "text/html",
+        ...(server.build ? { "x-sourceweft-build": server.build } : {}),
+      },
+    });
+  });
+  const navigate = vi.fn(async () => undefined);
+  const postMessage = vi.fn((_message: unknown, transfer?: ReplyPort[]) => {
+    if (options.answers) {
+      transfer?.[0]?.postMessage(`${ORIGIN}/dashboard/chat?draft=1`);
+    }
+  });
+  worker.windows.set("launch", {
+    url: `${ORIGIN}/dashboard/chat`,
+    navigate,
+    postMessage,
+  });
+  const launch = () =>
+    worker.dispatch("/dashboard/chat", "navigate", "", "launch");
+  return { worker, server, navigate, postMessage, launch };
+}
+
+test("a page cached before a deploy reloads before it has shown anything", async () => {
+  const { worker, server, navigate, launch } = deployedShell();
+  await launch();
+  await worker.dispatch("/auth/sign-in");
+  expect(navigate).not.toHaveBeenCalled();
+
+  server.build = "build-b";
+  const first = await launch();
+
+  // The cached page still opens at once; the reload follows.
+  expect(first?.headers.get("server-timing")).toBe("sw-shell-cache");
+  expect(await first?.text()).toBe("page from build-a");
+  expect(navigate).toHaveBeenCalledExactlyOnceWith(`${ORIGIN}/dashboard/chat`);
+  expect(worker.waits).toEqual([100]);
+  // The other cached page is from the old build as well.
+  const kept = [...(worker.stores.get("sourceweft-shell-v1")?.keys() ?? [])];
+  expect(kept.some((url) => url.endsWith("/auth/sign-in"))).toBe(false);
+
+  // The reload gets the new build, and nothing reloads again.
+  const reloaded = await launch();
+  expect(await reloaded?.text()).toBe("page from build-b");
+  expect(navigate).toHaveBeenCalledTimes(1);
+});
+
+test("a launch with no deploy in between reloads nothing", async () => {
+  const { navigate, postMessage, launch } = deployedShell();
+  await launch();
+  const again = await launch();
+  expect(again?.headers.get("server-timing")).toBe("sw-shell-cache");
+  expect(navigate).not.toHaveBeenCalled();
+  expect(postMessage).not.toHaveBeenCalled();
+});
+
+test("a page cached before the server named its build counts as another build", async () => {
+  const { server, navigate, launch } = deployedShell();
+  server.build = null;
+  await launch();
+  await launch();
+  expect(navigate).not.toHaveBeenCalled();
+
+  server.build = "build-b";
+  await launch();
+  expect(navigate).toHaveBeenCalledTimes(1);
+});
+
+test("a page that is already on screen is left to load the new build itself", async () => {
+  const { server, navigate, postMessage, launch } = deployedShell({
+    answers: true,
+  });
+  await launch();
+  server.build = "build-b";
+  await launch();
+  expect(postMessage).toHaveBeenCalledExactlyOnceWith(
+    { type: "sourceweft-shell-address" },
+    [expect.anything()],
+  );
+  expect(navigate).not.toHaveBeenCalled();
+  // The next launch still starts from the new build.
+  expect(await (await launch())?.text()).toBe("page from build-b");
+});
+
+test("a second deploy within a minute does not reload the page again", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    vi.setSystemTime(new Date("2026-11-26T14:00:00Z"));
+    const { server, navigate, launch } = deployedShell();
+    await launch();
+    server.build = "build-b";
+    await launch();
+    expect(navigate).toHaveBeenCalledTimes(1);
+
+    vi.setSystemTime(new Date("2026-11-26T14:00:30Z"));
+    server.build = "build-c";
+    await launch();
+    expect(navigate).toHaveBeenCalledTimes(1);
+
+    vi.setSystemTime(new Date("2026-11-26T14:02:00Z"));
+    server.build = "build-d";
+    await launch();
+    expect(navigate).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a navigation whose page cannot be found reloads nothing", async () => {
+  const { worker, server, navigate, launch } = deployedShell();
+  await launch();
+  server.build = "build-b";
+  await worker.dispatch("/dashboard/chat");
+  expect(navigate).not.toHaveBeenCalled();
 });
