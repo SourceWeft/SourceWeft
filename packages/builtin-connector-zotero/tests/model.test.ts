@@ -660,8 +660,8 @@ test("toConnectorItem caps lengths and entry counts", () => {
   assert.equal((item.metadata.collections as string[]).length, 100);
   assert.equal(
     item.contentHash,
-    contentHashOf(group, paths),
-    "the hash covers every path even when metadata is capped",
+    contentHashOf(group, item.metadata.collections as string[]),
+    "the hash covers exactly the stored (filtered and capped) paths",
   );
 });
 

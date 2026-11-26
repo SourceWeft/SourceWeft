@@ -184,7 +184,7 @@ test("the scan hash and the extract hash agree for the same library", async () =
   assert.equal(result.item.title, scanned.title);
 });
 
-test("an invalid itemKey throws before any request", async () => {
+test("an invalid itemKey is skipped before any request", async () => {
   for (const itemKey of [
     "short",
     "abcdefgh",
@@ -204,10 +204,103 @@ test("an invalid itemKey throws before any request", async () => {
         }),
       }),
       (error) =>
-        error instanceof ZoteroError && error.code === "ZOTERO_CONFIG_INVALID",
+        error instanceof ConnectorItemSkipError &&
+        error.reason === "unreadable",
     );
     assert.equal(fake.requests.length, 0);
   }
+});
+
+test("an invalid libraryType or libraryId is skipped before any request", async () => {
+  for (const [libraryType, libraryId] of [
+    ["team", "1"],
+    ["user", 1],
+    [undefined, undefined],
+  ]) {
+    const { fake, client } = setup(richLibrary);
+    await assert.rejects(
+      extractZoteroItem({
+        client,
+        item: discovered({
+          metadata: { itemKey: "ARTICLE1", libraryType, libraryId },
+        }),
+      }),
+      (error) =>
+        error instanceof ConnectorItemSkipError &&
+        error.reason === "unreadable",
+    );
+    assert.equal(fake.requests.length, 0);
+  }
+});
+
+test("an item too large to read in full is skipped as unreadable", async () => {
+  const attachments = Array.from({ length: 60 }, (_, i) =>
+    raw(`ATT${String(i).padStart(5, "0")}`, "attachment", {
+      parentItem: "ARTICLE1",
+      title: `Attachment number ${i}`,
+    }),
+  );
+  const fake = startFakeZotero({
+    version: 5,
+    items: [article],
+    children: { ARTICLE1: attachments },
+  });
+  const client = createZoteroClient({
+    fetch: fake.fetch,
+    credential: { secret: KEY },
+    libraryPrefix: "users/1",
+    sleep: async () => undefined,
+    maxResponseBytes: 2_000,
+  });
+  await assert.rejects(
+    extractZoteroItem({ client, item: discovered() }),
+    (error) =>
+      error instanceof ConnectorItemSkipError && error.reason === "unreadable",
+  );
+});
+
+test("scan and extract hash alike for many, unknown and over-long collection paths", async () => {
+  const collections = Array.from({ length: 120 }, (_, i) => {
+    const key = `COLL${String(i).padStart(4, "0")}`;
+    return {
+      key,
+      version: 1,
+      data: { key, name: `Collection ${i}`, parentCollection: false },
+    };
+  });
+  collections.push({
+    key: "COLLLONG",
+    version: 1,
+    data: { key: "COLLLONG", name: "L".repeat(2_500), parentCollection: false },
+  });
+  const memberOf = [
+    "UNKNOWN1",
+    "COLLLONG",
+    ...collections.slice(0, 120).map((c) => c.key),
+  ];
+  const { client } = setup({
+    items: [raw("ARTICLE1", "book", { title: "Many", collections: memberOf })],
+    collections,
+  });
+  let scanned: ConnectorItem | undefined;
+  for await (const page of scanLibrary({
+    client,
+    libraryType: "user",
+    libraryId: "1",
+    selectedCollectionKeys: [],
+    cursor: null,
+  })) {
+    scanned = page.items.find(
+      (entry) => entry.externalId === "zotero:ARTICLE1",
+    );
+  }
+  assert.ok(scanned);
+  const stored = scanned.metadata.collections;
+  assert.ok(Array.isArray(stored));
+  assert.equal(stored.length, 100);
+  assert.ok(stored.every((path) => path !== "" && path.length <= 2_000));
+  const result = await extractZoteroItem({ client, item: scanned });
+  assert.equal(result.item.contentHash, scanned.contentHash);
 });
 
 test("an attachment key that is not a Zotero key is never used in a URL", async () => {

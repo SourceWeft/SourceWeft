@@ -378,7 +378,8 @@ export function toConnectorItem(
     mimeType: "text/markdown",
     sizeBytes: null,
     externalUpdatedAt: parseDate(item.data.dateModified),
-    contentHash: contentHashOf(group, collectionPaths),
+    // The list stored in metadata, so a later extract that reads it agrees.
+    contentHash: contentHashOf(group, paths),
     metadata,
   };
 }

@@ -49,15 +49,16 @@ export async function extractZoteroItem(
 ): Promise<ConnectorExtractedText> {
   const { client, item } = input;
   const { itemKey, libraryType, libraryId } = item.metadata;
-  // Checked before any URL is built.
+  // Checked before any URL is built. Corrupt metadata on one item skips that
+  // item; it must not abort the whole run.
   if (typeof itemKey !== "string" || !ITEM_KEY.test(itemKey)) {
-    throw new ZoteroError("ZOTERO_CONFIG_INVALID");
+    throw new ConnectorItemSkipError("unreadable");
   }
   if (
     (libraryType !== "user" && libraryType !== "group") ||
     typeof libraryId !== "string"
   ) {
-    throw new ZoteroError("ZOTERO_CONFIG_INVALID");
+    throw new ConnectorItemSkipError("unreadable");
   }
   const collectionPaths = stringList(item.metadata.collections);
 
@@ -87,8 +88,11 @@ export async function extractZoteroItem(
   } catch (error) {
     if (
       error instanceof ZoteroError &&
-      error.code === "ZOTERO_LIBRARY_NOT_FOUND"
+      (error.code === "ZOTERO_LIBRARY_NOT_FOUND" ||
+        error.code === "ZOTERO_TOO_LARGE")
     ) {
+      // Deleted since the scan, or too big to read in full. Attachments are
+      // never capped: that would break equality with the scan's hash.
       throw new ConnectorItemSkipError("unreadable");
     }
     throw error;
