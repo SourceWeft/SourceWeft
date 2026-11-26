@@ -28,7 +28,7 @@ use super::{
 use base64::{engine::general_purpose::STANDARD, Engine};
 use flate2::read::GzDecoder;
 use minisign_verify::{PublicKey, Signature};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 #[cfg(unix)]
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
@@ -303,6 +303,71 @@ pub struct InstalledBundle {
     pub srt_version: String,
     /// The files of the bundle, excluding `manifest.json`.
     pub files: Vec<String>,
+}
+
+/// What the installed runtime says about itself, next to the app version it has to belong to.
+///
+/// Readiness only checks that the runtime starts and speaks this app's protocol, so a runtime
+/// built for an older app version keeps passing it for as long as the protocol number does not
+/// change, and nothing ever replaces it. This is the signal that closes that gap: the web UI
+/// reads `updateAvailable` and refreshes the runtime in the background. It is deliberately not
+/// part of readiness, so a runtime that still works stays usable when the refresh cannot
+/// download (offline, a build without a published release).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeInfo {
+    /// The version of this app build, the one an installed runtime has to belong to.
+    pub app_version: String,
+    /// The app version the installed runtime was built for; absent when nothing readable is
+    /// installed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub installed_app_version: Option<String>,
+    /// The sandbox-runtime (srt) version inside the installed runtime.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub installed_srt_version: Option<String>,
+    /// A runtime is installed, it belongs to another app version, and one is published for
+    /// this platform, so installing replaces it. False when nothing is installed (readiness
+    /// reports that on its own) and when nothing is published to install.
+    pub update_available: bool,
+}
+
+/// The largest `manifest.json` this reads; a real one is a few hundred bytes.
+const RUNTIME_MANIFEST_READ_LIMIT: u64 = 64 * 1024;
+
+/// Reads the installed runtime's header from `<app_data>/sandbox/current/manifest.json`.
+/// Lenient on purpose: an unreadable, oversized or unexpected file means "nothing known", never
+/// an error, because whether the runtime works at all is readiness's question.
+pub fn runtime_info(app_data: &Path, app_version: &str, published: bool) -> RuntimeInfo {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Header {
+        app_version: Option<String>,
+        srt_version: Option<String>,
+    }
+    let path = super::readiness::bundle_dir(app_data).join("manifest.json");
+    let header = File::open(&path)
+        .ok()
+        .and_then(|file| {
+            let mut bytes = Vec::new();
+            // One byte past the limit tells an oversized file from one that just fits.
+            file.take(RUNTIME_MANIFEST_READ_LIMIT + 1)
+                .read_to_end(&mut bytes)
+                .ok()?;
+            (bytes.len() as u64 <= RUNTIME_MANIFEST_READ_LIMIT).then_some(bytes)
+        })
+        .and_then(|bytes| serde_json::from_slice::<Header>(&bytes).ok());
+    let installed_app_version = header.as_ref().and_then(|h| h.app_version.clone());
+    let installed_srt_version = header.and_then(|h| h.srt_version);
+    let update_available = published
+        && installed_app_version
+            .as_deref()
+            .is_some_and(|installed| installed != app_version);
+    RuntimeInfo {
+        app_version: app_version.to_string(),
+        installed_app_version,
+        installed_srt_version,
+        update_available,
+    }
 }
 
 // ------------------------------------------------------------------ manifest
@@ -1049,6 +1114,16 @@ fn install_around_stop<T>(stop_first: bool, stop: &dyn Fn(), install: impl FnOnc
 }
 
 impl LocalHost {
+    /// The installed runtime next to this app build's version; see [`RuntimeInfo`]. A small
+    /// file read, safe to call on every status poll.
+    pub fn sandbox_runtime_info(&self) -> RuntimeInfo {
+        runtime_info(
+            &self.base,
+            env!("CARGO_PKG_VERSION"),
+            InstallSpec::runtime_published(),
+        )
+    }
+
     /// Downloads and installs the sandbox runtime for this build. While it runs,
     /// `sandbox_readiness()` reports `installing`; afterwards (success or failure) the running
     /// sidecar is shut down, the readiness cache is invalidated, and on success the result is
@@ -2657,6 +2732,96 @@ mod tests {
         assert!(!dest("c").exists(), "nothing is created for a refused URL");
         finish(stop, handle);
         finish(stop_r, handle_r);
+    }
+
+    fn write_installed_manifest(app_data: &Path, body: &str) {
+        let dir = crate::local_host::readiness::bundle_dir(app_data);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("manifest.json"), body).unwrap();
+    }
+
+    #[test]
+    fn a_runtime_built_for_another_app_version_is_an_update() {
+        // The reported case: rc.9's runtime stays installed under an rc.11 app because both
+        // speak the same protocol, so readiness never calls it stale.
+        let app_data = tempfile::tempdir().unwrap();
+        write_installed_manifest(
+            app_data.path(),
+            r#"{"schemaVersion":1,"protocolVersion":3,"appVersion":"0.3.0-rc.9","target":"aarch64-apple-darwin","srtVersion":"0.0.81","files":{}}"#,
+        );
+        let info = runtime_info(app_data.path(), "0.3.0-rc.11", true);
+        assert_eq!(info.app_version, "0.3.0-rc.11");
+        assert_eq!(info.installed_app_version.as_deref(), Some("0.3.0-rc.9"));
+        assert_eq!(info.installed_srt_version.as_deref(), Some("0.0.81"));
+        assert!(info.update_available);
+    }
+
+    #[test]
+    fn a_runtime_for_this_app_version_is_current() {
+        let app_data = tempfile::tempdir().unwrap();
+        write_installed_manifest(
+            app_data.path(),
+            r#"{"appVersion":"0.3.0-rc.11","srtVersion":"0.0.83"}"#,
+        );
+        let info = runtime_info(app_data.path(), "0.3.0-rc.11", true);
+        assert!(!info.update_available);
+        assert_eq!(info.installed_srt_version.as_deref(), Some("0.0.83"));
+    }
+
+    #[test]
+    fn nothing_is_offered_when_nothing_is_published_to_install() {
+        // A build without a release for this platform (or a development build) must not be
+        // told to download something that cannot be downloaded.
+        let app_data = tempfile::tempdir().unwrap();
+        write_installed_manifest(app_data.path(), r#"{"appVersion":"0.3.0-rc.9"}"#);
+        assert!(!runtime_info(app_data.path(), "0.3.0-rc.11", false).update_available);
+    }
+
+    #[test]
+    fn a_missing_unreadable_or_oversized_manifest_means_nothing_known() {
+        // Whether the runtime works at all is readiness's question; this never errors.
+        let app_data = tempfile::tempdir().unwrap();
+        let missing = runtime_info(app_data.path(), "0.3.0-rc.11", true);
+        assert_eq!(missing.installed_app_version, None);
+        assert!(!missing.update_available);
+
+        write_installed_manifest(app_data.path(), "not json");
+        let garbage = runtime_info(app_data.path(), "0.3.0-rc.11", true);
+        assert_eq!(garbage.installed_app_version, None);
+        assert!(!garbage.update_available);
+
+        let padding = "x".repeat(RUNTIME_MANIFEST_READ_LIMIT as usize);
+        write_installed_manifest(
+            app_data.path(),
+            &format!(r#"{{"appVersion":"0.3.0-rc.9","note":"{padding}"}}"#),
+        );
+        let oversized = runtime_info(app_data.path(), "0.3.0-rc.11", true);
+        assert_eq!(oversized.installed_app_version, None);
+        assert!(!oversized.update_available);
+    }
+
+    #[test]
+    fn runtime_info_serialises_camel_case_and_omits_what_is_unknown() {
+        let app_data = tempfile::tempdir().unwrap();
+        let json = serde_json::to_value(runtime_info(app_data.path(), "0.3.0-rc.11", true)).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "appVersion": "0.3.0-rc.11", "updateAvailable": false })
+        );
+        write_installed_manifest(
+            app_data.path(),
+            r#"{"appVersion":"0.3.0-rc.9","srtVersion":"0.0.81"}"#,
+        );
+        let json = serde_json::to_value(runtime_info(app_data.path(), "0.3.0-rc.11", true)).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "appVersion": "0.3.0-rc.11",
+                "installedAppVersion": "0.3.0-rc.9",
+                "installedSrtVersion": "0.0.81",
+                "updateAvailable": true
+            })
+        );
     }
 }
 

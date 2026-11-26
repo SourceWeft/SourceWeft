@@ -72,7 +72,8 @@ export function installSandboxRuntime(): Promise<SandboxReadiness> {
 
 /**
  * Installs the runtime without being asked, when the only thing this computer is missing is
- * the runtime download (`downloadRuntime`: not installed, out of date or damaged). Every other
+ * the runtime download (`downloadRuntime`: not installed, out of date or damaged), or when it
+ * works but was installed by an older app version (`runtime.updateAvailable`). Every other
  * remedy needs the user and is left to Settings, and an install that is already running is
  * left alone. At most one install is started this way per page load; a failure stays in the
  * state for the user to retry and nothing here tries again.
@@ -83,13 +84,16 @@ export function installSandboxRuntimeAutomatically(): Promise<void> {
   // Overlapping calls (the dashboard effect runs again) share one check.
   automaticCheck ??= (async () => {
     try {
-      const readiness = await settledReadiness();
-      if (
-        readiness?.state !== "needsSetup" ||
-        readiness.remedy !== "downloadRuntime" ||
-        readiness.code === "installing"
-      )
-        return;
+      const { readiness, runtime } = await settledStatus();
+      // A working runtime from an older app version is refreshed too; if that fails the old
+      // one keeps working and the failure is left in the state.
+      const outdated =
+        readiness?.state === "ready" && runtime?.updateAvailable === true;
+      const missing =
+        readiness?.state === "needsSetup" &&
+        readiness.remedy === "downloadRuntime" &&
+        readiness.code !== "installing";
+      if (!outdated && !missing) return;
       automaticAttempted = true;
       // The failure is kept in the state; there is nobody here to report it to.
       await installSandboxRuntime().catch(() => {});
@@ -111,11 +115,11 @@ const SETTLE_DELAY_MS = 500;
  * skip the install for the whole page load. Reads again for at most ten seconds, then
  * returns whatever the host says. This waits for a status, it never repeats an install.
  */
-async function settledReadiness() {
+async function settledStatus() {
   for (let read = 1; ; read += 1) {
-    const { readiness } = await desktopBridge.localHostStatus();
-    if (!isSandboxProbePending(readiness) || read >= SETTLE_READS)
-      return readiness;
+    const status = await desktopBridge.localHostStatus();
+    if (!isSandboxProbePending(status.readiness) || read >= SETTLE_READS)
+      return status;
     await new Promise((resolve) => setTimeout(resolve, SETTLE_DELAY_MS));
   }
 }

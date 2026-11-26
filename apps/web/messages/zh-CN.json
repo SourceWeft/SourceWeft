@@ -1404,7 +1404,10 @@
         "elevatedSetupDescription": "需要执行一次管理员操作。它会把 SourceWeft 沙箱辅助程序安装到 Program Files 下，并在这台电脑上为它创建受限的沙箱账户和网络规则。Windows 会请求你的批准；SourceWeft 不会获取你的密码。",
         "elevatedSetup": "设置（需要管理员批准）",
         "elevatedSetupRunning": "正在设置…",
-        "checkAgain": "重新检查"
+        "checkAgain": "重新检查",
+        "updateTitle": "更新沙箱运行时",
+        "updateDescription": "这台电脑上的沙箱运行时来自旧版本的应用。应用会自动刷新；如果还没有完成，请点击“更新”。",
+        "update": "更新沙箱运行时"
       },
       "remoteAccessTitle": "允许其他设备访问",
       "remoteAccessDescription": "让使用同一账户的其他设备访问这台电脑。它们可以访问任务文件夹和已授权的工作目录。即使关闭远程访问，你仍可在这台电脑上继续工作。",

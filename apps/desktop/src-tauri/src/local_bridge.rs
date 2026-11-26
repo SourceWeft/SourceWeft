@@ -1,7 +1,7 @@
 //! Narrow discovery bridge for the existing Web UI. No separate native pages.
 //! Workspace/file operations stay internal until authenticated dispatch is wired.
 use serde::Serialize;
-use sourceweft_desktop::local_host::readiness::SandboxReadiness;
+use sourceweft_desktop::local_host::{bundle_install::RuntimeInfo, readiness::SandboxReadiness};
 use tauri::{AppHandle, Manager, WebviewWindow};
 
 /// What a local command reports when no local host is managed: the platform has no local
@@ -21,6 +21,11 @@ pub struct LocalHostStatus {
     connection_error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     readiness: Option<SandboxReadiness>,
+    /// The installed sandbox runtime next to this app's version, so the Web UI can refresh a
+    /// runtime that predates the app. Absent when no local host is managed; older builds never
+    /// send it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    runtime: Option<RuntimeInfo>,
 }
 
 #[tauri::command]
@@ -59,13 +64,16 @@ pub async fn local_host_status(
     let storage_initialized = host.is_some();
     // macOS, Linux and Windows are supported only once a readiness probe on the managed
     // LocalHost reports something other than Unsupported; every other platform is unsupported.
-    let readiness = match host {
-        Some(host) => Some(
-            tauri::async_runtime::spawn_blocking(move || host.sandbox_readiness())
-                .await
-                .map_err(|error| format!("Sandbox readiness check failed: {error}"))?,
-        ),
-        None => None,
+    let (readiness, runtime) = match host {
+        Some(host) => {
+            let (readiness, runtime) = tauri::async_runtime::spawn_blocking(move || {
+                (host.sandbox_readiness(), host.sandbox_runtime_info())
+            })
+            .await
+            .map_err(|error| format!("Sandbox readiness check failed: {error}"))?;
+            (Some(readiness), Some(runtime))
+        }
+        None => (None, None),
     };
     let platform_supported =
         matches!(readiness, Some(ref r) if !matches!(r, SandboxReadiness::Unsupported));
@@ -78,6 +86,7 @@ pub async fn local_host_status(
         connected: remote.connected,
         connection_error: remote.error,
         readiness,
+        runtime,
     })
 }
 
