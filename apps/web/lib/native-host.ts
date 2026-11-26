@@ -42,6 +42,27 @@ export function purchasesAllowedIn(host: NativeHost): boolean {
   return host.platform !== null && host.platform !== "ios";
 }
 
+/**
+ * Whether Google Tag Manager, and with it Google Analytics and Microsoft
+ * Clarity, may load here.
+ *
+ * Not in the iOS app: Clarity records the screen and both tools set
+ * identifiers their vendors also use for advertising, which the App Store
+ * counts as tracking and would require the system tracking prompt. A mobile
+ * app whose platform is not known yet is treated the same. A host that is not
+ * determined yet gets the same answer, unlike purchases: a script that has
+ * loaded cannot be taken back.
+ */
+export function thirdPartyTagsAllowedIn(host: NativeHost): boolean {
+  if (host.kind === "unknown") {
+    return false;
+  }
+  if (host.kind !== "mobile") {
+    return true;
+  }
+  return host.platform !== null && host.platform !== "ios";
+}
+
 /** True in the iOS app only. */
 export function isIosApp(host: NativeHost): boolean {
   return host.kind === "mobile" && host.platform === "ios";

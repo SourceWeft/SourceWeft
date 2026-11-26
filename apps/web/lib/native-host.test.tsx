@@ -10,6 +10,7 @@ import {
   isIosApp,
   purchasesAllowedIn,
   resetNativeHostForTests,
+  thirdPartyTagsAllowedIn,
   useNativeHost,
   usePurchasesAllowed,
 } from "./native-host";
@@ -62,6 +63,28 @@ describe("purchasesAllowedIn", () => {
     expect(isIosApp({ kind: "mobile", platform: "ios" })).toBe(true);
     expect(purchasesAllowedIn({ kind: "mobile", platform: null })).toBe(false);
     expect(isIosApp({ kind: "mobile", platform: null })).toBe(false);
+  });
+});
+
+describe("thirdPartyTagsAllowedIn", () => {
+  it("allows the tag manager on the web, on the desktop app and on Android", () => {
+    for (const host of [
+      { kind: "web" },
+      { kind: "desktop" },
+      { kind: "mobile", platform: "android" },
+    ] as const) {
+      expect(thirdPartyTagsAllowedIn(host)).toBe(true);
+    }
+  });
+
+  it("keeps it out of the iOS app, an unnamed mobile app and a host not known yet", () => {
+    for (const host of [
+      { kind: "mobile", platform: "ios" },
+      { kind: "mobile", platform: null },
+      { kind: "unknown" },
+    ] as const) {
+      expect(thirdPartyTagsAllowedIn(host)).toBe(false);
+    }
   });
 });
 
