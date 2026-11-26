@@ -1,25 +1,8 @@
-import type { ConnectorAdapter } from "@sourceweft/contracts";
 import type {
   CapabilityConnectorContribution,
   CreateConnectorAdapters,
 } from "@sourceweft/contracts/capability-host-services";
-import { toBackendDiscourseManifest } from "./backend-manifest";
-
-// replaced in Task 6: a marker adapter that only exposes the manifest. It
-// discovers nothing and refuses every extract and action, so an enabled
-// deployment can register the connector before the real adapter exists.
-function createPlaceholderAdapter(): ConnectorAdapter {
-  return {
-    getManifest: toBackendDiscourseManifest,
-    async *discover() {},
-    async extract() {
-      throw new Error("Discourse adapter is not implemented yet");
-    },
-    async executeAction() {
-      throw new Error("Discourse adapter is not implemented yet");
-    },
-  };
-}
+import { createDiscourseAdapter } from "./adapter";
 
 /**
  * Discourse is gated behind a strict boolean deployment switch, exactly like
@@ -33,6 +16,7 @@ function createPlaceholderAdapter(): ConnectorAdapter {
 export const createConnectorAdapters: CreateConnectorAdapters = ({
   env,
   publicFetch,
+  logger,
 }): CapabilityConnectorContribution => {
   const activation = env
     .get("DISCOURSE_CONNECTOR_ENABLED")
@@ -50,7 +34,7 @@ export const createConnectorAdapters: CreateConnectorAdapters = ({
     );
   }
   return {
-    adapters: [createPlaceholderAdapter()],
+    adapters: [createDiscourseAdapter({ publicFetch, logger })],
     agentToolDefs: [],
   };
 };

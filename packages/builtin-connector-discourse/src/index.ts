@@ -8,6 +8,12 @@ export { builtinDiscourseConnectorCapabilityManifest } from "./manifest";
 export { toBackendDiscourseManifest } from "./backend-manifest";
 export { createConnectorAdapters } from "./host-services";
 export {
+  createDiscourseAdapter,
+  DiscourseAdapterError,
+  type DiscourseAdapterInput,
+} from "./adapter";
+export { browseForum, searchForum, describeForum } from "./selection";
+export {
   PAGE_SIZE_ASSUMED,
   MAX_TOPICS_PER_CATEGORY,
   MAX_TOPICS,

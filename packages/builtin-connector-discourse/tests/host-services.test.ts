@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { ConnectorPublicFetchScope } from "@sourceweft/contracts/capability-host-services";
 import { createConnectorAdapters } from "../src/host-services";
+import { adapterForum } from "./helpers/adapter-fixtures";
+import { startFakeDiscourse } from "./helpers/fake-discourse";
 
 // Records every env name the capability reads, so a test can prove it consults
 // exactly DISCOURSE_CONNECTOR_ENABLED and nothing else.
@@ -95,4 +97,46 @@ test("Discourse capability rejects a malformed activation value", () => {
 test("an enabled Discourse capability fails fast without a host-provided publicFetch", () => {
   const { env } = environment({ DISCOURSE_CONNECTOR_ENABLED: "true" });
   assert.throws(() => createConnectorAdapters({ env }), /publicFetch/);
+});
+
+test("the registered adapter is the real one, built on the host's public fetch", async () => {
+  const fake = startFakeDiscourse(adapterForum());
+  let opened = 0;
+  let closed = 0;
+  const { env } = environment({ DISCOURSE_CONNECTOR_ENABLED: "true" });
+  const result = await createConnectorAdapters({
+    env,
+    publicFetch: () => {
+      opened += 1;
+      return {
+        fetch: fake.fetch,
+        close: async () => {
+          closed += 1;
+        },
+      };
+    },
+  });
+  // Construction opens no scope: scopes are per operation.
+  assert.equal(opened, 0);
+  const adapter = result.adapters[0]!;
+  assert.equal(adapter.capabilityId, "sourceweft/discourse");
+  const browsed = await adapter.executeAction({
+    teamId: "t",
+    workspaceId: "w",
+    connectorId: "c",
+    connectorType: "discourse",
+    config: { forumUrl: "https://forum.example.com", items: [] },
+    accessToken: "",
+    actionType: "discourse.browse",
+    request: {},
+    idempotencyKey: "k",
+  });
+  const entries = (browsed.result as { entries: unknown[] }).entries;
+  assert.equal(entries.length, 4);
+  assert.equal(opened, 1);
+  assert.equal(closed, 1);
+  assert.deepEqual(
+    fake.requests.map((request) => request.path),
+    ["/site.json"],
+  );
 });
