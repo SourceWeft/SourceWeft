@@ -24,8 +24,19 @@ export function blogFeedAlternate(locale: Locale, title: string) {
   };
 }
 
+// Code points XML 1.0 cannot carry, and lone surrogates. An article's title or
+// excerpt is author text: one stray control character must cost that
+// character, not the whole language's feed.
+const INVALID_XML_CHARACTERS =
+  // eslint-disable-next-line no-control-regex -- these are the characters to remove
+  /[\u0000-\u0008\u000b\u000c\u000e-\u001f\ud800-\udfff\ufffe\uffff]/gu;
+
+function xmlText(value: string) {
+  return escapeXml(value.replace(INVALID_XML_CHARACTERS, ""));
+}
+
 function element(name: string, value: string) {
-  return `<${name}>${escapeXml(value)}</${name}>`;
+  return `<${name}>${xmlText(value)}</${name}>`;
 }
 
 function itemXml(post: BlogPostSummary) {
@@ -33,7 +44,7 @@ function itemXml(post: BlogPostSummary) {
   const fields = [
     element("title", post.title),
     element("link", url),
-    `<guid isPermaLink="true">${escapeXml(url)}</guid>`,
+    `<guid isPermaLink="true">${xmlText(url)}</guid>`,
     element("description", post.excerpt),
     ...(post.publishedAt
       ? [element("pubDate", post.publishedAt.toUTCString())]
@@ -79,7 +90,7 @@ export function blogFeedXml(input: {
     ...(lastChange
       ? [element("lastBuildDate", new Date(lastChange).toUTCString())]
       : []),
-    `<atom:link href="${escapeXml(blogFeedUrl(input.locale))}" rel="self" type="${BLOG_FEED_CONTENT_TYPE}"/>`,
+    `<atom:link href="${xmlText(blogFeedUrl(input.locale))}" rel="self" type="${BLOG_FEED_CONTENT_TYPE}"/>`,
   ];
   return (
     '<?xml version="1.0" encoding="UTF-8"?>\n' +

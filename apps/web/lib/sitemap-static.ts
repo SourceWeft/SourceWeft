@@ -86,6 +86,12 @@ export async function buildStaticSitemap(): Promise<MetadataRoute.Sitemap> {
       priority: 0.5,
       url: `${SITE_URL}/about`,
     },
+    {
+      alternates: sitemapLocaleAlternates("/about/method"),
+      changeFrequency: "monthly",
+      priority: 0.5,
+      url: `${SITE_URL}/about/method`,
+    },
     ...(hasPricingPage
       ? [
           {

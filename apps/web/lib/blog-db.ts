@@ -203,15 +203,36 @@ export async function listPublishedBlogPostsInLocale(locale: Locale) {
   );
 }
 
+// How long a page that is not part of the blog waits for its article links.
+// A warm cache answers at once and a cold read of a reachable database takes
+// milliseconds; only an unreachable host comes near this, and without the
+// bound the page would wait for the TCP connect timeout.
+export const BLOG_LINK_BLOCK_TIMEOUT_MS = 2_000;
+
 // For link blocks on pages that are not part of the blog (home, directories):
 // those pages must keep rendering when the blog tables cannot be read, so a
-// failed read is logged and the block is left out.
-export async function listBlogPostsForLinkBlock(browsingLocale: Locale) {
+// failed or slow read is logged and the block is left out. A read that was
+// given up on keeps running and fills the cache for the next request.
+export async function listBlogPostsForLinkBlock(
+  browsingLocale: Locale,
+  timeoutMs: number = BLOG_LINK_BLOCK_TIMEOUT_MS,
+) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    return await listPublishedBlogPosts(browsingLocale);
+    return await Promise.race([
+      listPublishedBlogPosts(browsingLocale),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`Blog read exceeded ${timeoutMs} ms`)),
+          timeoutMs,
+        );
+      }),
+    ]);
   } catch (error) {
     console.error("Blog link block unavailable", error);
     return [];
+  } finally {
+    clearTimeout(timer);
   }
 }
 

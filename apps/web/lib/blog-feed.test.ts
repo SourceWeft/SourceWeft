@@ -161,3 +161,28 @@ it("names the feed of each language for the page head", () => {
     ],
   });
 });
+
+it("drops characters XML cannot carry instead of failing the feed", () => {
+  const control = String.fromCodePoint(0x0b);
+  const loneSurrogate = String.fromCharCode(0xd800);
+  const xml = blogFeedXml({
+    description: `Guides${String.fromCodePoint(0x1f)}`,
+    locale: "en",
+    posts: [
+      post({
+        excerpt: `Line one\nLine two\ttabbed${String.fromCodePoint(0xffff)}`,
+        tags: [`M${control}CP`],
+        title: `What${control} is ${loneSurrogate}MCP? \u{1F600}`,
+      }),
+    ],
+    title: "SourceWeft Blog",
+  });
+  const document = parse(xml);
+  expect(text(document, "channel > description")).toBe("Guides");
+  // Astral characters and the whitespace XML allows are kept.
+  expect(text(document, "item > title")).toBe("What is MCP? \u{1F600}");
+  expect(text(document, "item > description")).toBe(
+    "Line one\nLine two\ttabbed",
+  );
+  expect(text(document, "item > category")).toBe("MCP");
+});

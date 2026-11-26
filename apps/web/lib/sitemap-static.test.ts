@@ -86,3 +86,15 @@ it("lists /pricing only when checkout is available", async () => {
   const withCheckout = await buildStaticSitemap();
   expect(withCheckout.some((e) => e.url === SITE_URL + "/pricing")).toBe(true);
 });
+it("lists the About & method page with its three languages", async () => {
+  mocks.counts.mockResolvedValue({ counts: {}, total: 0 });
+  const entries = await buildStaticSitemap();
+  const method = entries.filter((e) => e.url === SITE_URL + "/about/method");
+  expect(method).toHaveLength(1);
+  expect(method[0]?.alternates?.languages).toEqual({
+    en: SITE_URL + "/about/method",
+    "zh-CN": SITE_URL + "/zh-CN/about/method",
+    "zh-TW": SITE_URL + "/zh-TW/about/method",
+  });
+  expect(method[0]?.lastModified).toBeUndefined();
+});
