@@ -236,16 +236,11 @@ export function createDiscourseAdapter(
     ): Promise<ConnectorSyncReadinessResult> {
       try {
         return await useClient(
-          () => {
-            const resolved = resolveConfig(input.config);
-            // Nothing to index: no request is made.
-            if (resolved.selection.length === 0) {
-              throw new DiscourseError("DISCOURSE_SELECTION_REQUIRED");
-            }
-            return resolved;
-          },
+          () => resolveConfig(input.config),
           (resolved) => resolved.base,
-          async ({ client }) => {
+          async ({ client, resolved }) => {
+            // The forum is checked first: an empty selection is valid config,
+            // and only a reachable Discourse forum can ask for a selection.
             const { categories } = await client.site();
             const tree = buildCategoryTree(categories);
             const categoryCount = new Set(
@@ -253,6 +248,15 @@ export function createDiscourseAdapter(
                 .filter((category) => !tree.isRestricted(category.id))
                 .map((category) => category.id),
             ).size;
+            if (resolved.selection.length === 0) {
+              return {
+                ready: false,
+                reason: "selection_required",
+                message: new DiscourseError("DISCOURSE_SELECTION_REQUIRED")
+                  .message,
+                metadata: { categoryCount },
+              };
+            }
             return { ready: true, metadata: { categoryCount } };
           },
           { bounded: true },

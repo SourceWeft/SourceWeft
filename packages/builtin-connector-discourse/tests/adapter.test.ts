@@ -66,14 +66,42 @@ test("readiness: an invalid config is config_invalid without any request", async
   assert.equal(h.closed(), h.opened());
 });
 
-test("readiness: an empty selection is selection_required without any request", async () => {
-  const h = harness(adapterForum());
+test("readiness: an empty selection on a valid forum is selection_required after exactly one request", async () => {
   for (const config of [forumConfig([]), { forumUrl: FORUM_URL }]) {
+    const h = harness(adapterForum());
     const result = await h.adapter.checkSyncReadiness!(baseInput(config));
     assert.equal(result.ready, false);
     assert.equal(result.reason, "selection_required");
+    assert.deepEqual(result.metadata, { categoryCount: 4 });
+    assert.deepEqual(
+      h.fake.requests.map((r) => r.path),
+      ["/site.json"],
+    );
+    assert.equal(h.opened(), 1);
+    assert.equal(h.closed(), 1);
   }
-  assert.equal(h.fake.requests.length, 0);
+});
+
+test("readiness: an empty selection on a login-required or non-Discourse forum reports that reason", async () => {
+  const login = harness({ ...adapterForum(), loginRequired: true });
+  assert.equal(
+    (await login.adapter.checkSyncReadiness!(baseInput(forumConfig([]))))
+      .reason,
+    "login_required",
+  );
+  const other = harness(adapterForum());
+  other.fake.failNext({ status: 404 }, 1);
+  assert.equal(
+    (await other.adapter.checkSyncReadiness!(baseInput(forumConfig([]))))
+      .reason,
+    "not_a_discourse_site",
+  );
+  const bad = harness(adapterForum());
+  const invalid = await bad.adapter.checkSyncReadiness!(
+    baseInput({ items: [] }),
+  );
+  assert.equal(invalid.reason, "config_invalid");
+  assert.equal(bad.fake.requests.length, 0);
 });
 
 test("readiness: every site() failure maps to its reason", async () => {
