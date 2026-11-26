@@ -267,6 +267,30 @@ test("Docker and backend examples default the Discourse connector switch to fals
   );
 });
 
+test("Docker and backend examples default the WordPress connector switch to false", () => {
+  const backend = readFileSync(
+    new URL("../../.env.example", import.meta.url),
+    "utf8",
+  );
+  const docker = readFileSync(
+    new URL("../../../../docker/.env.example", import.meta.url),
+    "utf8",
+  );
+  const compose = readFileSync(
+    new URL("../../../../docker/docker-compose.yml", import.meta.url),
+    "utf8",
+  );
+  const line = /^WORDPRESS_CONNECTOR_ENABLED=false$/m;
+  assert.match(backend, line, "apps/backend/.env.example");
+  assert.match(docker, line, "docker/.env.example");
+  assert.ok(
+    compose.includes(
+      "WORDPRESS_CONNECTOR_ENABLED: ${WORDPRESS_CONNECTOR_ENABLED:-false}",
+    ),
+    "docker-compose.yml",
+  );
+});
+
 test("agent interpreter is disabled by default with strict limits", async () => {
   for (const name of interpreterEnvNames) delete process.env[name];
   vi.resetModules();

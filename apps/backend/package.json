@@ -76,6 +76,7 @@
     "@sourceweft/builtin-connector-dropbox": "workspace:*",
     "@sourceweft/builtin-connector-rss": "workspace:*",
     "@sourceweft/builtin-connector-discourse": "workspace:*",
+    "@sourceweft/builtin-connector-wordpress": "workspace:*",
     "@sourceweft/builtin-connector-github": "workspace:*",
     "@sourceweft/builtin-connector-linear": "workspace:*",
     "@sourceweft/builtin-connector-jira": "workspace:*",

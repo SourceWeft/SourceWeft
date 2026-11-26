@@ -24,6 +24,9 @@
       "@sourceweft/builtin-connector-discourse": [
         "../builtin-connector-discourse/src/index.ts"
       ],
+      "@sourceweft/builtin-connector-wordpress": [
+        "../builtin-connector-wordpress/src/index.ts"
+      ],
       "@sourceweft/builtin-connector-github": [
         "../builtin-connector-github/src/index.ts"
       ],

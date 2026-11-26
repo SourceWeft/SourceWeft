@@ -1,0 +1,285 @@
+{
+  "schemaVersion": 1,
+  "id": "sourceweft/wordpress",
+  "kind": "connector",
+  "name": "WordPress Connector",
+  "version": "0.1.0",
+  "entry": "./src/index.ts",
+  "connectors": [
+    {
+      "id": "wordpress",
+      "title": "WordPress site",
+      "auth": {
+        "kind": "none"
+      },
+      "sync": {
+        "supportsIncremental": false,
+        "defaultFrequencyMinutes": 360,
+        "minFrequencyMinutes": 60,
+        "resources": [
+          {
+            "type": "wordpress_content",
+            "title": "Post or page",
+            "supportsDeleteDetection": true
+          }
+        ]
+      },
+      "actions": [
+        {
+          "id": "wordpress.browse",
+          "title": "Browse WordPress",
+          "description": "List the content types and categories of a WordPress site, or the posts and pages of one category, so the user can choose what to index.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "internal",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "containerId": {
+                "type": ["string", "null"],
+                "pattern": "^category:[1-9][0-9]{0,9}$"
+              },
+              "cursor": {
+                "type": "string",
+                "maxLength": 4096
+              }
+            }
+          }
+        },
+        {
+          "id": "wordpress.search",
+          "title": "Search WordPress",
+          "description": "Search the posts and pages of a WordPress site so the user can choose which to index.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "internal",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["query"],
+            "properties": {
+              "query": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "cursor": {
+                "type": "string",
+                "maxLength": 4096
+              }
+            }
+          }
+        },
+        {
+          "id": "wordpress.describe",
+          "title": "Describe WordPress items",
+          "description": "Return the name, kind and existence of the selected WordPress content types, categories, posts and pages, identified by kind-qualified ids such as type:post, category:3 or post:9.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "internal",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["ids"],
+            "properties": {
+              "ids": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 100,
+                "items": {
+                  "type": "string",
+                  "pattern": "^(type:(post|page)|(category|post|page):[1-9][0-9]{0,9})$"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["siteUrl"],
+        "properties": {
+          "siteUrl": {
+            "type": "string",
+            "pattern": "^https://[A-Za-z0-9.-]{1,253}(/[A-Za-z0-9._~/-]{0,300})?$"
+          },
+          "items": {
+            "type": "array",
+            "default": [],
+            "maxItems": 500,
+            "uniqueItems": true,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "kind"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^(type:(post|page)|(category|post|page):[1-9][0-9]{0,9})$"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": ["type", "category", "post", "page"]
+                }
+              }
+            }
+          }
+        }
+      },
+      "selection": {
+        "actions": {
+          "browse": "wordpress.browse",
+          "search": "wordpress.search",
+          "describe": "wordpress.describe"
+        },
+        "kinds": ["type", "category", "post", "page"],
+        "maxItems": 500
+      }
+    },
+    {
+      "id": "wordpress_login",
+      "title": "WordPress site (login)",
+      "auth": {
+        "kind": "credential",
+        "scheme": "basic"
+      },
+      "sync": {
+        "supportsIncremental": false,
+        "defaultFrequencyMinutes": 360,
+        "minFrequencyMinutes": 60,
+        "resources": [
+          {
+            "type": "wordpress_content",
+            "title": "Post or page",
+            "supportsDeleteDetection": true
+          }
+        ]
+      },
+      "actions": [
+        {
+          "id": "wordpress_login.browse",
+          "title": "Browse WordPress",
+          "description": "List the content types and categories of a WordPress site, or the posts and pages of one category, so the user can choose what to index.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "internal",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "containerId": {
+                "type": ["string", "null"],
+                "pattern": "^category:[1-9][0-9]{0,9}$"
+              },
+              "cursor": {
+                "type": "string",
+                "maxLength": 4096
+              }
+            }
+          }
+        },
+        {
+          "id": "wordpress_login.search",
+          "title": "Search WordPress",
+          "description": "Search the posts and pages of a WordPress site so the user can choose which to index.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "internal",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["query"],
+            "properties": {
+              "query": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "cursor": {
+                "type": "string",
+                "maxLength": 4096
+              }
+            }
+          }
+        },
+        {
+          "id": "wordpress_login.describe",
+          "title": "Describe WordPress items",
+          "description": "Return the name, kind and existence of the selected WordPress content types, categories, posts and pages, identified by kind-qualified ids such as type:post, category:3 or post:9.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "internal",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["ids"],
+            "properties": {
+              "ids": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 100,
+                "items": {
+                  "type": "string",
+                  "pattern": "^(type:(post|page)|(category|post|page):[1-9][0-9]{0,9})$"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["siteUrl"],
+        "properties": {
+          "siteUrl": {
+            "type": "string",
+            "pattern": "^https://[A-Za-z0-9.-]{1,253}(/[A-Za-z0-9._~/-]{0,300})?$"
+          },
+          "items": {
+            "type": "array",
+            "default": [],
+            "maxItems": 500,
+            "uniqueItems": true,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "kind"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^(type:(post|page)|(category|post|page):[1-9][0-9]{0,9})$"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": ["type", "category", "post", "page"]
+                }
+              }
+            }
+          },
+          "includeUnpublished": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "selection": {
+        "actions": {
+          "browse": "wordpress_login.browse",
+          "search": "wordpress_login.search",
+          "describe": "wordpress_login.describe"
+        },
+        "kinds": ["type", "category", "post", "page"],
+        "maxItems": 500
+      }
+    }
+  ]
+}

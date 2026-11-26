@@ -89,6 +89,10 @@ x-sourceweft-env: &sourceweft-env
   # Discourse forums (auth kind "none"): public forums only, no credential.
   # Restart api, worker and scheduler together after changing it; off hides it.
   DISCOURSE_CONNECTOR_ENABLED: ${DISCOURSE_CONNECTOR_ENABLED:-false}
+  # WordPress sites (auth kinds "none" and "credential"): public sites and sites
+  # read with an Application Password, no credential in this variable.
+  # Restart api, worker and scheduler together after changing it; off hides both.
+  WORDPRESS_CONNECTOR_ENABLED: ${WORDPRESS_CONNECTOR_ENABLED:-false}
   # WebDAV (auth kind "credential"): a stored username/app password, no OAuth app.
   # Restart api, worker and scheduler together after changing it; off hides it.
   # Also gates the Nextcloud connector (Login Flow v2), which ships in the same package.
