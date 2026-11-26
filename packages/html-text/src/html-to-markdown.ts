@@ -238,9 +238,22 @@ function safeUrl(value: string | undefined): string | null {
   );
 }
 
+/** A finished blockquote, rendered with its `> ` prefixes at the very end. */
+class QuoteBlock {
+  constructor(readonly frame: Frame) {}
+  /** Only used when the block is flattened into a table cell or link label. */
+  toString(): string {
+    const sink: string[] = [];
+    renderPieces(this.frame.out, 1, sink, { lineStart: true });
+    return sink.join("");
+  }
+}
+
+type Piece = string | QuoteBlock;
+
 /** One level of output: the document, or the inside of a blockquote. */
 type Frame = {
-  out: string[];
+  out: Piece[];
   /** Newlines currently ending the output (2 at the start of a frame). */
   newlines: number;
   /** A list or heading marker waiting for the first text of its line. */
@@ -249,14 +262,87 @@ type Frame = {
 
 const newFrame = (): Frame => ({ out: [], newlines: 2, pending: null });
 
-const lastPiece = (frame: Frame): string =>
-  frame.out.length === 0 ? "" : (frame.out[frame.out.length - 1] as string);
+const lastPiece = (frame: Frame): string => {
+  const last = frame.out[frame.out.length - 1];
+  return typeof last === "string" ? last : "";
+};
 
-const finalize = (parts: string[]): string =>
-  parts
-    .join("")
-    .replace(/^(?:[ \t]*\n)+/, "")
-    .trimEnd();
+/** Appends to the last piece when that is plain text. */
+const appendToLast = (frame: Frame, add: string): boolean => {
+  const last = frame.out[frame.out.length - 1];
+  if (typeof last !== "string") return false;
+  frame.out[frame.out.length - 1] = last + add;
+  return true;
+};
+
+/** Drops leading blank lines and all trailing whitespace of a frame. */
+function trimFrame(frame: Frame): void {
+  const out = frame.out;
+  let first = 0;
+  while (first < out.length) {
+    const piece = out[first];
+    if (typeof piece !== "string" || !/^[ \t\n]*$/.test(piece)) break;
+    first += 1;
+  }
+  if (first > 0) out.splice(0, first);
+  const head = out[0];
+  if (typeof head === "string") out[0] = head.replace(/^(?:[ \t]*\n)+/, "");
+  while (out.length > 0) {
+    const piece = out[out.length - 1];
+    if (typeof piece !== "string") return;
+    const trimmed = piece.trimEnd();
+    if (trimmed !== "") {
+      out[out.length - 1] = trimmed;
+      return;
+    }
+    out.pop();
+  }
+}
+
+const PREFIXES: string[] = [];
+const prefixOf = (depth: number): string =>
+  (PREFIXES[depth] ??= "> ".repeat(depth));
+
+/**
+ * Writes the pieces of a frame into `sink`, prefixing every line with the
+ * quote markers of `depth`. Each piece is visited once, so the cost does not
+ * grow with the nesting depth.
+ */
+function renderPieces(
+  pieces: Piece[],
+  depth: number,
+  sink: string[],
+  state: { lineStart: boolean },
+): void {
+  const prefix = prefixOf(depth);
+  const blankPrefix = prefix.trimEnd();
+  for (const piece of pieces) {
+    if (typeof piece !== "string") {
+      renderPieces(piece.frame.out, depth + 1, sink, state);
+      continue;
+    }
+    if (depth === 0) {
+      sink.push(piece);
+      if (piece !== "") state.lineStart = piece.endsWith("\n");
+      continue;
+    }
+    let start = 0;
+    for (;;) {
+      const newline = piece.indexOf("\n", start);
+      const end = newline === -1 ? piece.length : newline;
+      if (end > start) {
+        if (state.lineStart) sink.push(prefix);
+        sink.push(piece.slice(start, end));
+        state.lineStart = false;
+      }
+      if (newline === -1) break;
+      if (state.lineStart) sink.push(blankPrefix);
+      sink.push("\n");
+      state.lineStart = true;
+      start = newline + 1;
+    }
+  }
+}
 
 /** Cuts `text` at `maxChars` on a line boundary. */
 function cutAtLine(text: string, maxChars: number): string {
@@ -265,8 +351,13 @@ function cutAtLine(text: string, maxChars: number): string {
     return text.slice(0, maxChars).trimEnd();
   const head = text.slice(0, maxChars);
   const boundary = head.lastIndexOf("\n");
-  // A single line longer than the limit has no boundary to cut at.
-  return (boundary === -1 ? head : head.slice(0, boundary)).trimEnd();
+  if (boundary !== -1) return head.slice(0, boundary).trimEnd();
+  // A single line longer than the limit has no boundary to cut at: hard cut,
+  // without splitting a surrogate pair.
+  const last = head.charCodeAt(head.length - 1);
+  return (
+    last >= 0xd800 && last <= 0xdbff ? head.slice(0, -1) : head
+  ).trimEnd();
 }
 
 /**
@@ -280,6 +371,12 @@ function cutAtLine(text: string, maxChars: number): string {
  * characters, attribute values at 2,000, and the scan is linear and never
  * throws, whatever the markup. An unterminated tag at the end of the input is
  * dropped, as is an unterminated comment.
+ *
+ * The result is plain text for indexing and LLM context. It is not escaped:
+ * text that merely looks like Markdown or HTML (for example the literal text
+ * `[x](javascript:alert(1))`, or `<script>` written as `&lt;script&gt;`) is
+ * emitted verbatim. Never render it as trusted Markdown or HTML. The
+ * http(s)-only guarantee applies to links this function builds from tags.
  */
 export function htmlToMarkdown(
   html: string,
@@ -289,8 +386,14 @@ export function htmlToMarkdown(
   if (!(maxChars > 0)) {
     throw new RangeError("maxChars must be a positive number");
   }
-  const source =
-    html.length > MAX_INPUT_CHARS ? html.slice(0, MAX_INPUT_CHARS) : html;
+  let source = html;
+  if (html.length > MAX_INPUT_CHARS) {
+    const last = html.charCodeAt(MAX_INPUT_CHARS - 1);
+    // Do not end the input on half of a surrogate pair.
+    const end =
+      last >= 0xd800 && last <= 0xdbff ? MAX_INPUT_CHARS - 1 : MAX_INPUT_CHARS;
+    source = html.slice(0, end);
+  }
   const n = source.length;
 
   const frames: Frame[] = [newFrame()];
@@ -317,7 +420,11 @@ export function htmlToMarkdown(
     frame: Frame;
     index: number;
     url: string;
+    /** Markers written ahead of the label by its first push. */
     prefix: string;
+    prefixDone: boolean;
+    /** How many queued emphasis markers were open before the link. */
+    emphBase: number;
     newlines: number;
     pending: string | null;
   } | null = null;
@@ -346,9 +453,7 @@ export function htmlToMarkdown(
     if (frame.newlines < need) {
       trimTrailingSpace(frame);
       const add = "\n".repeat(need - frame.newlines);
-      if (frame.newlines > 0 && frame.out.length > 0) {
-        frame.out[frame.out.length - 1] += add;
-      } else {
+      if (!(frame.newlines > 0 && appendToLast(frame, add))) {
         frame.out.push(add);
       }
       frame.newlines = need;
@@ -360,9 +465,7 @@ export function htmlToMarkdown(
     const frame = top();
     if (frame.pending !== null || frame.newlines >= 2) return;
     trimTrailingSpace(frame);
-    if (frame.newlines > 0 && frame.out.length > 0) {
-      frame.out[frame.out.length - 1] += "\n";
-    } else {
+    if (!(frame.newlines > 0 && appendToLast(frame, "\n"))) {
       frame.out.push("\n");
     }
     frame.newlines += 1;
@@ -371,6 +474,12 @@ export function htmlToMarkdown(
   const push = (piece: string): void => {
     const frame = top();
     let s = piece;
+    if (link !== null && link.frame === frame && !link.prefixDone) {
+      link.prefixDone = true;
+      link.prefix =
+        (frame.pending !== null ? `${frame.pending} ` : "") +
+        emph.slice(0, link.emphBase).join("");
+    }
     if (emph.length > 0) {
       s = emph.join("") + s;
       emph.length = 0;
@@ -418,7 +527,10 @@ export function htmlToMarkdown(
     if (frame.pending !== null) return;
     // The closing marker goes before trailing whitespace.
     let tail = "";
-    if (frame.newlines > 0 && frame.out.length > 0) {
+    if (
+      frame.newlines > 0 &&
+      typeof frame.out[frame.out.length - 1] === "string"
+    ) {
       tail = frame.out.pop() as string;
     }
     const last = lastPiece(frame);
@@ -493,18 +605,23 @@ export function htmlToMarkdown(
     const frame = done.frame;
     if (top() !== frame) return;
     const pieces = frame.out.splice(done.index);
-    let label = pieces.join("");
-    if (label.startsWith(done.prefix)) label = label.slice(done.prefix.length);
+    const joined = pieces.join("");
+    // A space written before the queued emphasis markers stays in front.
+    const lead = joined.slice(0, joined.length - joined.trimStart().length);
+    let label = joined.slice(lead.length);
+    if (done.prefix !== "" && label.startsWith(done.prefix)) {
+      label = label.slice(done.prefix.length);
+    }
     const trimmed = label.trim();
     if (trimmed === "") {
       frame.newlines = done.newlines;
       frame.pending = done.pending;
       return;
     }
-    const lead = label.slice(0, label.length - label.trimStart().length);
+    const inner = label.slice(0, label.length - label.trimStart().length);
     const trail = label.slice(label.trimEnd().length);
     const body = trimmed.includes("\n") ? trimmed : `[${trimmed}](${done.url})`;
-    frame.out.push(`${done.prefix}${lead}${body}${trail}`);
+    frame.out.push(`${lead}${done.prefix}${inner}${body}${trail}`);
     frame.newlines = trail.endsWith("\n\n") ? 2 : trail.endsWith("\n") ? 1 : 0;
   };
 
@@ -517,15 +634,18 @@ export function htmlToMarkdown(
     if (link !== null && link.frame === top()) link = null;
     if (row !== null && row.frame === top()) finishRow();
     const frame = frames.pop() as Frame;
-    const body = finalize(frame.out);
-    if (body === "") return;
+    trimFrame(frame);
+    if (frame.out.length === 0) return;
     blockBreak();
-    push(
-      body
-        .split("\n")
-        .map((line) => (line === "" ? ">" : `> ${line}`))
-        .join("\n"),
-    );
+    const parent = top();
+    const block = new QuoteBlock(frame);
+    if (parent.pending !== null || emph.length > 0) {
+      // A marker is waiting for text: it goes in front of the quote's text.
+      push(block.toString());
+    } else {
+      parent.out.push(block);
+      parent.newlines = 0;
+    }
     blockBreak();
   }
 
@@ -615,8 +735,9 @@ export function htmlToMarkdown(
           frame,
           index: frame.out.length,
           url,
-          prefix:
-            (frame.pending !== null ? `${frame.pending} ` : "") + emph.join(""),
+          prefix: "",
+          prefixDone: false,
+          emphBase: emph.length,
           newlines: frame.newlines,
           pending: frame.pending,
         };
@@ -771,5 +892,9 @@ export function htmlToMarkdown(
   finishRow();
   while (frames.length > 1) closeQuote();
   extraQuotes = 0;
-  return cutAtLine(finalize(frames[0]?.out ?? []), maxChars);
+  const root = frames[0] as Frame;
+  trimFrame(root);
+  const sink: string[] = [];
+  renderPieces(root.out, 0, sink, { lineStart: true });
+  return cutAtLine(sink.join(""), maxChars);
 }
