@@ -170,6 +170,23 @@ function rewriteCategory(
     }) as typeof fetch;
 }
 
+/** Rewrites the JSON body of every 200 response whose path matches. */
+function rewriteMatching(
+  match: RegExp,
+  change: (body: any) => unknown,
+): (inner: typeof fetch) => typeof fetch {
+  return (inner) =>
+    (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const response = await inner(input, init);
+      const url = new URL(String(input));
+      if (!match.test(url.pathname) || response.status !== 200) return response;
+      return new Response(JSON.stringify(change(await response.json())), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+}
+
 // ---------------------------------------------------------------- selection
 
 test("an empty selection throws DISCOURSE_SELECTION_REQUIRED before any request", async () => {
@@ -436,7 +453,7 @@ test("a topic over the post cap is hashed over what was read and records the omi
   assert.equal(item?.contentHash, deepHashOf(doc, read));
 });
 
-test("a topic whose posts vanish mid-scan is dropped in deep mode", async () => {
+test("posts that are not found after the topic was read fail the scan", async () => {
   const f = forum([topic(1, 10, { postCount: 30 })]);
   const { fake, client } = setup(f);
   fake.failNext(
@@ -444,9 +461,60 @@ test("a topic whose posts vanish mid-scan is dropped in deep mode", async () => 
     1,
     (r) => r.path === "/t/1/posts.json",
   );
+  await rejectsWith(
+    run(client, cat(10), { refresh: "deep" }),
+    "DISCOURSE_BAD_RESPONSE",
+  );
+});
+
+test("a topic that is not found on its own deep read is not emitted and the scan reconciles", async () => {
+  const { fake, client } = setup(forum([topic(1, 10), topic(2, 10)]));
+  fake.failNext({ status: 410, body: "" }, 1, (r) => r.path === "/t/1.json");
   const { page } = await only(client, cat(10), { refresh: "deep" });
-  assert.deepEqual(page.items, []);
+  assert.deepEqual(ids(page), ["discourse:topic:2"]);
   assert.equal(page.reconcileMissing, true);
+});
+
+test("posts the document carries that are not in the stream are not indexed", async () => {
+  const { client } = setup(forum([topic(1, 10, { postCount: 3 })]), {
+    wrap: rewriteMatching(/\/t\/1\.json$/, (body) => {
+      body.post_stream.stream = body.post_stream.stream.filter(
+        (id: number) => id !== 1002,
+      );
+      return body;
+    }),
+  });
+  const { page } = await only(client, top(1), { refresh: "deep" });
+  assert.deepEqual(page.items[0]?.metadata.postIds, [1001, 1003]);
+  assert.equal("omittedPosts" in (page.items[0]?.metadata ?? {}), false);
+});
+
+test("an empty stream with posts present indexes nothing of them and does not crash", async () => {
+  const { client } = setup(forum([topic(1, 10, { postCount: 3 })]), {
+    wrap: rewriteMatching(/\/t\/1\.json$/, (body) => {
+      body.post_stream.stream = [];
+      return body;
+    }),
+  });
+  const { page } = await only(client, top(1), { refresh: "deep" });
+  assert.equal(page.items.length, 1);
+  assert.equal("postIds" in (page.items[0]?.metadata ?? {}), false);
+  assert.equal("omittedPosts" in (page.items[0]?.metadata ?? {}), false);
+  assert.equal(page.reconcileMissing, true);
+});
+
+test("posts.json returning fewer posts than asked is hashed and listed as read", async () => {
+  const { client } = setup(forum([topic(1, 10, { postCount: 30 })]), {
+    wrap: rewriteMatching(/\/t\/1\/posts\.json$/, (body) => {
+      body.post_stream.posts = body.post_stream.posts.slice(0, 4);
+      return body;
+    }),
+  });
+  const { page } = await only(client, top(1), { refresh: "deep" });
+  const item = page.items[0];
+  // 20 from the document + 4 of the 10 asked for.
+  assert.equal((item?.metadata.postIds as number[]).length, 24);
+  assert.equal("omittedPosts" in (item?.metadata ?? {}), false);
 });
 
 test("a single selected topic is requested once in deep mode", async () => {
@@ -513,7 +581,7 @@ test("duplicate topic rows are emitted once", async () => {
   assert.deepEqual(ids(page), ["discourse:topic:1", "discourse:topic:2"]);
 });
 
-test("a category that vanishes mid-walk contributes nothing", async () => {
+test("a category that is not found on a later page fails the scan", async () => {
   const topics = Array.from({ length: 40 }, (_, i) => topic(i + 1, 10));
   const { fake, client } = setup(forum(topics));
   fake.failNext(
@@ -521,9 +589,21 @@ test("a category that vanishes mid-walk contributes nothing", async () => {
     1,
     (r) => r.path === "/c/10.json" && r.query.page === "1",
   );
-  const { page } = await only(client, cat(10));
-  assert.deepEqual(page.items, []);
-  assert.equal(page.reconcileMissing, true);
+  const pages: unknown[] = [];
+  await rejectsWith(
+    (async () => {
+      for await (const page of scanForum({
+        client,
+        base: BASE,
+        selection: cat(10),
+        refresh: "light",
+      })) {
+        pages.push(page);
+      }
+    })(),
+    "DISCOURSE_BAD_RESPONSE",
+  );
+  assert.deepEqual(pages, []);
 });
 
 // ------------------------------------------------------------------ caps
@@ -538,6 +618,39 @@ test("a request cap yields the incomplete result with the fixed warning", async 
   assert.deepEqual(warnings, [
     { message: "discourse_scan_incomplete", meta: { reason: "too_large" } },
   ]);
+});
+
+test("the request cap is exact: N needed requests with MAX_REQUESTS=N complete", async () => {
+  const topics = Array.from({ length: 35 }, (_, i) => topic(i + 1, 10));
+  const needed = 1 + 2; // site + two category pages
+  const exact = setup(forum(topics));
+  const ok = await only(exact.client, cat(10), {
+    limits: { MAX_REQUESTS: needed },
+  });
+  assert.equal(ok.page.items.length, 35);
+  assert.equal(ok.page.reconcileMissing, true);
+  assert.equal(exact.fake.requests.length, needed);
+
+  const short = setup(forum(topics));
+  const over = await only(short.client, cat(10), {
+    limits: { MAX_REQUESTS: needed - 1 },
+  });
+  assert.deepEqual(over.page, INCOMPLETE);
+  assert.equal(short.fake.requests.length, needed - 1);
+});
+
+test("a deep scan that hits the request cap midway is incomplete with no items", async () => {
+  const { fake, client } = setup(
+    forum([topic(1, 10), topic(2, 10), topic(3, 10)]),
+  );
+  // site + category page + two of three topics.
+  const { page, warnings } = await only(client, cat(10), {
+    refresh: "deep",
+    limits: { MAX_REQUESTS: 4 },
+  });
+  assert.deepEqual(page, INCOMPLETE);
+  assert.equal(warnings[0]?.meta?.reason, "too_large");
+  assert.equal(fake.requests.length, 4);
 });
 
 test("the client's own request ceiling yields the incomplete result", async () => {
@@ -601,7 +714,8 @@ test("the wall-clock deadline is checked before every request", async () => {
   assert.deepEqual(warnings, [
     { message: "discourse_scan_incomplete", meta: { reason: "timeout" } },
   ]);
-  assert.ok(fake.requests.length < 3);
+  // site and the first category page; the check before page 1 timed out.
+  assert.equal(fake.requests.length, 2);
 });
 
 test("a deadline already passed sends no request at all", async () => {

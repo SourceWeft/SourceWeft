@@ -105,7 +105,11 @@ export async function* scanForum(
   const deadline = now() + limits.SCAN_TIMEOUT_MS;
   let requests = 0;
 
-  /** Every request goes through here so the caps hold for the whole scan. */
+  /**
+   * Every request goes through here so the caps hold for the whole scan. The
+   * real time bound is the deadline plus one client call (which has its own
+   * per-request timeout and retries).
+   */
   async function call<T>(request: () => Promise<T>): Promise<T> {
     if (now() >= deadline) throw new ScanIncomplete("timeout");
     if (requests >= limits.MAX_REQUESTS) throw new ScanIncomplete("too_large");
@@ -185,6 +189,9 @@ export async function* scanForum(
       for (let page = 0; ; page += 1) {
         const result = await call(() => client.categoryPage(root, page));
         if (isNotFound(result)) {
+          // Gone on the first page: nothing to list. Gone after rows were
+          // read is an inconsistent read, never "the category is empty".
+          if (page > 0) throw new DiscourseError("DISCOURSE_BAD_RESPONSE");
           gone = true;
           break;
         }
@@ -192,7 +199,9 @@ export async function* scanForum(
         if (rows.length > limits.MAX_TOPICS_PER_CATEGORY) {
           throw new ScanIncomplete("too_large");
         }
-        // `more_topics_url` is only a hint that another page exists.
+        // The walk stops on a missing `more_topics_url` or an empty page; it
+        // is only a presence signal, never followed. Real-forum behaviour is
+        // confirmed in Task 9's read-shape check.
         if (!result.hasMore || result.topics.length === 0) break;
       }
       // A category that vanished or became restricted lists nothing.
@@ -244,20 +253,21 @@ export async function* scanForum(
         if (wanted.has(post.id)) read.set(post.id, post);
       }
       const missing = included.filter((postId) => !read.has(postId));
-      let vanished = false;
       for (let start = 0; start < missing.length; start += POST_BATCH) {
         const batch = missing.slice(start, start + POST_BATCH);
         const reply = await call(() => client.topicPosts(id, batch));
-        if (isNotFound(reply)) {
-          vanished = true;
-          break;
-        }
+        // The topic document was just read: posts that are suddenly
+        // not found are an inconsistent read, never a deleted topic.
+        if (isNotFound(reply))
+          throw new DiscourseError("DISCOURSE_BAD_RESPONSE");
         for (const post of reply) {
           if (wanted.has(post.id)) read.set(post.id, post);
         }
       }
-      if (vanished) continue;
 
+      // Posts the document carries that are not in `stream`, and ids the
+      // forum did not return, are simply not read; `omittedPosts` counts only
+      // what the per-topic cap cut off.
       // The hash, the post ids and the authors are over the same posts.
       const visible = [...read.values()].filter(isVisiblePost);
       visible.sort(comparePosts);
