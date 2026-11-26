@@ -5,7 +5,7 @@ import {
   connectorSelectionDescribeResultSchema,
   connectorSelectionSearchResultSchema,
 } from "@sourceweft/contracts";
-import { DiscourseAdapterError } from "../src/adapter";
+import { createDiscourseAdapter, DiscourseAdapterError } from "../src/adapter";
 import {
   adapterForum,
   baseInput,
@@ -525,4 +525,114 @@ test("a describe or search call after many calls is not starved either", async (
     await search(h, { query: "Hello" });
   }
   assert.equal(h.opened(), 16);
+});
+
+test("browse of 600 top-level categories stays within the platform's 500-entry bound", async () => {
+  const categories = Array.from({ length: 600 }, (_, i) => ({
+    id: i + 1,
+    name: `Cat ${String(i).padStart(4, "0")}`,
+    slug: `cat-${i}`,
+  }));
+  const h = harness(adapterForum({ categories }));
+  const result = await browse(h);
+  assert.equal(result.entries.length, 500);
+  assert.equal(result.entries[0]!.name, "Cat 0000");
+  assert.equal(result.entries[499]!.name, "Cat 0499");
+  assert.equal(result.hasMore, false);
+  assert.equal(result.cursor, "");
+});
+
+test("browse of a category with 600 subcategories stays within the bound", async () => {
+  const categories = [
+    { id: 1, name: "Parent", slug: "parent" },
+    ...Array.from({ length: 600 }, (_, i) => ({
+      id: i + 2,
+      name: `Sub ${String(i).padStart(4, "0")}`,
+      slug: `sub-${i}`,
+      parent_category_id: 1,
+    })),
+  ];
+  const h = harness(adapterForum({ categories }));
+  const result = await browse(h, { containerId: "category:1" });
+  assert.ok(result.entries.length <= 500);
+  assert.equal(
+    result.entries.filter((entry) => entry.kind === "category").length,
+    450,
+  );
+});
+
+// ---- wall-clock bound -------------------------------------------------------
+
+/** A fetch that never answers and ignores the abort signal. */
+function stalledHarness(deadlineMs: number) {
+  let opened = 0;
+  let closed = 0;
+  const adapter = createDiscourseAdapter({
+    publicFetch: () => {
+      opened += 1;
+      return {
+        fetch: (() => new Promise<Response>(() => {})) as typeof fetch,
+        close: async () => {
+          closed += 1;
+        },
+      };
+    },
+    limits: { minRequestGapMs: 0, ACTION_DEADLINE_MS: deadlineMs },
+  });
+  return { adapter, opened: () => opened, closed: () => closed };
+}
+
+test("a stalled forum ends a browse, search or describe in DISCOURSE_FORUM_UNREACHABLE and closes the scope", async () => {
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown) => unhandled.push(reason);
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    for (const [actionType, request] of [
+      ["discourse.browse", {}],
+      ["discourse.search", { query: "x" }],
+      ["discourse.describe", { ids: ["topic:1"] }],
+    ] as const) {
+      const h = stalledHarness(30);
+      const started = Date.now();
+      await assert.rejects(
+        () =>
+          h.adapter.executeAction({
+            ...baseInput(forumConfig([])),
+            actionType,
+            request,
+            idempotencyKey: "k",
+          }),
+        (error: unknown) =>
+          error instanceof DiscourseAdapterError &&
+          error.code === "DISCOURSE_FORUM_UNREACHABLE" &&
+          error.statusCode === 502,
+        actionType,
+      );
+      assert.ok(Date.now() - started < 5000);
+      assert.equal(h.opened(), 1);
+      assert.equal(h.closed(), 1);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.deepEqual(unhandled, []);
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+  }
+});
+
+test("a stalled forum makes readiness forum_unreachable and closes the scope", async () => {
+  const h = stalledHarness(30);
+  const result = await h.adapter.checkSyncReadiness!(
+    baseInput(forumConfig([{ id: "topic:1", kind: "topic" }])),
+  );
+  assert.equal(result.ready, false);
+  assert.equal(result.reason, "forum_unreachable");
+  assert.equal(h.opened(), 1);
+  assert.equal(h.closed(), 1);
+});
+
+test("the action deadline does not cut off a quick call and leaves no timer behind", async () => {
+  const h = harness(adapterForum(), { limits: { ACTION_DEADLINE_MS: 60_000 } });
+  assert.equal((await browse(h)).entries.length, 4);
+  // A pending 60 s timer would keep this test process alive past the run;
+  // the suite finishing proves the timer was cleared.
 });

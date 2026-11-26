@@ -383,3 +383,58 @@ test("the hash helper agrees with the capped tags stored in metadata", () => {
   const stored = (item.metadata as { tags: string[] }).tags;
   assert.equal(lightHashOf(row({ tags: stored })), item.contentHash);
 });
+
+test("isRestricted over a 5,000-deep parent chain is linear and keeps its answers", () => {
+  const depth = 5000;
+  const categories: DiscourseCategory[] = [];
+  for (let id = 1; id <= depth; id += 1) {
+    categories.push({
+      id,
+      name: `c${id}`,
+      slug: `c${id}`,
+      parentId: id === 1 ? null : id - 1,
+      // only the root is restricted: every descendant inherits it
+      readRestricted: id === 1,
+      topicCount: 0,
+    });
+  }
+  const tree = buildCategoryTree(categories);
+  const started = Date.now();
+  for (let id = depth; id >= 1; id -= 1)
+    assert.equal(tree.isRestricted(id), true);
+  assert.ok(Date.now() - started < 1000);
+
+  const open = buildCategoryTree(
+    categories.map((c) => ({ ...c, readRestricted: false })),
+  );
+  for (let id = depth; id >= 1; id -= 1)
+    assert.equal(open.isRestricted(id), false);
+});
+
+test("isRestricted keeps its cycle behaviour and an unknown id is not restricted", () => {
+  const mk = (id: number, parentId: number | null, readRestricted = false) => ({
+    id,
+    name: `c${id}`,
+    slug: `c${id}`,
+    parentId,
+    readRestricted,
+    topicCount: 0,
+  });
+  // 1 -> 2 -> 3 -> 2 (cycle of 2 and 3); 4 hangs under the cycle; 3 is restricted
+  const tree = buildCategoryTree([
+    mk(1, 2),
+    mk(2, 3),
+    mk(3, 2, true),
+    mk(4, 3),
+  ]);
+  for (const id of [1, 2, 3, 4])
+    assert.equal(tree.isRestricted(id), true, String(id));
+  // the same cycle without a restricted member
+  const clean = buildCategoryTree([mk(1, 2), mk(2, 3), mk(3, 2), mk(4, 3)]);
+  for (const id of [1, 2, 3, 4]) assert.equal(clean.isRestricted(id), false);
+  // a restricted tail outside the cycle only affects its own descendants
+  const mixed = buildCategoryTree([mk(1, 2, true), mk(2, 3), mk(3, 2)]);
+  assert.equal(mixed.isRestricted(1), true);
+  assert.equal(mixed.isRestricted(2), false);
+  assert.equal(mixed.isRestricted(999), false);
+});

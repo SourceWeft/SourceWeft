@@ -49,3 +49,9 @@ export const MAX_METADATA_AUTHORS = 100;
 /** Sent on every Discourse request. */
 export const DISCOURSE_USER_AGENT =
   "SourceWeft-DiscourseConnector/1.0 (+https://sourceweft.com)";
+
+/**
+ * Wall-clock ceiling for one selection action or readiness check (a scan has
+ * its own, {@link SCAN_TIMEOUT_MS}).
+ */
+export const ACTION_DEADLINE_MS = 60_000;

@@ -20,8 +20,14 @@ import {
 const BROWSE_TOPICS_PER_PAGE = 30;
 /** Topics a search result holds. */
 const SEARCH_MAX_RESULTS = 50;
-/** Subcategories one browse result lists (the platform's own bound is 500). */
+/**
+ * Subcategories one browse result lists (the platform's own bound is 500, and
+ * topics share it). More than this many subcategories of one category are not
+ * reachable through browse; that is rare and a platform cap.
+ */
 const BROWSE_MAX_SUBCATEGORIES = 450;
+/** Entries one browse result holds (the selection contract's own bound). */
+const BROWSE_MAX_ENTRIES = 500;
 /** Ancestors one browse result holds (the selection contract's own bound). */
 const BROWSE_MAX_BREADCRUMBS = 50;
 const QUERY_MAX = 200;
@@ -191,8 +197,11 @@ export async function browseForum(input: {
     return {
       container: null,
       breadcrumbs: [],
+      // The platform caps a result at 500 entries; further top-level
+      // categories are not reachable through browse (rare, a platform cap).
       entries: forum.tree
         .children(null)
+        .slice(0, BROWSE_MAX_ENTRIES)
         .map((category) => categoryEntry(forum, category)),
       cursor: "",
       hasMore: false,
@@ -231,7 +240,7 @@ export async function browseForum(input: {
       detail: null,
     },
     breadcrumbs: breadcrumbsFor(forum, container),
-    entries: entries.slice(0, 500),
+    entries: entries.slice(0, BROWSE_MAX_ENTRIES),
     cursor: hasMore ? encodeCursor(page + 1) : "",
     hasMore,
     helpLink: null,

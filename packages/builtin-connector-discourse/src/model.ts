@@ -349,6 +349,55 @@ export function buildCategoryTree(
     return chain;
   };
 
+  /**
+   * `isRestricted` per category, memoised so repeated calls over a deep (or
+   * hostile) parent chain cost O(n) overall. Same result as scanning
+   * {@link lineage}: a cycle member's lineage is the whole cycle.
+   */
+  const restrictedMemo = new Map<number, boolean>();
+  const restricted = (id: number): boolean => {
+    const known = restrictedMemo.get(id);
+    if (known !== undefined) return known;
+    const chain: DiscourseCategory[] = [];
+    const index = new Map<number, number>();
+    let current = byId.get(id);
+    let base = false;
+    let cycleStart = -1;
+    while (current) {
+      const memo = restrictedMemo.get(current.id);
+      if (memo !== undefined) {
+        base = memo;
+        break;
+      }
+      const seenAt = index.get(current.id);
+      if (seenAt !== undefined) {
+        cycleStart = seenAt;
+        break;
+      }
+      index.set(current.id, chain.length);
+      chain.push(current);
+      current =
+        current.parentId === null ? undefined : byId.get(current.parentId);
+    }
+    let tail = chain.length;
+    if (cycleStart >= 0) {
+      const cycle = chain
+        .slice(cycleStart)
+        .some((category) => category.readRestricted);
+      for (let i = cycleStart; i < chain.length; i += 1) {
+        restrictedMemo.set((chain[i] as DiscourseCategory).id, cycle);
+      }
+      base = cycle;
+      tail = cycleStart;
+    }
+    for (let i = tail - 1; i >= 0; i -= 1) {
+      const category = chain[i] as DiscourseCategory;
+      base = category.readRestricted || base;
+      restrictedMemo.set(category.id, base);
+    }
+    return restrictedMemo.get(id) ?? false;
+  };
+
   return {
     expand(selectedIds) {
       const result = new Set<number>();
@@ -371,7 +420,7 @@ export function buildCategoryTree(
       return [...(byParent.get(parentId) ?? [])];
     },
     isRestricted(id) {
-      return lineage(id).some((category) => category.readRestricted);
+      return restricted(id);
     },
   };
 }

@@ -20,7 +20,7 @@ import { DISCOURSE_ID_PATTERN } from "./contribution";
 import { DiscourseError, type DiscourseErrorCode } from "./errors";
 import { extractDiscourseTopic } from "./extract";
 import { parseForumUrl } from "./forum-url";
-import { MAX_SELECTED_ITEMS } from "./limits";
+import { ACTION_DEADLINE_MS, MAX_SELECTED_ITEMS } from "./limits";
 import { buildCategoryTree, type RefreshMode } from "./model";
 import { scanForum, type ScanLimits, type ScanSelection } from "./scan";
 import { browseForum, describeForum, searchForum } from "./selection";
@@ -33,7 +33,7 @@ export type DiscourseAdapterInput = {
   publicFetch: () => ConnectorPublicFetchScope;
   logger?: { warn?(message: string, meta?: Record<string, unknown>): void };
   /** Test seams. */
-  limits?: Partial<ScanLimits & ClientLimits>;
+  limits?: Partial<ScanLimits & ClientLimits & { ACTION_DEADLINE_MS: number }>;
   now?: () => number;
 };
 
@@ -138,17 +138,31 @@ export function createDiscourseAdapter(
       client: DiscourseClient;
       resolved: C;
     }) => Promise<T>,
+    options: { bounded?: boolean } = {},
   ): Promise<T> {
     const resolved = resolve();
     const scope = publicFetch();
+    // A selection action or readiness check ends within one wall-clock
+    // budget, however many requests it makes; aborting makes the client fail
+    // with DISCOURSE_FORUM_UNREACHABLE.
+    const controller = options.bounded ? new AbortController() : undefined;
+    const timer =
+      controller === undefined
+        ? undefined
+        : setTimeout(
+            () => controller.abort(),
+            limits?.ACTION_DEADLINE_MS ?? ACTION_DEADLINE_MS,
+          );
     try {
       const client = createDiscourseClient({
         fetch: scope.fetch,
         base: base(resolved),
         limits,
+        signal: controller?.signal,
       });
       return await operation({ client, resolved });
     } finally {
+      if (timer !== undefined) clearTimeout(timer);
       await scope.close();
     }
   }
@@ -160,9 +174,10 @@ export function createDiscourseAdapter(
       client: DiscourseClient;
       resolved: C;
     }) => Promise<T>,
+    options?: { bounded?: boolean },
   ): Promise<T> {
     try {
-      return await useClient(resolve, base, operation);
+      return await useClient(resolve, base, operation, options);
     } catch (error) {
       return toAdapterError(error);
     }
@@ -209,6 +224,7 @@ export function createDiscourseAdapter(
       async ({ client }) => ({
         result: await run({ client, request: input.request }),
       }),
+      { bounded: true },
     ) as Promise<ConnectorActionResult>;
 
   return {
@@ -239,6 +255,7 @@ export function createDiscourseAdapter(
             ).size;
             return { ready: true, metadata: { categoryCount } };
           },
+          { bounded: true },
         );
       } catch (error) {
         const result = readinessFailure(error);
