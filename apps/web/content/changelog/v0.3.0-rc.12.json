@@ -1,0 +1,15 @@
+{
+  "tag": "v0.3.0-rc.12",
+  "releasedAt": "2026-11-26",
+  "category": "Release",
+  "commit": "0b06d93200a701f94db69c1fd884d374725172d6",
+  "title": "Sandbox runtime refreshes after app updates",
+  "summary": "The desktop app now brings its local sandbox runtime up to date after an app update, instead of keeping the runtime that an earlier version installed. The macOS app is signed and notarized, Windows installers are not publisher-signed, and the stable and latest channels are unchanged.",
+  "items": [
+    "After you update the app, the local sandbox runtime installed by an earlier version is replaced automatically the next time the dashboard opens. If that fails, the existing runtime keeps working.",
+    "Settings now shows an Update sandbox runtime button whenever the installed runtime came from an earlier app version.",
+    "Other app features and your connection to your workspace are unchanged from the previous release."
+  ],
+  "githubPrerelease": false,
+  "desktopPublicationPolicy": "macos-signed"
+}
