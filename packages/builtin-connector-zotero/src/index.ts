@@ -51,3 +51,9 @@ export {
   type ZoteroObject,
   type ZoteroItemGroup,
 } from "./model";
+export {
+  scanLibrary,
+  type ScanLimits,
+  type ScanCheckpoint,
+  type ScanLibraryInput,
+} from "./scan";
