@@ -2,9 +2,15 @@
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-const state = vi.hoisted(() => ({ trackMobileLaunch: vi.fn() }));
+const state = vi.hoisted(() => ({
+  trackMobileLaunch: vi.fn(),
+  reloadForStaleBuild: vi.fn(),
+}));
 vi.mock("./analytics/events", () => ({
   trackMobileLaunch: state.trackMobileLaunch,
+}));
+vi.mock("./stale-build-reload", () => ({
+  reloadForStaleBuild: state.reloadForStaleBuild,
 }));
 
 import {
@@ -29,11 +35,23 @@ function installBridge(platform: string, invoke = vi.fn()) {
   return invoke;
 }
 
+let workerMessage: ((event: { data: unknown }) => void) | undefined;
+
 function installServiceWorker() {
   const register = vi.fn(async () => ({}));
+  workerMessage = undefined;
   Object.defineProperty(navigator, "serviceWorker", {
     configurable: true,
-    value: { register, controller: null },
+    value: {
+      register,
+      controller: null,
+      addEventListener: (
+        type: string,
+        listener: (event: { data: unknown }) => void,
+      ) => {
+        if (type === "message") workerMessage = listener;
+      },
+    },
   });
   return register;
 }
@@ -53,6 +71,7 @@ function navigationTiming(
 
 beforeEach(() => {
   state.trackMobileLaunch.mockReset();
+  state.reloadForStaleBuild.mockReset();
   vi.spyOn(console, "info").mockImplementation(() => {});
 });
 
@@ -67,6 +86,17 @@ describe("registerMobileServiceWorker", () => {
     const register = installServiceWorker();
     registerMobileServiceWorker();
     expect(register).toHaveBeenCalledWith("/sw.js", { scope: "/" });
+  });
+
+  test("reloads when the worker reports that the page on screen is from before a deploy", () => {
+    installBridge("ios");
+    installServiceWorker();
+    registerMobileServiceWorker();
+    workerMessage?.({ data: { type: "something-else" } });
+    workerMessage?.({ data: null });
+    expect(state.reloadForStaleBuild).not.toHaveBeenCalled();
+    workerMessage?.({ data: { type: "sourceweft-shell-stale" } });
+    expect(state.reloadForStaleBuild).toHaveBeenCalledTimes(1);
   });
 
   test("leaves the website and other hosts alone", () => {

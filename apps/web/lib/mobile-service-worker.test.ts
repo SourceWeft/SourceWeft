@@ -24,7 +24,7 @@ function loadWorker(network: (request: Request) => Promise<Response>) {
           store.set(key(request), response);
         },
         keys: async () => [...store.keys()].map((url) => new Request(url)),
-        delete: async (request: Request) => store.delete(request.url),
+        delete: async (request: RequestInfo) => store.delete(key(request)),
       };
     },
     keys: async () => [...stores.keys()],
@@ -36,12 +36,25 @@ function loadWorker(network: (request: Request) => Promise<Response>) {
   const fetch = vi.fn((input: RequestInfo) =>
     network(typeof input === "string" ? new Request(key(input)) : input),
   );
+  // The pages the worker controls, by client id.
+  const windows = new Map<
+    string,
+    {
+      url: string;
+      navigate?: (url: string) => Promise<unknown>;
+      postMessage: (message: unknown) => void;
+    }
+  >();
   const self = {
     location: new URL(`${ORIGIN}/sw.js`),
     addEventListener: (type: string, listener: Listener) =>
       listeners.set(type, listener),
     skipWaiting: () => undefined,
-    clients: { claim: async () => undefined },
+    clients: {
+      claim: async () => undefined,
+      get: async (id: string) => windows.get(id),
+      matchAll: async () => [...windows.values()],
+    },
   };
   runInNewContext(source, {
     self,
@@ -51,16 +64,22 @@ function loadWorker(network: (request: Request) => Promise<Response>) {
     Headers,
     Response,
     Set,
+    Date,
     console,
   });
 
-  async function dispatch(path: string, mode: RequestMode = "navigate") {
+  async function dispatch(
+    path: string,
+    mode: RequestMode = "navigate",
+    clientId = "",
+  ) {
     const request = new Request(`${ORIGIN}${path}`);
     Object.defineProperty(request, "mode", { value: mode });
     let responded: Promise<Response> | undefined;
     const background: Promise<unknown>[] = [];
     listeners.get("fetch")?.({
       request,
+      clientId,
       respondWith: (response: Promise<Response>) => {
         responded = response;
       },
@@ -79,7 +98,7 @@ function loadWorker(network: (request: Request) => Promise<Response>) {
     await Promise.all(background);
   }
 
-  return { dispatch, install, fetch, stores };
+  return { dispatch, install, fetch, stores, windows };
 }
 
 let served = 0;
@@ -234,4 +253,101 @@ test("refreshing a page caches the build files a new deploy names", async () => 
   expect(files.some((url) => url.endsWith("/_next/static/chunks/new.js"))).toBe(
     true,
   );
+});
+
+// A deploy removes the previous build's files from the server. A page cached
+// before it then asks for script files that are gone.
+function staleShell(options: { navigate?: boolean } = {}) {
+  const worker = loadWorker(async (request) => {
+    const { pathname } = new URL(request.url);
+    if (pathname.startsWith("/_next/static/chunks/gone")) {
+      return new Response("Not found", { status: 404 });
+    }
+    return pathname.startsWith("/_next/static/")
+      ? new Response("file", { status: 200 })
+      : page();
+  });
+  const navigate = vi.fn(async () => undefined);
+  const postMessage = vi.fn();
+  worker.windows.set("app", {
+    url: `${ORIGIN}/dashboard/chat`,
+    ...(options.navigate === false ? {} : { navigate }),
+    postMessage,
+  });
+  const shellPaths = () =>
+    [...(worker.stores.get("sourceweft-shell-v1")?.keys() ?? [])]
+      .map((url) => new URL(url).pathname)
+      .filter((path) => path === "/dashboard/chat" || path === "/auth/sign-in");
+  return { worker, navigate, postMessage, shellPaths };
+}
+
+test("a build file the server no longer has drops the cached pages and reloads the page that asked", async () => {
+  const { worker, navigate, shellPaths } = staleShell();
+  await worker.dispatch("/dashboard/chat");
+  await worker.dispatch("/auth/sign-in");
+  await worker.dispatch("/logo.svg", "no-cors");
+  expect(shellPaths().sort()).toEqual(["/auth/sign-in", "/dashboard/chat"]);
+
+  const missing = await worker.dispatch(
+    "/_next/static/chunks/gone.js",
+    "no-cors",
+    "app",
+  );
+
+  expect(missing?.status).toBe(404);
+  expect(shellPaths()).toEqual([]);
+  expect(navigate).toHaveBeenCalledExactlyOnceWith(`${ORIGIN}/dashboard/chat`);
+  // The brand images do not depend on the build and stay.
+  const kept = [...(worker.stores.get("sourceweft-shell-v1")?.keys() ?? [])];
+  expect(kept.some((url) => url.endsWith("/logo.svg"))).toBe(true);
+  // The reloaded page comes from the network, not from the cache.
+  const reloaded = await worker.dispatch("/dashboard/chat");
+  expect(reloaded?.headers.get("server-timing")).toBeNull();
+});
+
+test("a missing build file reloads the page at most once a minute", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    vi.setSystemTime(new Date("2026-11-26T07:00:00Z"));
+    const { worker, navigate } = staleShell();
+    await worker.dispatch("/dashboard/chat");
+    await worker.dispatch("/_next/static/chunks/gone.js", "no-cors", "app");
+    expect(navigate).toHaveBeenCalledTimes(1);
+
+    // The reloaded page is cached again; its files are still missing.
+    await worker.dispatch("/dashboard/chat");
+    vi.setSystemTime(new Date("2026-11-26T07:00:20Z"));
+    await worker.dispatch("/_next/static/chunks/gone-2.js", "no-cors", "app");
+    expect(navigate).toHaveBeenCalledTimes(1);
+
+    await worker.dispatch("/dashboard/chat");
+    vi.setSystemTime(new Date("2026-11-26T07:02:00Z"));
+    await worker.dispatch("/_next/static/chunks/gone-3.js", "no-cors", "app");
+    expect(navigate).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a missing build file with no cached page reloads nothing", async () => {
+  const { worker, navigate, postMessage } = staleShell();
+  await worker.dispatch("/_next/static/chunks/gone.js", "no-cors", "app");
+  expect(navigate).not.toHaveBeenCalled();
+  expect(postMessage).not.toHaveBeenCalled();
+});
+
+test("a page the worker cannot navigate is asked to reload itself", async () => {
+  const { worker, postMessage } = staleShell({ navigate: false });
+  await worker.dispatch("/dashboard/chat");
+  await worker.dispatch("/_next/static/chunks/gone.js", "no-cors", "app");
+  expect(postMessage).toHaveBeenCalledExactlyOnceWith({
+    type: "sourceweft-shell-stale",
+  });
+});
+
+test("without a client id every open page is reloaded", async () => {
+  const { worker, navigate } = staleShell();
+  await worker.dispatch("/dashboard/chat");
+  await worker.dispatch("/_next/static/chunks/gone.js", "no-cors");
+  expect(navigate).toHaveBeenCalledTimes(1);
 });

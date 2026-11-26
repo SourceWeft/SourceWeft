@@ -2,9 +2,12 @@
 
 import { trackMobileLaunch } from "./analytics/events";
 import { nativeBridge } from "./native-bridge";
+import { reloadForStaleBuild } from "./stale-build-reload";
 
 /** Name the service worker adds to `Server-Timing` on a response it served from its cache. */
 export const SHELL_CACHE_TIMING = "sw-shell-cache";
+/** What the service worker posts when the page on screen is from before a deploy. */
+export const SHELL_STALE_MESSAGE = "sourceweft-shell-stale";
 
 function isIosApp() {
   if (typeof window === "undefined") return false;
@@ -16,6 +19,9 @@ function isIosApp() {
  * Registers the service worker that keeps the app shell on the device, so a
  * launch shows the page without waiting for the network. Only the iOS app
  * registers it: the website and other hosts keep their plain network loads.
+ *
+ * The worker normally reloads a page it served from before a deploy itself;
+ * it posts a message instead when it may not navigate the page.
  */
 export function registerMobileServiceWorker() {
   if (!isIosApp()) return;
@@ -23,6 +29,16 @@ export function registerMobileServiceWorker() {
     console.info("[launch] service workers are not available in this WebView");
     return;
   }
+  navigator.serviceWorker.addEventListener("message", (event) => {
+    const data: unknown = event.data;
+    if (
+      data &&
+      typeof data === "object" &&
+      (data as { type?: unknown }).type === SHELL_STALE_MESSAGE
+    ) {
+      reloadForStaleBuild();
+    }
+  });
   navigator.serviceWorker
     .register("/sw.js", { scope: "/" })
     .catch((error) =>
