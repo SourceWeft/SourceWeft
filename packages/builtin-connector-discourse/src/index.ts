@@ -64,3 +64,9 @@ export {
 } from "./model";
 export { postHtmlToText } from "./post-text";
 export { renderTopicMarkdown, type RenderTopicInput } from "./render";
+export {
+  scanForum,
+  type ScanForumInput,
+  type ScanLimits,
+  type ScanSelection,
+} from "./scan";

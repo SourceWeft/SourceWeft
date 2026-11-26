@@ -302,6 +302,15 @@ test("toConnectorItem builds the identity, link and metadata", () => {
   });
 });
 
+test("toConnectorItem records omittedPosts only when posts were left out", () => {
+  const none = toConnectorItem(row(), input());
+  assert.equal("omittedPosts" in none.metadata, false);
+  const zero = toConnectorItem(row(), input({ omittedPosts: 0 }));
+  assert.equal("omittedPosts" in zero.metadata, false);
+  const some = toConnectorItem(row(), input({ omittedPosts: 7 }));
+  assert.equal(some.metadata.omittedPosts, 7);
+});
+
 test("toConnectorItem omits missing fields and falls back for the title", () => {
   const bare = row({
     title: "   ",

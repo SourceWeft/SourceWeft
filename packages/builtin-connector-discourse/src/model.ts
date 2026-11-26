@@ -456,6 +456,11 @@ export type ToConnectorItemInput = {
   hash: string;
   postIds: number[];
   authors: string[];
+  /**
+   * Posts of the topic that were not read (a topic longer than the per-topic
+   * cap); recorded in the metadata only when greater than zero.
+   */
+  omittedPosts?: number;
 };
 
 function parseDate(value: string | null): Date | null {
@@ -496,6 +501,12 @@ export function toConnectorItem(
   if (authors.length > 0) metadata.authors = authors;
   const createdAt = lineOf(row.createdAt, FIELD_MAX);
   if (createdAt !== null) metadata.createdAt = createdAt;
+  if (
+    input.omittedPosts !== undefined &&
+    isId(input.omittedPosts) // a positive safe integer
+  ) {
+    metadata.omittedPosts = input.omittedPosts;
+  }
 
   return {
     externalId: `discourse:topic:${row.id}`,
