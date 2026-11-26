@@ -70,3 +70,7 @@ export {
   type ScanLimits,
   type ScanSelection,
 } from "./scan";
+export {
+  extractDiscourseTopic,
+  type ExtractDiscourseTopicInput,
+} from "./extract";

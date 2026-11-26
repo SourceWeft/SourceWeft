@@ -9,20 +9,18 @@ import {
   MAX_REQUESTS,
   MAX_TOPICS,
   MAX_TOPICS_PER_CATEGORY,
-  POST_BATCH,
   SCAN_TIMEOUT_MS,
 } from "./limits";
 import {
   buildCategoryTree,
   deepHashOf,
-  isVisiblePost,
   lightHashOf,
   toConnectorItem,
-  type DiscoursePost,
   type DiscourseTopic,
   type DiscourseTopicRow,
   type RefreshMode,
 } from "./model";
+import { readTopicPosts } from "./topic-read";
 
 /** The caps one scan enforces; each defaults to the matching package limit. */
 export type ScanLimits = {
@@ -74,10 +72,6 @@ const DEFAULTS: ScanLimits = {
   SCAN_TIMEOUT_MS,
   MAX_POSTS_PER_TOPIC,
 };
-
-function comparePosts(a: DiscoursePost, b: DiscoursePost): number {
-  return a.postNumber - b.postNumber || a.id - b.id;
-}
 
 /**
  * Scans the selected categories and topics of a public Discourse forum and
@@ -244,33 +238,18 @@ export async function* scanForum(
       // The topic document is the fresher row: check it again.
       if (!acceptable(doc)) continue;
 
-      // Read the first posts up to the cap: the document carries the first
-      // page, the rest comes in batches of POST_BATCH post ids.
-      const included = doc.stream.slice(0, limits.MAX_POSTS_PER_TOPIC);
-      const wanted = new Set(included);
-      const read = new Map<number, DiscoursePost>();
-      for (const post of doc.posts) {
-        if (wanted.has(post.id)) read.set(post.id, post);
-      }
-      const missing = included.filter((postId) => !read.has(postId));
-      for (let start = 0; start < missing.length; start += POST_BATCH) {
-        const batch = missing.slice(start, start + POST_BATCH);
-        const reply = await call(() => client.topicPosts(id, batch));
-        // The topic document was just read: posts that are suddenly
-        // not found are an inconsistent read, never a deleted topic.
-        if (isNotFound(reply))
-          throw new DiscourseError("DISCOURSE_BAD_RESPONSE");
-        for (const post of reply) {
-          if (wanted.has(post.id)) read.set(post.id, post);
-        }
-      }
+      const read = await readTopicPosts({
+        client,
+        topic: doc,
+        maxPosts: limits.MAX_POSTS_PER_TOPIC,
+        request: call,
+      });
+      // The topic document was just read: posts that are suddenly
+      // not found are an inconsistent read, never a deleted topic.
+      if (isNotFound(read)) throw new DiscourseError("DISCOURSE_BAD_RESPONSE");
 
-      // Posts the document carries that are not in `stream`, and ids the
-      // forum did not return, are simply not read; `omittedPosts` counts only
-      // what the per-topic cap cut off.
       // The hash, the post ids and the authors are over the same posts.
-      const visible = [...read.values()].filter(isVisiblePost);
-      visible.sort(comparePosts);
+      const { visible } = read;
       items.push(
         toConnectorItem(doc, {
           base,
@@ -282,7 +261,7 @@ export async function* scanForum(
             const author = post.username ?? post.name;
             return author === null ? [] : [author];
           }),
-          omittedPosts: doc.stream.length - included.length,
+          omittedPosts: read.omittedPosts,
         }),
       );
     }
