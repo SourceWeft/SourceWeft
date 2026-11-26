@@ -3,7 +3,6 @@ import type {
   ConnectorItem,
 } from "@sourceweft/contracts";
 import type { WordPressClient } from "./client";
-import { WordPressError, type WordPressRestCode } from "./errors";
 import {
   MAX_ITEMS,
   MAX_REQUESTS,
@@ -17,6 +16,7 @@ import {
   type WpNames,
   type WpPost,
 } from "./model";
+import { fetchSingleItem, nameMap } from "./lookup";
 import { resolveScope, type SelectionItem } from "./selection-scope";
 
 /** The caps one scan enforces; each defaults to the matching package limit. */
@@ -79,25 +79,6 @@ class ScanIncomplete extends Error {
   }
 }
 
-/** R8b: a selected single that answers 401/403 with one of these rights codes
- * has become private or unreadable — it is treated as gone (skipped), like a
- * 404. A `LOGIN_REQUIRED` from any other cause means the whole site now needs a
- * login and stays an error. */
-const GONE_WHEN_FORBIDDEN: ReadonlySet<WordPressRestCode> = new Set([
-  "rest_forbidden",
-  "rest_cannot_view",
-  "rest_user_cannot_view",
-]);
-
-function singleIsGone(error: unknown): boolean {
-  return (
-    error instanceof WordPressError &&
-    error.code === "LOGIN_REQUIRED" &&
-    error.restCode !== undefined &&
-    GONE_WHEN_FORBIDDEN.has(error.restCode)
-  );
-}
-
 /**
  * Scans the selected posts and pages of one WordPress site and returns exactly
  * one discovery page.
@@ -138,16 +119,11 @@ export async function scanSite(
     if (found.size > limits.MAX_ITEMS) throw new ScanIncomplete("too_large");
   }
 
-  async function fetchSingle(
+  function fetchSingle(
     route: "posts" | "pages",
     id: number,
   ): Promise<WpPost | null> {
-    try {
-      return await client.getItem(route, id, includeUnpublished);
-    } catch (error) {
-      if (singleIsGone(error)) return null;
-      throw error;
-    }
+    return fetchSingleItem(client, route, id, includeUnpublished);
   }
 
   /**
@@ -188,9 +164,7 @@ export async function scanSite(
     budget();
     const categoryList = await client.listCategories();
     const scope = resolveScope(input.items, categoryList);
-    const categoryNames = new Map<number, string>(
-      categoryList.map((category) => [category.id, category.name]),
-    );
+    const categoryNames = nameMap(categoryList);
 
     if (scope.posts.all) {
       for (const item of await listRoute("posts", undefined)) admit(item);
@@ -227,9 +201,7 @@ export async function scanSite(
 
     budget();
     const tagList = tagIds.size > 0 ? await client.listTags([...tagIds]) : [];
-    const tagNames = new Map<number, string>(
-      tagList.map((tag) => [tag.id, tag.name]),
-    );
+    const tagNames = nameMap(tagList);
 
     budget();
     const authorNames =
