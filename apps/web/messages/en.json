@@ -3697,7 +3697,7 @@
           "login_required": "This forum requires a login. Private forums are not supported.",
           "not_a_discourse_site": "This address is not a Discourse forum. Use the address of the forum's home page.",
           "forum_unreachable": "The forum could not be reached. Try again in a moment.",
-          "blocked_endpoint": "This deployment does not allow connections to this address.",
+          "blocked_endpoint": "This address can't be used: this deployment may not allow connections to it, or the forum redirects to a different address. Enter the forum's own home-page address (the address it redirects to).",
           "rate_limited": "The forum is limiting requests right now. Wait a moment and try again.",
           "config_invalid": "The forum address or refresh mode is not valid."
         }

@@ -119,7 +119,8 @@ export const discourseConnectorContribution = {
     },
   ],
   // Non-secret configuration only: the forum and what to index from it. An
-  // empty `items` list indexes every public category. `uniqueItems` compares
+  // empty `items` list indexes nothing: readiness reports `selection_required`
+  // until a category or topic is chosen. `uniqueItems` compares
   // whole objects, and an item holds only `id` and `kind`, so it is exactly
   // uniqueness by kind and id (the id carries the kind prefix too).
   configSchema: {

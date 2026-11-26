@@ -3697,7 +3697,7 @@
           "login_required": "此論壇需要登入。不支援私有論壇。",
           "not_a_discourse_site": "此網址不是 Discourse 論壇。請使用論壇首頁的網址。",
           "forum_unreachable": "無法連接到該論壇，請稍後重試。",
-          "blocked_endpoint": "此部署不允許連接該網址。",
+          "blocked_endpoint": "無法使用此網址：此部署可能不允許連接該網址，或者該論壇會重新導向到另一個網址。請輸入論壇自己的首頁網址（即它重新導向到的網址）。",
           "rate_limited": "論壇目前正在限制請求。請稍等片刻後重試。",
           "config_invalid": "論壇網址或更新方式無效。"
         }

@@ -268,7 +268,7 @@ test.each([
   ["login_required", "requires a login"],
   ["not_a_discourse_site", "not a Discourse forum"],
   ["forum_unreachable", "could not be reached"],
-  ["blocked_endpoint", "does not allow connections to this address"],
+  ["blocked_endpoint", "forum redirects to a different address"],
   ["rate_limited", "limiting requests"],
   ["config_invalid", "address or refresh mode is not valid"],
 ])(

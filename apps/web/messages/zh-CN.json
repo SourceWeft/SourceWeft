@@ -3697,7 +3697,7 @@
           "login_required": "此论坛需要登录。不支持私有论坛。",
           "not_a_discourse_site": "此网址不是 Discourse 论坛。请使用论坛首页的网址。",
           "forum_unreachable": "无法连接到该论坛，请稍后重试。",
-          "blocked_endpoint": "此部署不允许连接该网址。",
+          "blocked_endpoint": "无法使用此网址：此部署可能不允许连接该网址，或者该论坛会重定向到另一个网址。请输入论坛自己的首页网址（即它重定向到的网址）。",
           "rate_limited": "论坛当前正在限制请求。请稍等片刻后重试。",
           "config_invalid": "论坛网址或更新方式无效。"
         }
