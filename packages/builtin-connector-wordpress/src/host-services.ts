@@ -1,37 +1,8 @@
 import type {
-  ConnectorActionResult,
-  ConnectorAdapter,
-  ConnectorExtractedContent,
-  ConnectorItem,
-} from "@sourceweft/contracts";
-import type {
   CapabilityConnectorContribution,
   CreateConnectorAdapters,
 } from "@sourceweft/contracts/capability-host-services";
-import { toBackendWordPressManifest } from "./backend-manifest";
-import { toBackendWordPressLoginManifest } from "./login-backend-manifest";
-
-// replaced in Task 7: the real adapters arrive with the REST client. Until
-// then an enabled deployment registers these inert adapters, which carry the
-// real manifests (so the catalog and selection wiring can be exercised) and
-// refuse every operation.
-function placeholderAdapter(
-  getManifest: ConnectorAdapter["getManifest"],
-): ConnectorAdapter {
-  const notImplemented = (): never => {
-    throw new Error("WordPress connector adapter is not implemented yet");
-  };
-  return {
-    capabilityId: "sourceweft/wordpress",
-    getManifest,
-    // eslint-disable-next-line require-yield
-    async *discover(): AsyncIterable<ConnectorItem> {
-      notImplemented();
-    },
-    extract: async (): Promise<ConnectorExtractedContent> => notImplemented(),
-    executeAction: async (): Promise<ConnectorActionResult> => notImplemented(),
-  };
-}
+import { createWordPressAdapter } from "./adapter";
 
 /**
  * WordPress is gated behind a strict boolean deployment switch, exactly like
@@ -51,6 +22,7 @@ export const createConnectorAdapters: CreateConnectorAdapters = ({
   env,
   publicFetch,
   credentialedFetch,
+  logger,
 }): CapabilityConnectorContribution => {
   const activation = env
     .get("WORDPRESS_CONNECTOR_ENABLED")
@@ -73,10 +45,13 @@ export const createConnectorAdapters: CreateConnectorAdapters = ({
     );
   }
   return {
-    // replaced in Task 7
     adapters: [
-      placeholderAdapter(toBackendWordPressManifest),
-      placeholderAdapter(toBackendWordPressLoginManifest),
+      createWordPressAdapter({ flavor: "public", publicFetch, logger }),
+      createWordPressAdapter({
+        flavor: "login",
+        credentialedFetch,
+        logger,
+      }),
     ],
     agentToolDefs: [],
   };

@@ -10,6 +10,12 @@ export { toBackendWordPressManifest } from "./backend-manifest";
 export { toBackendWordPressLoginManifest } from "./login-backend-manifest";
 export { createConnectorAdapters } from "./host-services";
 export {
+  createWordPressAdapter,
+  WordPressAdapterError,
+  type WordPressAdapterInput,
+} from "./adapter";
+export { wordPressCredentialIdentity } from "./identity";
+export {
   PER_PAGE,
   MAX_ITEMS,
   MAX_REQUESTS,
