@@ -45,3 +45,7 @@ export const MAX_METADATA_POST_IDS = 500;
 
 /** Distinct author names recorded in an item's metadata. */
 export const MAX_METADATA_AUTHORS = 100;
+
+/** Sent on every Discourse request. */
+export const DISCOURSE_USER_AGENT =
+  "SourceWeft-DiscourseConnector/1.0 (+https://sourceweft.com)";

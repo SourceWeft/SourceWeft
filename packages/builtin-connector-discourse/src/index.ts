@@ -24,4 +24,20 @@ export {
   MAX_TEXT_CHARS,
   MAX_METADATA_POST_IDS,
   MAX_METADATA_AUTHORS,
+  DISCOURSE_USER_AGENT,
 } from "./limits";
+export { DiscourseError, type DiscourseErrorCode } from "./errors";
+export { parseForumUrl, topicUrl, postUrl } from "./forum-url";
+export {
+  createDiscourseClient,
+  isNotFound,
+  DiscourseNotFound,
+  type CreateDiscourseClientInput,
+  type ClientLimits,
+  type DiscourseClient,
+  type DiscourseCategory,
+  type DiscourseTopicRow,
+  type DiscourseTopic,
+  type DiscoursePost,
+  type DiscourseSearchPost,
+} from "./client";
