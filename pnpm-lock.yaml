@@ -2071,6 +2071,18 @@ importers:
         specifier: ^4.23.12
         version: 4.23.12
 
+  packages/html-text:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
+
   packages/i18n:
     dependencies:
       opencc-js:
