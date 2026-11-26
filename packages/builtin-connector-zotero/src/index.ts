@@ -21,3 +21,19 @@ export {
   SHORTCUT_MAX_AGE_MS,
   MAX_TEXT_CHARS,
 } from "./limits";
+export { ZoteroError, type ZoteroErrorCode } from "./errors";
+export {
+  zoteroCredentialIdentity,
+  parseStoredCredential,
+  libraryPrefixFromConfig,
+  type ZoteroLibraryPrefix,
+} from "./identity";
+export {
+  createZoteroClient,
+  assertReadOnly,
+  type ZoteroClient,
+  type ZoteroKeyInfo,
+  type ZoteroPage,
+  type CreateZoteroClientInput,
+} from "./client";
+export { ZOTERO_USER_AGENT } from "./limits";

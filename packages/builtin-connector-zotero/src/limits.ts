@@ -21,3 +21,6 @@ export const MAX_SELECTED_COLLECTIONS = 50;
 export const SHORTCUT_MAX_AGE_MS = 86_400_000;
 /** Ceiling on extracted characters per indexed document. */
 export const MAX_TEXT_CHARS = 500_000;
+/** Sent on every Zotero API request. */
+export const ZOTERO_USER_AGENT =
+  "SourceWeft-ZoteroConnector/1.0 (+https://sourceweft.com)";
