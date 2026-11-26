@@ -35,9 +35,22 @@ export {
   type CreateDiscourseClientInput,
   type ClientLimits,
   type DiscourseClient,
+} from "./client";
+export {
+  parseSite,
+  parseCategory,
+  parseTopicRow,
+  parseTopic,
+  parsePost,
+  parseCategoryPage,
+  parseTopicPosts,
+  parseSearch,
+  type DiscourseSite,
   type DiscourseCategory,
   type DiscourseTopicRow,
   type DiscourseTopic,
   type DiscoursePost,
   type DiscourseSearchPost,
-} from "./client";
+  type DiscourseCategoryPage,
+  type DiscourseSearchResult,
+} from "./model";

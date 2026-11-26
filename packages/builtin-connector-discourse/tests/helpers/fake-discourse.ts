@@ -49,6 +49,8 @@ export type FakeTopic = {
   visible?: boolean;
   /** Answer 410 (deleted topic) for the topic and its posts. */
   gone?: boolean;
+  /** Answer 403 `invalid_access` for the topic and its posts (a private topic). */
+  restricted?: boolean;
   posts: FakePost[];
 };
 
@@ -59,6 +61,8 @@ export type FakeCategory = {
   parent_category_id?: number | null;
   read_restricted?: boolean;
   topic_count?: number;
+  /** Answer 403 `invalid_access` for `c/<id>.json` (a private category). */
+  restricted?: boolean;
 };
 
 export type FakeForum = {
@@ -66,7 +70,10 @@ export type FakeForum = {
   basePath?: string;
   categories: FakeCategory[];
   topics: FakeTopic[];
-  /** Every request answers 403, like a forum that requires login. */
+  /**
+   * Every request answers 403 with `error_type: "not_logged_in"`, like a forum
+   * that requires login.
+   */
   loginRequired?: boolean;
 };
 
@@ -170,6 +177,17 @@ function topicRow(topic: FakeTopic): Record<string, unknown> {
   };
 }
 
+/** What a real Discourse sends for a topic or category the viewer may not see. */
+function invalidAccess(): Response {
+  return json(
+    {
+      errors: ["You are not permitted to view the requested resource."],
+      error_type: "invalid_access",
+    },
+    403,
+  );
+}
+
 export function startFakeDiscourse(initial: FakeForum): FakeDiscourse {
   let forum: FakeForum = { ...initial };
   const requests: RecordedRequest[] = [];
@@ -216,8 +234,33 @@ export function startFakeDiscourse(initial: FakeForum): FakeDiscourse {
     const category = /^c\/([1-9][0-9]*)\.json$/.exec(rest);
     if (category) {
       const id = Number(category[1]);
-      if (!forum.categories.some((c) => c.id === id)) return json({}, 404);
-      const all = forum.topics.filter((t) => t.category_id === id && !t.gone);
+      const found = forum.categories.find((c) => c.id === id);
+      if (!found) return json({}, 404);
+      if (found.restricted) return invalidAccess();
+      // Like a real Discourse, a category lists its subcategories' topics
+      // too, most recently bumped first (ties keep their order).
+      const inside = new Set<number>([id]);
+      for (let grew = true; grew;) {
+        grew = false;
+        for (const c of forum.categories) {
+          const parent = c.parent_category_id;
+          if (parent != null && inside.has(parent) && !inside.has(c.id)) {
+            inside.add(c.id);
+            grew = true;
+          }
+        }
+      }
+      const all = forum.topics
+        .filter((t) => inside.has(t.category_id) && !t.gone)
+        .map((t, order) => ({ t, order }))
+        .sort((a, b) => {
+          const x =
+            a.t.bumped_at ?? a.t.last_posted_at ?? a.t.created_at ?? DATE;
+          const y =
+            b.t.bumped_at ?? b.t.last_posted_at ?? b.t.created_at ?? DATE;
+          return x < y ? 1 : x > y ? -1 : a.order - b.order;
+        })
+        .map(({ t }) => t);
       const page = Number(request.query.page ?? "0");
       const slice = all.slice(
         page * FAKE_PAGE_SIZE,
@@ -242,6 +285,7 @@ export function startFakeDiscourse(initial: FakeForum): FakeDiscourse {
       const topic = forum.topics.find((t) => t.id === Number(topicPosts[1]));
       if (!topic) return json({}, 404);
       if (topic.gone) return json({}, 410);
+      if (topic.restricted) return invalidAccess();
       const wanted = new Set(
         (request.queryAll["post_ids[]"] ?? []).map((v) => Number(v)),
       );
@@ -256,6 +300,7 @@ export function startFakeDiscourse(initial: FakeForum): FakeDiscourse {
       const topic = forum.topics.find((t) => t.id === Number(topicDoc[1]));
       if (!topic) return json({}, 404);
       if (topic.gone) return json({}, 410);
+      if (topic.restricted) return invalidAccess();
       return json({
         ...topicRow(topic),
         post_stream: {

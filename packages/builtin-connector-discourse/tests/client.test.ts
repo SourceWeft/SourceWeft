@@ -3,8 +3,10 @@ import { getEventListeners } from "node:events";
 import test from "node:test";
 import {
   createDiscourseClient,
+  createDiscourseTransport,
   isNotFound,
   type DiscourseClient,
+  type DiscourseTransport,
 } from "../src/client";
 import { DiscourseError, type DiscourseErrorCode } from "../src/errors";
 import {
@@ -25,6 +27,8 @@ const BASE = "https://forum.example.com";
 type Harness = {
   fake: FakeDiscourse;
   client: DiscourseClient;
+  /** The raw transport, a second instance over the same fake. */
+  transport: DiscourseTransport;
   sleeps: number[];
   clock: { t: number };
 };
@@ -43,11 +47,11 @@ function harness(
   const fake = startFakeDiscourse(forum);
   const sleeps: number[] = [];
   const clock = { t: 1_000_000 };
-  const client = createDiscourseClient({
+  const config = {
     fetch: options.fetch ?? fake.fetch,
     base: options.base ?? BASE + (forum.basePath ?? ""),
     now: () => clock.t,
-    sleep: async (ms) => {
+    sleep: async (ms: number) => {
       sleeps.push(ms);
       clock.t += ms;
     },
@@ -55,8 +59,14 @@ function harness(
     requestTimeoutMs: options.requestTimeoutMs,
     signal: options.signal,
     limits: options.limits,
-  });
-  return { fake, client, sleeps, clock };
+  };
+  return {
+    fake,
+    client: createDiscourseClient(config),
+    transport: createDiscourseTransport(config),
+    sleeps,
+    clock,
+  };
 }
 
 async function codeOf(promise: Promise<unknown>): Promise<DiscourseErrorCode> {
@@ -103,7 +113,7 @@ test("an invalid base is refused at construction", () => {
 });
 
 test("paths outside the allow-list and bad ids are refused before any request", async () => {
-  const { fake, client } = harness();
+  const { fake, client, transport } = harness();
   for (const path of [
     "admin/users.json",
     "/site.json",
@@ -124,21 +134,25 @@ test("paths outside the allow-list and bad ids are refused before any request", 
     "",
   ]) {
     assert.equal(
-      await codeOf(client.getJson(path)),
+      await codeOf(transport.getJson(path)),
       "DISCOURSE_CONFIG_INVALID",
       path,
     );
   }
   assert.equal(
-    await codeOf(client.getJson("site.json", { foo: "x" })),
+    await codeOf(transport.getJson("site.json", { foo: "x" })),
     "DISCOURSE_CONFIG_INVALID",
   );
   assert.equal(
-    await codeOf(client.getJson("site.json", { page: 1.5 })),
+    await codeOf(transport.getJson("site.json", { page: 1.5 })),
     "DISCOURSE_CONFIG_INVALID",
   );
   assert.equal(
-    await codeOf(client.getJson("site.json", { page: -1 })),
+    await codeOf(transport.getJson("site.json", { page: -1 })),
+    "DISCOURSE_CONFIG_INVALID",
+  );
+  assert.equal(
+    await codeOf(transport.getJson("search.json", { page: 100_001 })),
     "DISCOURSE_CONFIG_INVALID",
   );
   const calls: Promise<unknown>[] = [
@@ -592,7 +606,7 @@ test("an aborted external signal stops the client before sending", async () => {
 test("errors never contain the base URL, host, path, digits or a cause", async () => {
   const base = "https://secret-forum.example.com/private-path";
   const forum = sampleForum({ basePath: "/private-path" });
-  const { fake, client } = harness(forum, { base });
+  const { fake, client, transport } = harness(forum, { base });
   const failures: (() => Promise<unknown>)[] = [
     () => {
       fake.failNext({ status: 403 });
@@ -622,7 +636,7 @@ test("errors never contain the base URL, host, path, digits or a cause", async (
       fake.failNext({ networkError: true }, 5);
       return client.topic(1);
     },
-    () => client.getJson("admin.json"),
+    () => transport.getJson("admin.json"),
   ];
   for (const failure of failures) {
     let caught: unknown;
@@ -651,4 +665,189 @@ test("the client never touches the global fetch", async () => {
   } finally {
     globalThis.fetch = original;
   }
+});
+
+const INVALID_ACCESS = JSON.stringify({
+  errors: ["You are not permitted to view the requested resource."],
+  error_type: "invalid_access",
+});
+
+test("a restricted topic, category or post list is NotFound", async () => {
+  const forum = sampleForum();
+  forum.topics[0]!.restricted = true;
+  forum.categories[2]!.restricted = true;
+  const { client } = harness(forum);
+  assert.ok(isNotFound(await client.topic(1)));
+  assert.ok(isNotFound(await client.topicPosts(1, [1001])));
+  assert.ok(isNotFound(await client.categoryPage(12, 0)));
+  // The neighbours are untouched.
+  assert.ok(!isNotFound(await client.topic(2)));
+  assert.ok(!isNotFound(await client.categoryPage(10, 0)));
+});
+
+test("any other 403 on a topic, category or post list stays LOGIN_REQUIRED", async () => {
+  const { fake, client } = harness();
+  const calls: [string, () => Promise<unknown>][] = [
+    ["category", () => client.categoryPage(10, 0)],
+    ["topic", () => client.topic(1)],
+    ["posts", () => client.topicPosts(1, [1001])],
+  ];
+  const bodies: [string, string][] = [
+    ["a challenge page", "<html><title>Just a moment...</title></html>"],
+    ["an empty body", ""],
+    ["another error_type", '{"error_type":"not_logged_in","errors":["x"]}'],
+    ["no error_type", '{"errors":["x"]}'],
+    ["an array", '[{"error_type":"invalid_access"}]'],
+    ["a string error_type in an array", '["invalid_access"]'],
+    [
+      "an oversized body",
+      JSON.stringify({ error_type: "invalid_access", pad: "x".repeat(70_000) }),
+    ],
+  ];
+  for (const [path, call] of calls) {
+    for (const [what, body] of bodies) {
+      fake.failNext({ status: 403, body });
+      assert.equal(
+        await codeOf(call()),
+        "DISCOURSE_LOGIN_REQUIRED",
+        `${path} with ${what}`,
+      );
+    }
+    // A 403 with the restricted body is NotFound on the same path.
+    fake.failNext({ status: 403, body: INVALID_ACCESS });
+    assert.ok(isNotFound(await call()), `${path} invalid_access`);
+  }
+});
+
+test("a login-required forum is LOGIN_REQUIRED on every path", async () => {
+  const forum = { ...sampleForum(), loginRequired: true };
+  const { client } = harness(forum);
+  for (const call of [
+    () => client.site(),
+    () => client.categoryPage(10, 0),
+    () => client.topic(1),
+    () => client.topicPosts(1, [1001]),
+    () => client.search("topic", 1),
+  ]) {
+    assert.equal(await codeOf(call()), "DISCOURSE_LOGIN_REQUIRED");
+  }
+});
+
+test("a restricted-looking 403 on site.json or search.json is still LOGIN_REQUIRED", async () => {
+  const { fake, client } = harness();
+  fake.failNext({ status: 403, body: INVALID_ACCESS });
+  assert.equal(await codeOf(client.site()), "DISCOURSE_LOGIN_REQUIRED");
+  fake.failNext({ status: 403, body: INVALID_ACCESS });
+  assert.equal(await codeOf(client.search("x", 1)), "DISCOURSE_LOGIN_REQUIRED");
+});
+
+test("the 403 body is read through a capped, cancelled reader", async () => {
+  const state = { cancelled: false, pulled: 0 };
+  const chunks = Array.from({ length: 200 }, () =>
+    new Uint8Array(1024).fill(97),
+  );
+  const forbidden = (async () => {
+    let i = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        state.pulled += 1;
+        const chunk = chunks[i];
+        i += 1;
+        if (chunk === undefined) controller.close();
+        else controller.enqueue(chunk);
+      },
+      cancel() {
+        state.cancelled = true;
+      },
+    });
+    return new Response(body, { status: 403 });
+  }) as typeof fetch;
+  const { client } = harness(sampleForum(), { fetch: forbidden });
+  assert.equal(await codeOf(client.topic(1)), "DISCOURSE_LOGIN_REQUIRED");
+  assert.equal(state.cancelled, true);
+  assert.ok(state.pulled < 100, `stopped early (pulled ${state.pulled})`);
+});
+
+test("the gap is measured from the end of the previous response", async () => {
+  const fake = startFakeDiscourse(sampleForum());
+  const sleeps: number[] = [];
+  const clock = { t: 1_000 };
+  // Each request takes 100 ms of (injected) time.
+  const slow = (async (...args: Parameters<typeof fetch>) => {
+    const response = await fake.fetch(...args);
+    clock.t += 100;
+    return response;
+  }) as typeof fetch;
+  const client = createDiscourseClient({
+    fetch: slow,
+    base: BASE,
+    now: () => clock.t,
+    sleep: async (ms) => {
+      sleeps.push(ms);
+      clock.t += ms;
+    },
+  });
+  await client.site();
+  assert.deepEqual(sleeps, []);
+  // The first request ended just now: a full gap is still owed.
+  await client.topic(1);
+  assert.deepEqual(sleeps, [MIN_REQUEST_GAP_MS]);
+  clock.t += MIN_REQUEST_GAP_MS - 1;
+  await client.topic(2);
+  assert.deepEqual(sleeps, [MIN_REQUEST_GAP_MS, 1]);
+});
+
+test("a category lists its subcategories' topics, most recently bumped first, 30 per page", async () => {
+  const forum = sampleForum({ topics: 0 });
+  // 10 is the parent of 11; 11 is the parent of 13; 12 is unrelated.
+  forum.categories.push({
+    id: 13,
+    name: "Deep",
+    slug: "deep",
+    parent_category_id: 11,
+  });
+  const at = (day: number) =>
+    `2026-03-${String(day).padStart(2, "0")}T00:00:00.000Z`;
+  const topic = (id: number, categoryId: number, day: number) => ({
+    id,
+    title: `T${id}`,
+    slug: `t${id}`,
+    category_id: categoryId,
+    bumped_at: at(day),
+    posts: [{ id: id * 10, post_number: 1, username: "a", cooked: "<p>x</p>" }],
+  });
+  forum.topics = [
+    topic(1, 10, 1),
+    topic(2, 11, 5),
+    topic(3, 13, 3),
+    topic(4, 12, 9),
+    ...Array.from({ length: 30 }, (_, i) => topic(100 + i, 11, 10 + i)),
+  ];
+  const { client } = harness(forum);
+  const first = await client.categoryPage(10, 0);
+  assert.ok(!isNotFound(first));
+  assert.equal(first.topics.length, 30);
+  assert.equal(first.hasMore, true);
+  assert.equal(first.topics[0]!.id, 129); // newest bump first
+  const second = await client.categoryPage(10, 1);
+  assert.ok(!isNotFound(second));
+  assert.deepEqual(
+    second.topics.map((t) => t.id),
+    [2, 3, 1],
+  );
+  assert.equal(second.hasMore, false);
+  const own = await client.categoryPage(12, 0);
+  assert.ok(!isNotFound(own));
+  assert.deepEqual(
+    own.topics.map((t) => t.id),
+    [4],
+  );
+});
+
+test("mutateNext rewrites headers of the next served response", async () => {
+  const { fake, client } = harness();
+  fake.mutateNext({ "content-length": "99999999999" });
+  assert.equal(await codeOf(client.site()), "DISCOURSE_TOO_LARGE");
+  // Only the next response was touched.
+  assert.equal((await client.site()).categories.length, 3);
 });

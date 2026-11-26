@@ -10,6 +10,20 @@ import {
   POST_BATCH,
   REQUEST_TIMEOUT_MS,
 } from "./limits";
+import {
+  isId,
+  isRecord,
+  parseCategoryPage,
+  parseSearch,
+  parseSite,
+  parseTopic,
+  parseTopicPosts,
+  type DiscourseCategoryPage,
+  type DiscoursePost,
+  type DiscourseSearchResult,
+  type DiscourseSite,
+  type DiscourseTopic,
+} from "./model";
 
 /** Limits a test may lower; production uses the constants in `limits.ts`. */
 export type ClientLimits = {
@@ -42,93 +56,36 @@ export function isNotFound(value: unknown): value is DiscourseNotFound {
   return value instanceof DiscourseNotFound;
 }
 
-export type DiscourseCategory = {
-  id: number;
-  name: string;
-  slug: string;
-  parentId: number | null;
-  readRestricted: boolean;
-  topicCount: number;
-};
-
-export type DiscourseTopicRow = {
-  id: number;
-  title: string;
-  slug: string;
-  categoryId: number | null;
-  tags: string[];
-  postsCount: number;
-  highestPostNumber: number;
-  createdAt: string | null;
-  lastPostedAt: string | null;
-  bumpedAt: string | null;
-  archetype: string | null;
-  closed: boolean;
-  archived: boolean;
-  visible: boolean;
-};
-
-export type DiscoursePost = {
-  id: number;
-  postNumber: number;
-  username: string | null;
-  name: string | null;
-  createdAt: string | null;
-  updatedAt: string | null;
-  version: number;
-  replyToPostNumber: number | null;
-  /** HTML as the forum rendered it. Untrusted. */
-  cooked: string;
-  postType: number;
-  hidden: boolean;
-  deletedAt: string | null;
-  userDeleted: boolean;
-  topicId: number | null;
-};
-
-export type DiscourseTopic = DiscourseTopicRow & {
-  /** The posts the topic document carries (the first ones). */
-  posts: DiscoursePost[];
-  /** Every post id of the topic, in order. */
-  stream: number[];
-};
-
-export type DiscourseSearchPost = {
-  id: number;
-  topicId: number | null;
-  postNumber: number | null;
-  username: string | null;
-  blurb: string;
-};
-
+/** The public API: five typed reads. Raw paths are internal to this module. */
 export type DiscourseClient = {
-  /** One allow-listed GET; the 404/410 of a topic or category is {@link DiscourseNotFound}. */
-  getJson(
-    path: string,
-    query?: Record<string, string | number | string[]>,
-  ): Promise<unknown>;
-  site(): Promise<{ categories: DiscourseCategory[] }>;
+  site(): Promise<DiscourseSite>;
   /** `page` is 0-based, as the forum counts it. */
   categoryPage(
     categoryId: number,
     page: number,
-  ): Promise<
-    { topics: DiscourseTopicRow[]; hasMore: boolean } | DiscourseNotFound
-  >;
+  ): Promise<DiscourseCategoryPage | DiscourseNotFound>;
   topic(topicId: number): Promise<DiscourseTopic | DiscourseNotFound>;
   topicPosts(
     topicId: number,
     postIds: number[],
   ): Promise<DiscoursePost[] | DiscourseNotFound>;
   /** `page` is 1-based, as the forum counts it. */
-  search(
-    query: string,
-    page: number,
-  ): Promise<{
-    topics: DiscourseTopicRow[];
-    posts: DiscourseSearchPost[];
-    hasMore: boolean;
-  }>;
+  search(query: string, page: number): Promise<DiscourseSearchResult>;
+};
+
+/** Internal transport: one allow-listed GET. Exported for tests only. */
+export type DiscourseTransport = {
+  /** The 404/410 (or a restricted 403) of a topic or category is {@link DiscourseNotFound}. */
+  getJson(
+    path: string,
+    query?: Record<string, string | number | string[]>,
+  ): Promise<unknown>;
+  /** Like `getJson`, but a non-JSON 200 answers this code instead of BAD_RESPONSE. */
+  getJsonOr(
+    path: string,
+    query: Record<string, string | number | string[]> | undefined,
+    nonJson: DiscourseErrorCode,
+  ): Promise<unknown>;
 };
 
 const ID = "[1-9][0-9]{0,9}";
@@ -145,6 +102,8 @@ const NOT_FOUND_PATHS = ALLOWED_PATHS.slice(2);
 const QUERY_KEYS = new Set(["page", "q", "post_ids[]"]);
 const MAX_PAGE = 100_000;
 const MAX_QUERY_CHARS = 500;
+/** What a 403 body is read for: `error_type`. */
+const MAX_FORBIDDEN_BODY_BYTES = 65_536;
 /** A 429 body is only read for `extras.wait_seconds`; this is plenty. */
 const MAX_RATE_LIMIT_BODY_BYTES = 65_536;
 const RETRY_STATUSES = new Set([429, 502, 503, 504]);
@@ -241,18 +200,6 @@ async function readCapped(
   return out;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isId(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
-}
-
-function isCount(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-}
-
 /** Throws unless `value` is a positive safe integer of at most ten digits. */
 function requireId(value: unknown): number {
   if (!isId(value) || value > 9_999_999_999) {
@@ -277,105 +224,18 @@ function bad(): DiscourseError {
   return new DiscourseError("DISCOURSE_BAD_RESPONSE");
 }
 
-function optString(value: unknown): string | null {
-  return typeof value === "string" && value !== "" ? value : null;
-}
-
-function parseCategory(raw: unknown): DiscourseCategory {
-  if (!isRecord(raw) || !isId(raw.id)) throw bad();
-  return {
-    id: raw.id,
-    name: typeof raw.name === "string" ? raw.name : "",
-    slug: typeof raw.slug === "string" ? raw.slug : "",
-    parentId: isId(raw.parent_category_id) ? raw.parent_category_id : null,
-    readRestricted: raw.read_restricted === true,
-    topicCount: isCount(raw.topic_count) ? raw.topic_count : 0,
-  };
-}
-
-/** Tags are plain strings, or objects with a `name`, depending on the Discourse version. */
-function parseTags(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return [];
-  const tags: string[] = [];
-  for (const entry of raw) {
-    if (typeof entry === "string") tags.push(entry);
-    else if (isRecord(entry) && typeof entry.name === "string") {
-      tags.push(entry.name);
-    }
-  }
-  return tags;
-}
-
-function parseTopicRow(raw: unknown): DiscourseTopicRow {
-  if (!isRecord(raw) || !isId(raw.id) || typeof raw.title !== "string") {
-    throw bad();
-  }
-  return {
-    id: raw.id,
-    title: raw.title,
-    slug: typeof raw.slug === "string" ? raw.slug : "",
-    categoryId: isId(raw.category_id) ? raw.category_id : null,
-    tags: parseTags(raw.tags),
-    postsCount: isCount(raw.posts_count) ? raw.posts_count : 0,
-    highestPostNumber: isCount(raw.highest_post_number)
-      ? raw.highest_post_number
-      : 0,
-    createdAt: optString(raw.created_at),
-    lastPostedAt: optString(raw.last_posted_at),
-    bumpedAt: optString(raw.bumped_at),
-    archetype: optString(raw.archetype),
-    closed: raw.closed === true,
-    archived: raw.archived === true,
-    // Absent means visible: only an explicit false hides a topic.
-    visible: raw.visible !== false,
-  };
-}
-
-function parsePost(raw: unknown): DiscoursePost {
-  if (!isRecord(raw) || !isId(raw.id) || !isId(raw.post_number)) throw bad();
-  return {
-    id: raw.id,
-    postNumber: raw.post_number,
-    username: optString(raw.username),
-    name: optString(raw.name),
-    createdAt: optString(raw.created_at),
-    updatedAt: optString(raw.updated_at),
-    version: isCount(raw.version) ? raw.version : 1,
-    replyToPostNumber: isId(raw.reply_to_post_number)
-      ? raw.reply_to_post_number
-      : null,
-    cooked: typeof raw.cooked === "string" ? raw.cooked : "",
-    postType: isCount(raw.post_type) ? raw.post_type : 1,
-    hidden: raw.hidden === true,
-    deletedAt: optString(raw.deleted_at),
-    userDeleted: raw.user_deleted === true,
-    topicId: isId(raw.topic_id) ? raw.topic_id : null,
-  };
-}
-
-function list(value: unknown): unknown[] {
-  if (value === undefined) return [];
-  if (!Array.isArray(value)) throw bad();
-  return value;
-}
-
-function postStream(json: Record<string, unknown>): Record<string, unknown> {
-  if (!isRecord(json.post_stream)) throw bad();
-  return json.post_stream;
-}
-
 /**
- * A read-only client for a public Discourse forum's JSON API. Only five
- * fixed GET endpoints can be requested, every URL is built here from the
- * validated base and validated ids: nothing in a response (not even
- * `more_topics_url`) is ever followed. The `fetch` is the host's public-scope
- * fetch, which owns the address policy. Every failure is a
- * {@link DiscourseError} with a fixed message: nothing from the forum, the URL
- * or an underlying error is forwarded.
+ * The GET transport of the client. Only five fixed endpoints can be
+ * requested; every URL is built here from the validated base and validated
+ * ids: nothing in a response (not even `more_topics_url`) is ever followed.
+ * The `fetch` is the host's public-scope fetch, which owns the address
+ * policy. Every failure is a {@link DiscourseError} with a fixed message:
+ * nothing from the forum, the URL or an underlying error is forwarded.
+ * Exported for tests; the public API is {@link createDiscourseClient}.
  */
-export function createDiscourseClient(
+export function createDiscourseTransport(
   input: CreateDiscourseClientInput,
-): DiscourseClient {
+): DiscourseTransport {
   const parsedBase = parseForumUrl(input.base);
   if (parsedBase === null || parsedBase.base !== input.base) {
     throw new DiscourseError("DISCOURSE_FORUM_URL_INVALID");
@@ -427,7 +287,8 @@ export function createDiscourseClient(
       const values = Array.isArray(value) ? value : [value];
       for (const entry of values) {
         if (typeof entry === "number") {
-          if (!Number.isSafeInteger(entry) || entry < 0) {
+          const limit = key === "page" ? MAX_PAGE : Number.MAX_SAFE_INTEGER;
+          if (!Number.isSafeInteger(entry) || entry < 0 || entry > limit) {
             throw new DiscourseError("DISCOURSE_CONFIG_INVALID");
           }
           params.append(key, String(entry));
@@ -477,6 +338,24 @@ export function createDiscourseClient(
     return cap(fallback);
   }
 
+  /** True when the 403 body is a capped JSON object with `error_type: "invalid_access"`. */
+  async function isInvalidAccess(
+    response: Response,
+    signal: AbortSignal,
+  ): Promise<boolean> {
+    try {
+      const bytes = await readCapped(
+        response,
+        Math.min(maxBytes, MAX_FORBIDDEN_BODY_BYTES),
+        signal,
+      );
+      const body: unknown = JSON.parse(new TextDecoder("utf-8").decode(bytes));
+      return isRecord(body) && body.error_type === "invalid_access";
+    } catch {
+      return false;
+    }
+  }
+
   async function perform(
     path: string,
     query: Record<string, string | number | string[]> | undefined,
@@ -504,7 +383,6 @@ export function createDiscourseClient(
           }
         }
       }
-      lastRequestAt = now();
 
       const controller = new AbortController();
       const signal = controller.signal;
@@ -552,9 +430,16 @@ export function createDiscourseClient(
             throw new DiscourseError(finalFailure);
           // Falls out of the try: the timer is cleared before the wait.
         } else {
-          await discard(response);
-          if (status === 403)
+          if (status === 403) {
+            // A restricted topic or category on a public forum answers
+            // `invalid_access`; any other 403 (login wall, challenge page)
+            // stays a login requirement.
+            if (missing && (await isInvalidAccess(response, signal))) {
+              return new DiscourseNotFound();
+            }
             throw new DiscourseError("DISCOURSE_LOGIN_REQUIRED");
+          }
+          await discard(response);
           if (status === 404 && isSite) {
             throw new DiscourseError("DISCOURSE_NOT_A_DISCOURSE_SITE");
           }
@@ -585,32 +470,37 @@ export function createDiscourseClient(
       } finally {
         clearTimeout(timer);
         external?.removeEventListener("abort", onExternalAbort);
+        // The gap is measured from the end of the response, body included.
+        lastRequestAt = now();
       }
       await wait(waitMs);
     }
   }
 
-  function getJson(
-    path: string,
-    query?: Record<string, string | number | string[]>,
-  ): Promise<unknown> {
-    return perform(path, query, "DISCOURSE_BAD_RESPONSE");
-  }
+  return {
+    getJson: (path, query) => perform(path, query, "DISCOURSE_BAD_RESPONSE"),
+    getJsonOr: (path, query, nonJson) => perform(path, query, nonJson),
+  };
+}
+
+/**
+ * A read-only client for a public Discourse forum's JSON API: five typed
+ * reads over {@link createDiscourseTransport}.
+ */
+export function createDiscourseClient(
+  input: CreateDiscourseClientInput,
+): DiscourseClient {
+  const transport = createDiscourseTransport(input);
+  const { getJson } = transport;
 
   return {
-    getJson,
-
     async site() {
-      const json = (await perform(
+      const json = await transport.getJsonOr(
         "site.json",
         undefined,
         "DISCOURSE_NOT_A_DISCOURSE_SITE",
-      )) as Record<string, unknown>;
-      // Every Discourse answers `categories` (a list) on `site.json`.
-      if (!Array.isArray(json.categories)) {
-        throw new DiscourseError("DISCOURSE_NOT_A_DISCOURSE_SITE");
-      }
-      return { categories: json.categories.map(parseCategory) };
+      );
+      return parseSite(json);
     },
 
     async categoryPage(categoryId, page) {
@@ -618,34 +508,13 @@ export function createDiscourseClient(
       const json = await getJson(`c/${id}.json`, {
         page: requirePage(page, 0),
       });
-      if (isNotFound(json)) return json;
-      const topicList = (json as Record<string, unknown>).topic_list;
-      if (!isRecord(topicList)) throw bad();
-      return {
-        topics: list(topicList.topics).map(parseTopicRow),
-        // Only presence matters: the value is a path we never follow.
-        hasMore:
-          typeof topicList.more_topics_url === "string" &&
-          topicList.more_topics_url !== "",
-      };
+      return isNotFound(json) ? json : parseCategoryPage(json);
     },
 
     async topic(topicId) {
       const id = requireId(topicId);
       const json = await getJson(`t/${id}.json`);
-      if (isNotFound(json)) return json;
-      const document = json as Record<string, unknown>;
-      const row = parseTopicRow(document);
-      if (row.id !== id) throw bad();
-      const stream = postStream(document);
-      if (!Array.isArray(stream.stream) || !stream.stream.every(isId)) {
-        throw bad();
-      }
-      return {
-        ...row,
-        posts: list(stream.posts).map(parsePost),
-        stream: stream.stream as number[],
-      };
+      return isNotFound(json) ? json : parseTopic(json, id);
     },
 
     async topicPosts(topicId, postIds) {
@@ -659,10 +528,7 @@ export function createDiscourseClient(
       }
       const ids = postIds.map((postId) => String(requireId(postId)));
       const json = await getJson(`t/${id}/posts.json`, { "post_ids[]": ids });
-      if (isNotFound(json)) return json;
-      return list(postStream(json as Record<string, unknown>).posts).map(
-        parsePost,
-      );
+      return isNotFound(json) ? json : parseTopicPosts(json);
     },
 
     async search(query, page) {
@@ -673,25 +539,9 @@ export function createDiscourseClient(
       ) {
         throw new DiscourseError("DISCOURSE_CONFIG_INVALID");
       }
-      const json = (await getJson("search.json", {
-        q: query,
-        page: requirePage(page, 1),
-      })) as Record<string, unknown>;
-      const grouped = json.grouped_search_result;
-      return {
-        topics: list(json.topics).map(parseTopicRow),
-        posts: list(json.posts).map((raw): DiscourseSearchPost => {
-          if (!isRecord(raw) || !isId(raw.id)) throw bad();
-          return {
-            id: raw.id,
-            topicId: isId(raw.topic_id) ? raw.topic_id : null,
-            postNumber: isId(raw.post_number) ? raw.post_number : null,
-            username: optString(raw.username),
-            blurb: typeof raw.blurb === "string" ? raw.blurb : "",
-          };
-        }),
-        hasMore: isRecord(grouped) && grouped.more_full_page_results === true,
-      };
+      return parseSearch(
+        await getJson("search.json", { q: query, page: requirePage(page, 1) }),
+      );
     },
   };
 }
