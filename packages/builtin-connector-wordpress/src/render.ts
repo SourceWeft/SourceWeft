@@ -1,4 +1,7 @@
-import { htmlToMarkdown } from "@sourceweft/html-text";
+import {
+  HTML_TO_MARKDOWN_MAX_INPUT_CHARS,
+  htmlToMarkdown,
+} from "@sourceweft/html-text";
 import { WordPressError } from "./errors";
 import { MAX_METADATA_TERMS, MAX_TEXT_CHARS } from "./limits";
 import {
@@ -108,7 +111,12 @@ export function renderContent(
     maxChars: Number.POSITIVE_INFINITY,
   });
   const full = body === "" ? header : `${header}\n\n${body}`;
-  if (full.length <= maxChars) return full;
   const marker = `\n\n${TRUNCATION_MARKER}`;
+  // The converter ignores HTML past its input ceiling without saying so: that
+  // is a truncation too, even when what it did read converts to a short text.
+  const inputCut = post.contentHtml.length > HTML_TO_MARKDOWN_MAX_INPUT_CHARS;
+  if (full.length + (inputCut ? marker.length : 0) <= maxChars) {
+    return inputCut ? full + marker : full;
+  }
   return cut(full, maxChars - marker.length, header.length + 2) + marker;
 }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { htmlToMarkdown } from "../src";
+import { HTML_TO_MARKDOWN_MAX_INPUT_CHARS, htmlToMarkdown } from "../src";
 
 const LONE_SURROGATE =
   /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
@@ -27,6 +27,14 @@ describe("htmlToMarkdown hostile input", () => {
     const html = "a".repeat(2_000_000) + "<p>tail marker</p>";
     const out = htmlToMarkdown(html, { maxChars: 10_000_000 });
     assert.ok(!out.includes("tail marker"));
+  });
+
+  it("exports the input ceiling it applies", () => {
+    assert.equal(HTML_TO_MARKDOWN_MAX_INPUT_CHARS, 2_000_000);
+    const at = "a".repeat(HTML_TO_MARKDOWN_MAX_INPUT_CHARS - 1) + "b";
+    assert.ok(htmlToMarkdown(at, { maxChars: 10_000_000 }).endsWith("b"));
+    const over = at + "c";
+    assert.ok(!htmlToMarkdown(over, { maxChars: 10_000_000 }).endsWith("c"));
   });
 
   it("handles 100,000 unclosed div tags quickly", () => {

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { HTML_TO_MARKDOWN_MAX_INPUT_CHARS } from "@sourceweft/html-text";
 import { WordPressError } from "../src/errors";
 import { MAX_TEXT_CHARS } from "../src/limits";
 import { type WpPost } from "../src/model";
@@ -269,4 +270,54 @@ test("password-protected content is never rendered", () => {
     (error: unknown) =>
       error instanceof WordPressError && error.code === "BAD_RESPONSE",
   );
+});
+
+test("a body past the html-text input ceiling is marked truncated even when it converts short", () => {
+  const filler = "<span></span>".repeat(
+    Math.ceil(HTML_TO_MARKDOWN_MAX_INPUT_CHARS / 13),
+  );
+  const over = `${filler.slice(0, HTML_TO_MARKDOWN_MAX_INPUT_CHARS)}<p>tail</p>`;
+  assert.ok(over.length > HTML_TO_MARKDOWN_MAX_INPUT_CHARS);
+  const markdown = renderContent(
+    post({ contentHtml: over }),
+    names,
+    null,
+    SITE_HOST,
+  );
+  assert.ok(markdown.length < 1_000);
+  assert.equal(markdown.split("\n").at(-1), "[Content truncated]");
+  assert.equal(markdown.split("[Content truncated]").length, 2);
+  assert.equal(markdown.split("\n").at(-2), "");
+});
+
+test("a body exactly at the ceiling is not marked truncated", () => {
+  const pad = "<span></span>".repeat(1_000);
+  const tail = "<p>end</p>";
+  const exact =
+    pad +
+    " ".repeat(HTML_TO_MARKDOWN_MAX_INPUT_CHARS - pad.length - tail.length) +
+    tail;
+  assert.equal(exact.length, HTML_TO_MARKDOWN_MAX_INPUT_CHARS);
+  const markdown = renderContent(
+    post({ contentHtml: exact }),
+    names,
+    null,
+    SITE_HOST,
+  );
+  assert.doesNotMatch(markdown, /Content truncated/);
+  assert.ok(markdown.endsWith("end"));
+});
+
+test("both limits firing yield exactly one marker", () => {
+  const html = `<p>${"word ".repeat(450_000)}</p>`;
+  assert.ok(html.length > HTML_TO_MARKDOWN_MAX_INPUT_CHARS);
+  const markdown = renderContent(
+    post({ contentHtml: html }),
+    names,
+    null,
+    SITE_HOST,
+  );
+  assert.ok(markdown.length <= MAX_TEXT_CHARS);
+  assert.equal(markdown.split("[Content truncated]").length, 2);
+  assert.equal(markdown.split("\n").at(-1), "[Content truncated]");
 });

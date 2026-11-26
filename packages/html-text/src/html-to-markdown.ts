@@ -1,5 +1,5 @@
 /** Longest HTML the converter reads; the rest is ignored. */
-const MAX_INPUT_CHARS = 2_000_000;
+export const HTML_TO_MARKDOWN_MAX_INPUT_CHARS = 2_000_000;
 /** Attribute values longer than this are ignored. */
 const MAX_ATTRIBUTE_CHARS = 2_000;
 /** Default cut of the returned Markdown. */
@@ -390,11 +390,13 @@ export function htmlToMarkdown(
     throw new RangeError("maxChars must be a positive number");
   }
   let source = html;
-  if (html.length > MAX_INPUT_CHARS) {
-    const last = html.charCodeAt(MAX_INPUT_CHARS - 1);
+  if (html.length > HTML_TO_MARKDOWN_MAX_INPUT_CHARS) {
+    const last = html.charCodeAt(HTML_TO_MARKDOWN_MAX_INPUT_CHARS - 1);
     // Do not end the input on half of a surrogate pair.
     const end =
-      last >= 0xd800 && last <= 0xdbff ? MAX_INPUT_CHARS - 1 : MAX_INPUT_CHARS;
+      last >= 0xd800 && last <= 0xdbff
+        ? HTML_TO_MARKDOWN_MAX_INPUT_CHARS - 1
+        : HTML_TO_MARKDOWN_MAX_INPUT_CHARS;
     source = html.slice(0, end);
   }
   const n = source.length;
