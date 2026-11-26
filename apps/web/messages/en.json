@@ -3465,7 +3465,8 @@
         "connectedConfigure": "OAuth is connected. Configure this connector to enable syncing.",
         "available": "Ready to connect with {name} OAuth.",
         "availableAddFeed": "Add the URL of a public RSS or Atom feed.",
-        "availableLoginFlow": "Sign in to {name} in your browser to connect."
+        "availableLoginFlow": "Sign in to {name} in your browser to connect.",
+        "availableAddApiKey": "Add a Zotero library with a read-only API key."
       },
       "syncBlock": {
         "pagesLimit": "Ingestion pages are used up. The last run indexed {count} items before pausing; syncing resumes automatically when pages are available.",
@@ -3595,6 +3596,52 @@
           "failed": "The connection could not be completed. Try again."
         },
         "disconnectNote": "SourceWeft tries to remove the app password it created, but if that does not succeed you can delete it in Nextcloud under Settings > Security."
+      },
+      "zotero": {
+        "libraryTypeLabel": "Library type",
+        "libraryTypePersonal": "Personal library",
+        "libraryTypeGroup": "Group library",
+        "libraryIdLabel": "Library ID",
+        "libraryIdHintPersonal": "Your personal userID. It is shown on zotero.org/settings/keys and is a number, not your username.",
+        "libraryIdHintGroup": "The number in the group's web address, for example 2205533 in zotero.org/groups/2205533/team_name.",
+        "apiKeyLabel": "API key",
+        "apiKeyHint": "Create a read-only key at zotero.org/settings/keys: allow library access and notes access, and do not allow write access.",
+        "nameLabel": "Name (optional)",
+        "dialog": {
+          "title": "Connect a Zotero library",
+          "description": "Enter your Zotero library ID and a read-only API key. SourceWeft checks the key first, then indexes your library and keeps it in sync. Afterwards you can limit it to specific collections.",
+          "check": "Check key",
+          "checking": "Checking...",
+          "connected": "Library verified",
+          "add": "Add library",
+          "autoSync": "Sync automatically",
+          "autoSyncHint": "Check for new and changed items on a schedule. Off by default; you can sync manually anytime.",
+          "invalidLibraryId": "Enter the library ID as digits only (up to 12, not starting with 0).",
+          "invalidApiKey": "Enter an API key without spaces.",
+          "checkFailed": "Could not reach Zotero. Try again.",
+          "notesAccessWarning": "This key cannot read notes, so notes and annotations will not be indexed. Create a key with notes access to include them.",
+          "nameConflict": "A connector with this name already exists in this workspace. Change the name, or use the existing one.",
+          "accountConflict": "This library is already connected in this workspace.",
+          "credentialNotAllowed": "This deployment does not allow connecting this library.",
+          "addFailed": "Failed to add the library."
+        },
+        "readiness": {
+          "reauth_required": "Zotero rejected this API key. Check the key and try again.",
+          "library_not_accessible": "This key cannot read this library. Allow library access for it at zotero.org/settings/keys.",
+          "library_not_found": "Zotero could not find this library. Check the library type and ID.",
+          "rate_limited": "Zotero is limiting requests right now. Wait a moment and try again.",
+          "unreachable": "Zotero could not be reached. Try again in a moment.",
+          "blocked_endpoint": "This deployment does not allow connections to Zotero.",
+          "config_invalid": "The library type or ID is not valid."
+        },
+        "rotate": {
+          "title": "Reconnect Zotero",
+          "description": "Enter a new read-only API key for {name} ({library}). It replaces the stored key.",
+          "keyLabel": "API key",
+          "save": "Reconnect",
+          "failed": "Could not update the API key. Try again.",
+          "libraryUnknown": "This connector's library details are missing, so its key cannot be replaced here."
+        }
       },
       "gmail": {
         "modeTitle": "Choose how to use Gmail",
@@ -3816,6 +3863,20 @@
             "browser": {
               "description": "Open a site, then a space, to see its pages. Tick the spaces and pages to include.",
               "root": "Confluence sites"
+            }
+          },
+          "zotero": {
+            "itemsTitle": "Collections",
+            "itemsDescription": "Choose the Zotero collections to index. Items in a chosen collection, including its subcollections, are kept in sync on the connector's schedule.",
+            "choose": "Choose collections",
+            "empty": "No collections chosen, so the whole library is indexed. Choose collections to index only those.",
+            "kinds": {
+              "collection": "Collections"
+            },
+            "browser": {
+              "description": "Open a collection to see its subcollections, then tick the collections to index.",
+              "root": "Library",
+              "emptyContainer": "This collection has no subcollections."
             }
           }
         }

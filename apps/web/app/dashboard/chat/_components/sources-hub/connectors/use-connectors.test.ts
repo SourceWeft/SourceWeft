@@ -1568,6 +1568,103 @@ test("handleRotateCredential rotates the credential and closes the rotate dialog
   expect(api().rotateCredentialConnector).toBeNull();
 });
 
+function zoteroConnector(overrides: Partial<SourceConnector> = {}) {
+  return fakeConnector({
+    id: "zotero-1",
+    connectorType: "zotero",
+    name: "Lab library",
+    oauthAccountId: "acc-zotero",
+    configJson: { libraryType: "group", libraryId: "2205533", items: [] },
+    credentialConfigured: true,
+    credentialDisplayName: "groups/2205533",
+    ...overrides,
+  });
+}
+
+test("handleCheckCredential forwards a generic api-key check untouched and keeps its metadata", async () => {
+  checkConfig.mockResolvedValue({
+    ready: true,
+    message: "Key cannot read notes",
+    metadata: { notesAccess: false },
+  });
+  await mountHook(baseInput("ws-zcheck"));
+
+  const result = await api().handleCheckCredential({
+    connectorType: "zotero",
+    configJson: { libraryType: "user", libraryId: "42", items: [] },
+    credential: { username: "users/42", secret: "AbC123" },
+  });
+
+  expect(checkConfig).toHaveBeenCalledWith("ws-zcheck", {
+    connectorType: "zotero",
+    configJson: { libraryType: "user", libraryId: "42", items: [] },
+    credential: { username: "users/42", secret: "AbC123" },
+  });
+  expect(result).toEqual({
+    ready: true,
+    reason: "",
+    message: "Key cannot read notes",
+    metadata: { notesAccess: false },
+  });
+});
+
+test("handleAddCredential creates a generic api-key connector with the given config and credential", async () => {
+  create.mockResolvedValue({ connector: zoteroConnector() });
+  sync.mockResolvedValue({});
+  await mountHook(baseInput("ws-zadd"));
+
+  await act(async () => {
+    await api().handleAddCredential({
+      connectorType: "zotero",
+      name: "Lab library",
+      configJson: { libraryType: "group", libraryId: "2205533", items: [] },
+      credential: { username: "groups/2205533", secret: "AbC123" },
+      periodicIndexingEnabled: false,
+    });
+  });
+
+  expect(create).toHaveBeenCalledWith("ws-zadd", {
+    connectorType: "zotero",
+    name: "Lab library",
+    configJson: { libraryType: "group", libraryId: "2205533", items: [] },
+    credential: { username: "groups/2205533", secret: "AbC123" },
+    periodicIndexingEnabled: false,
+    indexingFrequencyMinutes: 360,
+  });
+  expect(sync).toHaveBeenCalled();
+});
+
+test("handleReconnectConnector opens the rotate dialog for an api-key connector, without redirecting", async () => {
+  list.mockResolvedValue({ items: [zoteroConnector()] });
+  await mountHook(baseInput("ws-zrotate"));
+  act(() => {
+    api().handleReconnectConnector(api().connectors[0]!);
+  });
+  expect(api().rotateCredentialConnector?.id).toBe("zotero-1");
+});
+
+test("handleRotateCredential sends the derived Zotero library username with the new key", async () => {
+  list.mockResolvedValue({ items: [zoteroConnector()] });
+  rotateCredential.mockResolvedValue({
+    credentialConfigured: true,
+    displayName: "groups/2205533",
+  });
+  await mountHook(baseInput("ws-zrotate2"));
+  const connector = api().connectors[0]!;
+
+  await act(async () => {
+    await api().handleRotateCredential(connector, {
+      username: "groups/2205533",
+      secret: "NewKey9",
+    });
+  });
+
+  expect(rotateCredential).toHaveBeenCalledWith("ws-zrotate2", "zotero-1", {
+    username: "groups/2205533",
+    secret: "NewKey9",
+  });
+});
+
 function nextcloudConnector(overrides: Partial<SourceConnector> = {}) {
   return fakeConnector({
     id: "nc-1",

@@ -1,5 +1,6 @@
 import {
   BookOpenText,
+  BookMarked,
   Box,
   Cloud,
   FileText,
@@ -189,6 +190,21 @@ export const connectorCatalog: ConnectorCatalogItem[] = [
     supportsPeriodicSync: true,
     supportsWebhook: false,
     addMode: "login_flow",
+  },
+  {
+    id: "zotero",
+    name: "Zotero",
+    category: "Knowledge & Docs",
+    description:
+      "Index your Zotero library, with its notes and annotations, and keep it in sync using a read-only API key.",
+    capabilities: ["Collections", "Notes and annotations", "Scheduled sync"],
+    requiresBackendRegistration: true,
+    icon: BookMarked,
+    isIndexable: true,
+    supportsActions: false,
+    supportsPeriodicSync: true,
+    supportsWebhook: false,
+    addMode: "api_key",
   },
 ];
 

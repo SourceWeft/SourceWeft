@@ -15,6 +15,7 @@ import {
   Folder,
   FolderGit2,
   FolderKanban,
+  FolderTree,
   Globe,
   LibraryBig,
   type LucideIcon,
@@ -117,6 +118,21 @@ export const selectionPresenters: Record<string, SelectionPresenter> = {
   // Confluence is tools-only too: the kind icons only, no `indexing` entry.
   confluence: {
     kindIcons: { site: Globe, space: LibraryBig, page: FileText },
+  },
+  // Zotero indexes its items, so a selection syncs after it is saved. A chosen
+  // collection is a container: no source is named after it, and the sources
+  // inside it carry collection name paths rather than the collection key, so
+  // there is no per-collection indexed count. An empty selection indexes the whole library.
+  zotero: {
+    kindIcons: { collection: FolderTree },
+    indexing: {
+      externalIdFor() {
+        return null;
+      },
+      containerIndexedCount() {
+        return null;
+      },
+    },
   },
 };
 

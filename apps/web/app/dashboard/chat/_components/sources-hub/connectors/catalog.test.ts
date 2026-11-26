@@ -614,6 +614,100 @@ describe("webdav catalog entry", () => {
   }
 });
 
+describe("zotero catalog entry", () => {
+  const zotero = connectorCatalog.find((item) => item.id === "zotero")!;
+
+  test("is hidden until the backend registers the type", () => {
+    expect(
+      connectorCatalogForAvailableTypes(["notion", "rss"]).map((i) => i.id),
+    ).not.toContain("zotero");
+    expect(
+      connectorCatalogForAvailableTypes(["notion", "zotero"]).map((i) => i.id),
+    ).toContain("zotero");
+  });
+
+  test("is the add-only api key entry", () => {
+    expect(zotero).toMatchObject({
+      id: "zotero",
+      name: "Zotero",
+      category: "Knowledge & Docs",
+      requiresBackendRegistration: true,
+      isIndexable: true,
+      supportsActions: false,
+      supportsPeriodicSync: true,
+      supportsWebhook: false,
+      addMode: "api_key",
+      capabilities: ["Collections", "Notes and annotations", "Scheduled sync"],
+    });
+    expect(zotero.icon).toBeDefined();
+    expect(zotero.postOAuthMode).toBeUndefined();
+  });
+
+  test("never shows as connected, however many connectors exist", () => {
+    const connectors = ["z1", "z2"].map((id) => ({
+      id,
+      name: `Zotero ${id}`,
+      status: "active" as const,
+      meta: "",
+      raw: {
+        id,
+        connectorType: "zotero",
+        status: "active",
+        configJson: { libraryType: "user", libraryId: "1", items: [] },
+        lastError: null,
+        lastIndexedAt: null,
+      } as unknown as SourceConnector,
+    }));
+    expect(getCatalogConnector(zotero, connectors)).toBeNull();
+  });
+
+  const ZOTERO_READINESS_REASONS = [
+    "reauth_required",
+    "library_not_accessible",
+    "library_not_found",
+    "rate_limited",
+    "unreachable",
+    "blocked_endpoint",
+    "config_invalid",
+  ];
+
+  for (const catalogName of ["en", "zh-CN"] as const) {
+    const messages = (catalogName === "en" ? en : zhCN) as unknown as {
+      dashboardSourcesHub: {
+        connectors: {
+          zotero: {
+            dialog: Record<string, string>;
+            readiness: Record<string, string>;
+            rotate: Record<string, string>;
+            libraryIdHintPersonal: string;
+            libraryIdHintGroup: string;
+            apiKeyHint: string;
+          };
+          detail: Record<string, string>;
+          selection: { byType: Record<string, Record<string, unknown>> };
+        };
+      };
+    };
+
+    test(`${catalogName} has the Zotero copy keys`, () => {
+      const { zotero: copy, detail, selection } =
+        messages.dashboardSourcesHub.connectors;
+      expect(copy.libraryIdHintPersonal?.trim()).toBeTruthy();
+      expect(copy.libraryIdHintGroup?.trim()).toBeTruthy();
+      expect(copy.apiKeyHint).toContain("zotero.org/settings/keys");
+      expect(copy.dialog.check?.trim()).toBeTruthy();
+      expect(copy.dialog.add?.trim()).toBeTruthy();
+      expect(copy.dialog.notesAccessWarning?.trim()).toBeTruthy();
+      expect(copy.rotate.save?.trim()).toBeTruthy();
+      for (const reason of ZOTERO_READINESS_REASONS) {
+        expect(copy.readiness[reason]?.trim(), reason).toBeTruthy();
+      }
+      expect(detail.availableAddApiKey?.trim()).toBeTruthy();
+      expect(selection.byType.zotero).toBeDefined();
+    });
+  }
+});
+
 describe("nextcloud catalog entry", () => {
   const nextcloud = connectorCatalog.find((item) => item.id === "nextcloud")!;
 

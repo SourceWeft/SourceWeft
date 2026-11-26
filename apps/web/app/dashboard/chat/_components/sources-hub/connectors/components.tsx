@@ -424,9 +424,11 @@ function getOAuthConnectorStatus(
     detail:
       input.item.addMode === "login_flow"
         ? t("connectors.detail.availableLoginFlow", { name: input.item.name })
-        : input.item.addMode
-          ? t("connectors.detail.availableAddFeed")
-          : t("connectors.detail.available", { name: input.item.name }),
+        : input.item.addMode === "api_key"
+          ? t("connectors.detail.availableAddApiKey")
+          : input.item.addMode
+            ? t("connectors.detail.availableAddFeed")
+            : t("connectors.detail.available", { name: input.item.name }),
   };
 }
 
@@ -541,6 +543,7 @@ export const ConnectorCatalogCard = memoComponent(
     item,
     status,
     connector,
+    onAddApiKey,
     onAddCredential,
     onAddLoginFlow,
     onAddFeed,
@@ -555,6 +558,9 @@ export const ConnectorCatalogCard = memoComponent(
     item: ConnectorCatalogItem;
     status: ConnectorCatalogStatus;
     connector: ConnectorItem | null;
+    /** Add-only API-key cards (`item.addMode === "api_key"`) call this instead
+     * of starting OAuth, so Zotero opens its library ID and key dialog. */
+    onAddApiKey: (item: ConnectorCatalogItem) => void;
     /** Add-only credential cards (`item.addMode === "credential"`) call this
      * instead of starting OAuth, so WebDAV opens its endpoint/credential dialog. */
     onAddCredential: (item: ConnectorCatalogItem) => void;
@@ -593,7 +599,9 @@ export const ConnectorCatalogCard = memoComponent(
     const canReconnect = Boolean(connector) && status.kind === "error";
     const cta = isBusy
       ? t("connectors.cta.connecting")
-      : item.addMode === "credential" || item.addMode === "login_flow"
+      : item.addMode === "credential" ||
+          item.addMode === "login_flow" ||
+          item.addMode === "api_key"
         ? t("connectors.cta.connect")
         : item.addMode
           ? t("connectors.cta.addFeed")
@@ -609,6 +617,10 @@ export const ConnectorCatalogCard = memoComponent(
     function handleAction() {
       if (item.addMode === "credential") {
         onAddCredential(item);
+        return;
+      }
+      if (item.addMode === "api_key") {
+        onAddApiKey(item);
         return;
       }
       if (item.addMode === "login_flow") {
