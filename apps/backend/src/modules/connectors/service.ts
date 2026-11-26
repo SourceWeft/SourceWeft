@@ -57,6 +57,13 @@ function assertCredentialUsername(credential: ConnectorCredentialInput): void {
   }
 }
 
+/**
+ * The readiness reason a selection-driven connector reports while nothing is
+ * selected. It blocks sync (every sync is skipped with it) but never creating
+ * or editing the connector, because the selection is made after it exists.
+ */
+const SELECTION_REQUIRED_REASON = "selection_required";
+
 export class ConnectorService {
   constructor(
     private readonly registry: ConnectorRegistry = connectorRegistry,
@@ -150,7 +157,11 @@ export class ConnectorService {
     input: Parameters<ConnectorService["evaluateConfigReadiness"]>[0],
   ) {
     const readiness = await this.evaluateConfigReadiness(input);
-    if (!readiness.ready) {
+    // A connector driven by a selection starts with nothing selected and the
+    // person picks what to index after it exists, so "no selection yet" is not
+    // a configuration fault. The sync readiness gate still skips every sync
+    // until a selection exists.
+    if (!readiness.ready && readiness.reason !== SELECTION_REQUIRED_REASON) {
       throw new ConnectorError(
         400,
         "CONNECTOR_CONFIG_NOT_READY",
