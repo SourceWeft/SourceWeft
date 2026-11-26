@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ConnectorItem } from "@sourceweft/contracts";
+import { noteHtmlToText } from "./note-text";
 
 /** A Zotero collection with its parent resolved to a key (`null` = top level). */
 export type ZoteroCollection = {
@@ -58,7 +59,7 @@ function cap(text: string, max: number): string {
 }
 
 /** A trimmed, non-empty, length-capped string, or `null`. */
-function cleanString(value: unknown, max: number): string | null {
+export function cleanString(value: unknown, max: number): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed === "" ? null : cap(trimmed, max);
@@ -285,40 +286,11 @@ export function contentHashOf(
   return createHash("sha256").update(canonical).digest("hex");
 }
 
-const NAMED_ENTITIES: Record<string, string> = {
-  lt: "<",
-  gt: ">",
-  quot: '"',
-  apos: "'",
-  nbsp: " ",
-};
-
-/** Plain text of a Zotero note's HTML, with block boundaries kept as newlines. */
-export function noteText(html: string): string {
-  return html
-    .replace(/<\s*br\s*\/?\s*>/gi, "\n")
-    .replace(/<\/\s*(?:p|div|li|h[1-6]|tr|blockquote|pre)\s*>/gi, "\n")
-    .replace(/<[^>]*>/g, "")
-    .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (match, body: string) => {
-      if (body[0] === "#") {
-        const code =
-          body[1] === "x" || body[1] === "X"
-            ? Number.parseInt(body.slice(2), 16)
-            : Number.parseInt(body.slice(1), 10);
-        return Number.isInteger(code) && code > 0 && code <= 0x10ffff
-          ? String.fromCodePoint(code)
-          : match;
-      }
-      return NAMED_ENTITIES[body.toLowerCase()] ?? match;
-    })
-    .replace(/&amp;/gi, "&");
-}
-
-function titleOf(item: ZoteroObject): string {
+export function titleOf(item: ZoteroObject): string {
   const title = cleanString(item.data.title, TITLE_MAX);
   if (title !== null) return title;
   if (item.itemType === "note" && typeof item.data.note === "string") {
-    for (const line of noteText(item.data.note).split(/\r?\n/)) {
+    for (const line of noteHtmlToText(item.data.note).split(/\r?\n/)) {
       const trimmed = line.trim();
       if (trimmed !== "") return cap(trimmed, NOTE_TITLE_MAX);
     }
@@ -326,7 +298,7 @@ function titleOf(item: ZoteroObject): string {
   return "Untitled";
 }
 
-function creatorNames(value: unknown): string[] {
+export function creatorNames(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   const names: string[] = [];
   for (const entry of value) {
@@ -346,7 +318,7 @@ function creatorNames(value: unknown): string[] {
   return names;
 }
 
-function tagNames(value: unknown): string[] {
+export function tagNames(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   const tags: string[] = [];
   for (const entry of value) {

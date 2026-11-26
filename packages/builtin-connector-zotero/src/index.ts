@@ -45,7 +45,6 @@ export {
   inScope,
   contentHashOf,
   toConnectorItem,
-  noteText,
   type ZoteroCollection,
   type CollectionTree,
   type ZoteroObject,
@@ -57,3 +56,6 @@ export {
   type ScanCheckpoint,
   type ScanLibraryInput,
 } from "./scan";
+export { noteHtmlToText } from "./note-text";
+export { renderItemMarkdown, type RenderItemInput } from "./render";
+export { extractZoteroItem, type ExtractZoteroItemInput } from "./extract";
