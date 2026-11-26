@@ -98,6 +98,12 @@ The first release targets iPhone only (`TARGETED_DEVICE_FAMILY` is `1` in
 `project.yml` and the Xcode project). iPad support can be added later, but a
 released app cannot drop a device family.
 
+The app installs on iOS 15.0 and later. Four places declare that version and
+must agree: `bundle.iOS.minimumSystemVersion` in `tauri.conf.json` (Tauri
+compiles the Rust code for it), `deploymentTarget` in `project.yml`,
+`IPHONEOS_DEPLOYMENT_TARGET` in the Xcode project, and the `Podfile`. The build
+helper also checks the built app's `MinimumOSVersion`.
+
 The app is portrait only on both platforms; it has no landscape layout. On iOS
 `UISupportedInterfaceOrientations` lists portrait alone in `project.yml` and the
 tracked `Info.plist`. On Android the activity in `AndroidManifest.xml` sets

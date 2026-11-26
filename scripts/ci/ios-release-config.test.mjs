@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import test from "node:test";
+import { MINIMUM_IOS_VERSION } from "./ios-build.mjs";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const mobile = resolve(root, "apps/mobile");
@@ -182,6 +183,32 @@ test("the app supports portrait only, in the tracked Info.plist and the project 
     assert.doesNotMatch(text, /UIInterfaceOrientationLandscape/, name);
     assert.doesNotMatch(text, /UISupportedInterfaceOrientations~/, name);
   }
+});
+
+// Tauri compiles the Rust code for bundle.iOS.minimumSystemVersion, and Xcode
+// builds the app for the project's deployment target. They must be the same
+// version, the one the build helper expects in the built app.
+test("every place that declares the minimum iOS version says the same one", () => {
+  assert.equal(
+    json(resolve(tauri, "tauri.conf.json")).bundle.iOS.minimumSystemVersion,
+    MINIMUM_IOS_VERSION,
+  );
+  assert.match(
+    read(resolve(apple, "project.yml")),
+    new RegExp(`\\n  deploymentTarget:\\n    iOS: ${MINIMUM_IOS_VERSION}\\n`),
+  );
+  const targets = [
+    ...read(
+      resolve(apple, "sourceweft-mobile.xcodeproj/project.pbxproj"),
+    ).matchAll(/IPHONEOS_DEPLOYMENT_TARGET = ([^;]+);/g),
+  ].map(([, version]) => version);
+  assert.deepEqual(targets, [MINIMUM_IOS_VERSION, MINIMUM_IOS_VERSION]);
+  assert(
+    read(resolve(apple, "Podfile")).includes(
+      `platform :ios, '${MINIMUM_IOS_VERSION}'`,
+    ),
+    "Podfile",
+  );
 });
 
 test("Sign in with Apple is permitted to the page and entitled in the app", () => {

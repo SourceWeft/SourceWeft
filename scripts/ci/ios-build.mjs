@@ -18,6 +18,9 @@ import { fileURLToPath } from "node:url";
 
 export const BUNDLE_ID = "nicelab.sourceweft.mobile";
 export const TEAM_ID = "PBML833M58";
+// The oldest iOS the app installs on. tauri.conf.json, project.yml, the Xcode
+// project and the Podfile declare the same version.
+export const MINIMUM_IOS_VERSION = "15.0";
 export const REQUIRED_TESTFLIGHT_SECRETS = [
   "IOS_DIST_CERT_P12_BASE64",
   "IOS_DIST_CERT_PASSWORD",
@@ -94,6 +97,11 @@ export const verifyAppBundle = (appPath, { signed }) => {
     );
   if (!keys.includes("ITSAppUsesNonExemptEncryption"))
     throw new Error("Export-compliance flag is missing");
+  const minimum = plistValue(info, "MinimumOSVersion");
+  if (minimum !== MINIMUM_IOS_VERSION)
+    throw new Error(
+      `Minimum iOS version is ${minimum}, expected ${MINIMUM_IOS_VERSION}`,
+    );
   if (signed && !existsSync(join(appPath, "embedded.mobileprovision"))) {
     throw new Error("The signed app has no embedded provisioning profile");
   }
