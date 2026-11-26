@@ -254,6 +254,44 @@ test("a credential connector whose sync is rejected marks its account reauth_req
   assert.equal(failed?.errorCode, "WEBDAV_REAUTH_REQUIRED");
 });
 
+test("a credential connector whose adapter rejects the stored credential mid-run with WORDPRESS_REAUTH_REQUIRED marks its account reauth_required and stops retries", async () => {
+  seedConnector("wordpress_login");
+  const m = manifest("wordpress_login", "credential");
+  const orch = orchestratorFor(
+    m,
+    throwingAdapter(
+      m,
+      new AdapterError(422, "WORDPRESS_REAUTH_REQUIRED", "nope"),
+    ),
+  );
+
+  await assert.rejects(orch.run(RUN_INPUT), (error: unknown) => {
+    assert.equal(
+      (error as { code?: string }).code,
+      "WORDPRESS_REAUTH_REQUIRED",
+    );
+    return true;
+  });
+
+  assert.equal(repo.markOAuthAccountReauthRequiredRecord.mock.calls.length, 1);
+  assert.deepEqual(
+    repo.markOAuthAccountReauthRequiredRecord.mock.calls[0]?.[0],
+    {
+      teamId: "team-1",
+      workspaceId: "ws-1",
+      accountId: "acct-1",
+      lastError: "The stored credential was rejected. Reconnect the connector.",
+    },
+  );
+  const complete = lastCompleteCall();
+  assert.equal(complete.succeeded, false);
+  assert.equal(complete.errorCode, "CONNECTOR_REAUTH_REQUIRED");
+  const failed = repo.updateSyncRunRecord.mock.calls
+    .map((call) => call[0] as { status?: string; errorCode?: string })
+    .find((patch) => patch.status === "failed");
+  assert.equal(failed?.errorCode, "WORDPRESS_REAUTH_REQUIRED");
+});
+
 test("an oauth2 connector rejected with its own _REAUTH_REQUIRED code keeps its code and retry behaviour", async () => {
   seedConnector("dropbox");
   const m = manifest("dropbox", "oauth2");
