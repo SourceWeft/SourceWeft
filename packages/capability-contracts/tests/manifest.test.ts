@@ -922,3 +922,59 @@ test("capability-manifest.connector rejects an unknown credential flow", () => {
   });
   assert.equal(result.success, false);
 });
+
+function credentialConnectorManifest(auth: unknown) {
+  return {
+    schemaVersion: 1,
+    id: "sourceweft/zotero",
+    kind: "connector",
+    name: "Zotero Connector",
+    version: "0.1.0",
+    connectors: [
+      {
+        id: "zotero",
+        title: "Zotero",
+        auth,
+        sync: {
+          supportsIncremental: true,
+          defaultFrequencyMinutes: 360,
+          resources: [],
+        },
+        actions: [],
+        configSchema: {},
+      },
+    ],
+  };
+}
+
+test("capability-manifest.connector parses a credential api_key auth connector", () => {
+  const manifest = capabilityManifestSchema.parse(
+    credentialConnectorManifest({ kind: "credential", scheme: "api_key" }),
+  );
+  assert.deepEqual(manifest.contributes.connectors[0]?.auth, {
+    kind: "credential",
+    scheme: "api_key",
+  });
+});
+
+test("capability-manifest.connector rejects the token credential scheme", () => {
+  const result = capabilityManifestSchema.safeParse(
+    credentialConnectorManifest({ kind: "credential", scheme: "token" }),
+  );
+  assert.equal(result.success, false);
+});
+
+test("capability-manifest.connector keeps api_key valid with the login_flow marker", () => {
+  const manifest = capabilityManifestSchema.parse(
+    credentialConnectorManifest({
+      kind: "credential",
+      scheme: "api_key",
+      flow: "login_flow",
+    }),
+  );
+  assert.deepEqual(manifest.contributes.connectors[0]?.auth, {
+    kind: "credential",
+    scheme: "api_key",
+    flow: "login_flow",
+  });
+});
