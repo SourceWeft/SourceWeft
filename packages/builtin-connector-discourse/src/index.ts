@@ -27,7 +27,7 @@ export {
   DISCOURSE_USER_AGENT,
 } from "./limits";
 export { DiscourseError, type DiscourseErrorCode } from "./errors";
-export { parseForumUrl, topicUrl, postUrl } from "./forum-url";
+export { parseForumUrl, topicUrl, postUrl, safeSlug } from "./forum-url";
 export {
   createDiscourseClient,
   isNotFound,
@@ -45,6 +45,14 @@ export {
   parseCategoryPage,
   parseTopicPosts,
   parseSearch,
+  buildCategoryTree,
+  isVisiblePost,
+  lightHashOf,
+  deepHashOf,
+  toConnectorItem,
+  type CategoryTree,
+  type RefreshMode,
+  type ToConnectorItemInput,
   type DiscourseSite,
   type DiscourseCategory,
   type DiscourseTopicRow,
@@ -54,3 +62,5 @@ export {
   type DiscourseCategoryPage,
   type DiscourseSearchResult,
 } from "./model";
+export { postHtmlToText } from "./post-text";
+export { renderTopicMarkdown, type RenderTopicInput } from "./render";

@@ -90,7 +90,7 @@ function requireId(value: number): number {
  * Anything else, hostile or merely unexpected, is replaced rather than
  * partially cleaned, so no fragment of it reaches a link.
  */
-function safeSlug(slug: unknown): string {
+export function safeSlug(slug: unknown): string {
   if (typeof slug !== "string") return "topic";
   const lower = slug.toLowerCase();
   if (!/^[a-z0-9-]{1,100}$/.test(lower)) return "topic";

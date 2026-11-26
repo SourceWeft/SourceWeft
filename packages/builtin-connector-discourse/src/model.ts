@@ -1,4 +1,8 @@
+import { createHash } from "node:crypto";
+import type { ConnectorItem } from "@sourceweft/contracts";
 import { DiscourseError } from "./errors";
+import { safeSlug, topicUrl } from "./forum-url";
+import { MAX_METADATA_AUTHORS, MAX_METADATA_POST_IDS } from "./limits";
 
 /**
  * The typed shape of a forum's JSON answers and the parsers that turn the
@@ -242,5 +246,265 @@ export function parseSearch(json: unknown): DiscourseSearchResult {
     topics: list(json.topics).map(parseTopicRow),
     posts: list(json.posts).map(parseSearchPost),
     hasMore: isRecord(grouped) && grouped.more_full_page_results === true,
+  };
+}
+
+// ------------------------------------------------------------------ text
+
+const TITLE_MAX = 1_000;
+const FIELD_MAX = 2_000;
+const TAGS_MAX = 100;
+
+/** Truncates to `max` UTF-16 units without leaving half a surrogate pair. */
+export function capText(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const head = text.slice(0, max);
+  const last = head.charCodeAt(head.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? head.slice(0, -1) : head;
+}
+
+/** Collapses every run of whitespace, so a value can never start a new block. */
+export function oneLine(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+/** A one-line, trimmed, length-capped string, or `null` when nothing is left. */
+export function lineOf(value: unknown, max: number): string | null {
+  if (typeof value !== "string") return null;
+  const flat = oneLine(value);
+  return flat === "" ? null : capText(flat, max);
+}
+
+/** The topic title as stored and rendered: one line, capped, never empty. */
+export function titleOf(row: DiscourseTopicRow): string {
+  return lineOf(row.title, TITLE_MAX) ?? "Untitled topic";
+}
+
+/**
+ * The tags as stored in metadata and hashed: one line each, empty ones
+ * dropped, each capped, at most {@link TAGS_MAX}. The hash and the metadata
+ * must see exactly the same list.
+ */
+export function tagsOf(row: DiscourseTopicRow): string[] {
+  const tags: string[] = [];
+  for (const tag of row.tags) {
+    if (tags.length >= TAGS_MAX) break;
+    const clean = lineOf(tag, FIELD_MAX);
+    if (clean !== null) tags.push(clean);
+  }
+  return tags;
+}
+
+// ------------------------------------------------------------ categories
+
+export type CategoryTree = {
+  /** The selected ids plus all their descendants. Unknown ids are ignored. */
+  expand(selectedIds: number[]): Set<number>;
+  /** Names from the root joined by ` / `; `""` for an unknown id. */
+  pathOf(id: number): string;
+  /** Direct children of `parentId` (`null` = top level), sorted by name. */
+  children(parentId: number | null): DiscourseCategory[];
+  /** True when the category or any of its ancestors is read-restricted. */
+  isRestricted(id: number): boolean;
+};
+
+export function buildCategoryTree(
+  categories: DiscourseCategory[],
+): CategoryTree {
+  const byId = new Map<number, DiscourseCategory>();
+  for (const category of categories) {
+    if (!byId.has(category.id)) byId.set(category.id, category);
+  }
+  // A category whose parent is not listed is shown at the top level.
+  const parentOf = (category: DiscourseCategory): number | null =>
+    category.parentId !== null && byId.has(category.parentId)
+      ? category.parentId
+      : null;
+  const byParent = new Map<number | null, DiscourseCategory[]>();
+  for (const category of byId.values()) {
+    const siblings = byParent.get(parentOf(category)) ?? [];
+    siblings.push(category);
+    byParent.set(parentOf(category), siblings);
+  }
+  for (const siblings of byParent.values()) {
+    siblings.sort((a, b) => {
+      const left = a.name.toLowerCase();
+      const right = b.name.toLowerCase();
+      if (left !== right) return left < right ? -1 : 1;
+      return a.id - b.id;
+    });
+  }
+
+  /** The category, then its ancestors, stopping at a cycle. */
+  const lineage = (id: number): DiscourseCategory[] => {
+    const chain: DiscourseCategory[] = [];
+    const seen = new Set<number>();
+    let current = byId.get(id);
+    while (current && !seen.has(current.id)) {
+      seen.add(current.id);
+      chain.push(current);
+      current =
+        current.parentId === null ? undefined : byId.get(current.parentId);
+    }
+    return chain;
+  };
+
+  return {
+    expand(selectedIds) {
+      const result = new Set<number>();
+      const queue = selectedIds.filter((id) => byId.has(id));
+      while (queue.length > 0) {
+        const id = queue.pop() as number;
+        if (result.has(id)) continue;
+        result.add(id);
+        for (const child of byParent.get(id) ?? []) queue.push(child.id);
+      }
+      return result;
+    },
+    pathOf(id) {
+      return lineage(id)
+        .map((category) => category.name)
+        .reverse()
+        .join(" / ");
+    },
+    children(parentId) {
+      return [...(byParent.get(parentId) ?? [])];
+    },
+    isRestricted(id) {
+      return lineage(id).some((category) => category.readRestricted);
+    },
+  };
+}
+
+// ----------------------------------------------------------------- posts
+
+/**
+ * A reader-visible post: a regular post (type 1), not hidden by flags and not
+ * deleted. Whispers, moderator actions and small actions are never indexed.
+ */
+export function isVisiblePost(post: DiscoursePost): boolean {
+  return (
+    post.postType === 1 &&
+    !post.hidden &&
+    post.deletedAt === null &&
+    !post.userDeleted
+  );
+}
+
+// ---------------------------------------------------------------- hashes
+
+/** How much of a topic a scan reads; part of every hash. */
+export type RefreshMode = "light" | "deep";
+
+function sha256(parts: unknown[]): string {
+  return createHash("sha256").update(JSON.stringify(parts)).digest("hex");
+}
+
+function topicParts(row: DiscourseTopicRow, mode: RefreshMode): unknown[] {
+  return [
+    "discourse-topic",
+    mode,
+    row.id,
+    titleOf(row),
+    row.categoryId,
+    [...tagsOf(row)].sort(),
+    row.closed,
+    row.archived,
+    row.postsCount,
+    row.highestPostNumber,
+    row.lastPostedAt,
+  ];
+}
+
+/**
+ * Hex sha256 over the canonical form of the listing fields: id, title,
+ * category, sorted tags, closed, archived, post counts and the last post
+ * time. `bumpedAt` is deliberately not part of it.
+ */
+export function lightHashOf(row: DiscourseTopicRow): string {
+  return sha256(topicParts(row, "light"));
+}
+
+/**
+ * The light hash's fields plus `id:version:updated_at` of every visible post
+ * in `posts`, sorted by post id so the order of `posts` does not matter. Pass
+ * exactly the posts that are indexed.
+ */
+export function deepHashOf(
+  row: DiscourseTopicRow,
+  posts: DiscoursePost[],
+): string {
+  const entries = posts
+    .filter(isVisiblePost)
+    .sort((a, b) => a.id - b.id)
+    .map((post) => `${post.id}:${post.version}:${post.updatedAt ?? ""}`);
+  return sha256([...topicParts(row, "deep"), entries]);
+}
+
+// ------------------------------------------------------------ item build
+
+export type ToConnectorItemInput = {
+  /** A validated forum base (see `parseForumUrl`). */
+  base: string;
+  categoryPath: string;
+  /**
+   * The refresh mode `hash` was computed for. The mode is already part of the
+   * hash input, so it is not stored separately.
+   */
+  refresh: RefreshMode;
+  /** {@link lightHashOf} or {@link deepHashOf}. */
+  hash: string;
+  postIds: number[];
+  authors: string[];
+};
+
+function parseDate(value: string | null): Date | null {
+  if (value === null) return null;
+  const time = Date.parse(value);
+  return Number.isNaN(time) ? null : new Date(time);
+}
+
+export function toConnectorItem(
+  row: DiscourseTopicRow,
+  input: ToConnectorItemInput,
+): ConnectorItem {
+  const metadata: Record<string, unknown> = {
+    topicId: row.id,
+    slug: safeSlug(row.slug),
+  };
+  if (row.categoryId !== null) metadata.categoryId = row.categoryId;
+  const categoryPath = lineOf(input.categoryPath, FIELD_MAX);
+  if (categoryPath !== null) metadata.categoryPath = categoryPath;
+  const tags = tagsOf(row);
+  if (tags.length > 0) metadata.tags = tags;
+  metadata.postsCount = row.postsCount;
+  const lastPostedAt = lineOf(row.lastPostedAt, FIELD_MAX);
+  if (lastPostedAt !== null) metadata.lastPostedAt = lastPostedAt;
+  metadata.closed = row.closed;
+  metadata.archived = row.archived;
+  const postIds = input.postIds.filter(isId).slice(0, MAX_METADATA_POST_IDS);
+  if (postIds.length > 0) metadata.postIds = postIds;
+  const authors: string[] = [];
+  const seenAuthors = new Set<string>();
+  for (const author of input.authors) {
+    if (authors.length >= MAX_METADATA_AUTHORS) break;
+    const clean = lineOf(author, FIELD_MAX);
+    if (clean === null || seenAuthors.has(clean)) continue;
+    seenAuthors.add(clean);
+    authors.push(clean);
+  }
+  if (authors.length > 0) metadata.authors = authors;
+  const createdAt = lineOf(row.createdAt, FIELD_MAX);
+  if (createdAt !== null) metadata.createdAt = createdAt;
+
+  return {
+    externalId: `discourse:topic:${row.id}`,
+    externalUri: topicUrl(input.base, row.slug, row.id),
+    title: titleOf(row),
+    mimeType: "text/markdown",
+    sizeBytes: null,
+    externalUpdatedAt: parseDate(row.lastPostedAt ?? row.createdAt),
+    contentHash: input.hash,
+    metadata,
   };
 }
