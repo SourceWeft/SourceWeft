@@ -194,37 +194,50 @@ test("listItems with includeUnpublished maps a forbidden status to INSUFFICIENT_
   assert.equal(error.restCode, undefined);
 });
 
-test("listItems maps rights-lacking 401/403 only when unpublished content was asked for", async () => {
+test("listItems: a credentialed 403 rights refusal maps by includeUnpublished; a 401 is BAD_CREDENTIALS", async () => {
   const restCodes: WordPressRestCode[] = [
     "rest_cannot_view",
     "rest_forbidden",
     "rest_user_cannot_view",
   ];
-  for (const status of [401, 403]) {
-    for (const code of restCodes) {
-      const body = JSON.stringify({ code });
-      const open = harness({ login: true, fake: { posts: posts(1) } });
-      open.fake.failNext({ status, body }, 1, onRest);
-      const mapped = await failure(
-        open.client.listItems("posts", { page: 1, includeUnpublished: true }),
-      );
-      assert.equal(mapped.code, "INSUFFICIENT_PERMISSION", `${status} ${code}`);
+  for (const code of restCodes) {
+    const body = JSON.stringify({ code });
 
-      const plain = harness({ login: true, fake: { posts: posts(1) } });
-      plain.fake.failNext({ status, body }, 1, onRest);
-      const passed = await failure(
-        plain.client.listItems("posts", {
-          page: 1,
-          includeUnpublished: false,
-        }),
+    // 403 = authenticated but forbidden: the rights path is unchanged.
+    const open = harness({ login: true, fake: { posts: posts(1) } });
+    open.fake.failNext({ status: 403, body }, 1, onRest);
+    const mapped = await failure(
+      open.client.listItems("posts", { page: 1, includeUnpublished: true }),
+    );
+    assert.equal(mapped.code, "INSUFFICIENT_PERMISSION", `403 ${code}`);
+
+    const plain = harness({ login: true, fake: { posts: posts(1) } });
+    plain.fake.failNext({ status: 403, body }, 1, onRest);
+    const passed = await failure(
+      plain.client.listItems("posts", { page: 1, includeUnpublished: false }),
+    );
+    assert.equal(passed.code, "LOGIN_REQUIRED", `403 ${code}`);
+    assert.equal(passed.restCode, code);
+
+    // 401 with a credential = the credential was rejected: BAD_CREDENTIALS,
+    // never remapped to INSUFFICIENT_PERMISSION, whatever the rest code or flag.
+    for (const includeUnpublished of [true, false]) {
+      const h = harness({ login: true, fake: { posts: posts(1) } });
+      h.fake.failNext({ status: 401, body }, 1, onRest);
+      assert.equal(
+        (
+          await failure(
+            h.client.listItems("posts", { page: 1, includeUnpublished }),
+          )
+        ).code,
+        "BAD_CREDENTIALS",
+        `401 ${code} ${includeUnpublished}`,
       );
-      assert.equal(passed.code, "LOGIN_REQUIRED", `${status} ${code}`);
-      assert.equal(passed.restCode, code);
     }
   }
 });
 
-test("listItems lets wrong credentials and login walls through unchanged", async () => {
+test("listItems lets a wrong credential and a credentialed login wall through as BAD_CREDENTIALS", async () => {
   const wrong = harness({ login: true, fake: { posts: posts(1) } });
   wrong.fake.failNext(
     { status: 401, body: JSON.stringify({ code: "incorrect_password" }) },
@@ -239,6 +252,9 @@ test("listItems lets wrong credentials and login walls through unchanged", async
     ).code,
     "BAD_CREDENTIALS",
   );
+  // A credentialed connector that gets 401 across the REST surface (the host
+  // strips Authorization, or the password was revoked) is a credential failure,
+  // not a public login prompt.
   const walled = harness({
     login: true,
     fake: { posts: posts(1), loginRequired: true },
@@ -249,7 +265,7 @@ test("listItems lets wrong credentials and login walls through unchanged", async
         walled.client.listItems("posts", { page: 1, includeUnpublished: true }),
       )
     ).code,
-    "LOGIN_REQUIRED",
+    "BAD_CREDENTIALS",
   );
 });
 
@@ -590,6 +606,18 @@ test("getMe reads the signed-in user with edit context", async () => {
 test("getMe without a valid login is LOGIN_REQUIRED", async () => {
   const { client } = harness();
   assert.equal((await failure(client.getMe())).code, "LOGIN_REQUIRED");
+});
+
+test("getMe with a credential the site never accepts is BAD_CREDENTIALS", async () => {
+  // The fake's users/me answers its realistic default, 401 rest_not_logged_in,
+  // when the Authorization does not match — what a host that strips the header,
+  // or a revoked password, produces. A credentialed getMe reads that as a
+  // rejected credential, not a public login prompt.
+  const { client } = harness({
+    login: true,
+    fake: { credential: { username: "wpuser", secret: "a-different-secret" } },
+  });
+  assert.equal((await failure(client.getMe())).code, "BAD_CREDENTIALS");
 });
 
 // --------------------------------------------------------------- search

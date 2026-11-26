@@ -3749,7 +3749,7 @@
           "not_a_wordpress_site": "此网址不是 WordPress 站点。请使用该站点首页的网址。",
           "rest_disabled": "此站点的 REST API 已关闭，因此无法读取其文章。请重新开启 WordPress REST API，或移除屏蔽它的插件。",
           "login_required": "此站点需要登录才能读取内容。请改为选择“使用应用程序密码登录”。",
-          "reauth_required": "站点拒绝了该用户名或应用程序密码。请检查后重试。",
+          "reauth_required": "站点拒绝了该用户名或应用程序密码。请检查后重试。如果密码无误，可能是网站主机屏蔽了 Authorization 请求头（某些主机的常见设置）——请咨询主机服务商或检查安全插件的设置。",
           "insufficient_permission": "此账户无法读取草稿和私密文章。请使用具有相应权限的账户，或关闭“包含草稿和私密文章”。",
           "blocked_endpoint": "无法使用此网址：此部署可能不允许连接该网址，或该站点会重新导向到其他网址。请填写站点自身使用的网址（带或不带 www）。",
           "rate_limited": "该站点当前正在限制请求。请稍等片刻后重试。"

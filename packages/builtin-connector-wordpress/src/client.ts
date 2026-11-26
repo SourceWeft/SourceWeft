@@ -479,7 +479,18 @@ function parseError(bytes: Uint8Array): {
   return { rawCode, restCode };
 }
 
-/** Maps a 401/403 to a login prompt or a credential failure (spec "Errors"). */
+/**
+ * Maps a 401/403 to a login prompt or a credential failure (spec "Errors").
+ *
+ * For a credentialed request, any 401 is a credential failure: the request
+ * carried an Application Password, so a 401 — whatever its `rest_*` code,
+ * including `rest_not_logged_in`/`rest_login_required` — means the credential
+ * was rejected or never reached WordPress (a host stripping the `Authorization`
+ * header is the common case), not a public-style login wall. A credentialed
+ * 403 keeps its mapping (a rights refusal, mapped to INSUFFICIENT_PERMISSION by
+ * {@link withUnpublishedMapping} when unpublished content was asked for). The
+ * public path is unchanged: with no credential, every 401/403 is LOGIN_REQUIRED.
+ */
 function authError(
   status: number,
   code: string | null,
@@ -489,8 +500,7 @@ function authError(
     if (code === "incorrect_password" || code === "invalid_username") {
       return "BAD_CREDENTIALS";
     }
-    const isRestCode = code !== null && code.startsWith("rest_");
-    if (status === 401 && !isRestCode) return "BAD_CREDENTIALS";
+    if (status === 401) return "BAD_CREDENTIALS";
   }
   return "LOGIN_REQUIRED";
 }

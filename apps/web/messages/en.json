@@ -3749,7 +3749,7 @@
           "not_a_wordpress_site": "This address is not a WordPress site. Use the address of the site's home page.",
           "rest_disabled": "This site's REST API is turned off, so its posts can't be read. Turn the WordPress REST API back on, or remove the plugin that blocks it.",
           "login_required": "This site needs a login to read its content. Choose \"Sign in with an Application Password\" instead.",
-          "reauth_required": "The site rejected the username or Application Password. Check them and try again.",
+          "reauth_required": "The site rejected the username or Application Password. Check them and try again. If the password is correct, the web host may be blocking the Authorization header, a common setting on some hosts — check with the host's support or a security plugin's settings.",
           "insufficient_permission": "This account cannot read drafts and private posts. Use an account with those permissions, or turn off \"Include drafts and private posts\".",
           "blocked_endpoint": "This address can't be used: this deployment may not allow connections to it, or the site redirects to a different address. Enter the address the site itself uses (with or without www).",
           "rate_limited": "The site is limiting requests right now. Wait a moment and try again."

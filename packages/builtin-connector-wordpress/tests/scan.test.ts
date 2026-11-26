@@ -256,6 +256,55 @@ test("a total that keeps moving gives the incomplete, non-reconciling result", a
   assertIncomplete(page, warnings, "unstable");
 });
 
+test("a stable total with fewer rows than it reports restarts, then ends unstable", async () => {
+  const { fake, client } = harness({ fake: { posts: manyPosts(2) } });
+  // Every posts read advertises 250 items on a single page but hands back only
+  // two rows, with an unchanged total (a cache/proxy serving a stale total, or
+  // a plugin that caps per_page below what it claims). The old first-vs-last
+  // total guard let this partial read reconcile and archive the skipped
+  // sources; the scan must now restart and end unstable, archiving nothing.
+  fake.failNext(
+    {
+      status: 200,
+      headers: { "X-WP-Total": "250", "X-WP-TotalPages": "1" },
+      body: JSON.stringify([listRow(1), listRow(2)]),
+    },
+    10,
+    (r) => r.path.endsWith("/wp/v2/posts"),
+  );
+  const warnings: WarnCall[] = [];
+  const page = await scan(client, { items: [item("type:post")], warnings });
+  assertIncomplete(page, warnings, "unstable");
+});
+
+test("a clean listing whose rows equal the reported total still reconciles", async () => {
+  const { client } = harness({ fake: { posts: manyPosts(3) } });
+  const page = await scan(client, { items: [item("type:post")] });
+  assert.equal(page.items.length, 3);
+  assert.equal(page.complete, true);
+  assert.equal(page.reconcileMissing, true);
+});
+
+test("benign duplicate re-reads (rows exceed the reported total) still reconcile", async () => {
+  const { fake, client } = harness({ fake: { posts: manyPosts(1) } });
+  // id-asc offset drift can re-read a row across pages, so the raw rows read
+  // exceed X-WP-Total. The `>=` guard tolerates it; dedup by id keeps the final
+  // set correct and the scan reconciles.
+  fake.failNext(
+    {
+      status: 200,
+      headers: { "X-WP-Total": "1", "X-WP-TotalPages": "1" },
+      body: JSON.stringify([listRow(1), listRow(1)]),
+    },
+    1,
+    (r) => r.path.endsWith("/wp/v2/posts"),
+  );
+  const page = await scan(client, { items: [item("type:post")] });
+  assert.equal(page.items.length, 1);
+  assert.equal(page.complete, true);
+  assert.equal(page.reconcileMissing, true);
+});
+
 // ------------------------------------------------------- drafts and status
 
 test("the public path never sends a status parameter", async () => {

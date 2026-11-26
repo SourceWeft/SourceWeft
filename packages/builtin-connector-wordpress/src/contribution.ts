@@ -38,8 +38,9 @@ const itemSchema = {
 
 /** The `items` property shared by both configuration schemas. `uniqueItems`
  * compares whole objects, and an item holds only `id` and `kind`, so it is
- * exactly uniqueness by id. An empty list indexes nothing: readiness reports
- * `selection_required` until something is chosen. */
+ * exactly uniqueness by id. An empty list is not "nothing": it means every
+ * published post and page (see `resolveScope`), and readiness treats it as
+ * ready. */
 export const wordpressItemsSchema = {
   type: "array",
   default: [],

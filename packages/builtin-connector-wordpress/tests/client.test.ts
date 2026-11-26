@@ -270,19 +270,31 @@ test("credential mapping: incorrect password and an un-coded 401 are BAD_CREDENT
   }
 });
 
-test("credential mapping: a rest_* coded 401/403 stays LOGIN_REQUIRED even with auth", async () => {
-  for (const fault of [
-    { status: 401, body: '{"code":"rest_cannot_edit"}' },
-    { status: 403, body: '{"code":"rest_forbidden"}' },
+test("credential mapping: any credentialed 401 is BAD_CREDENTIALS, whatever the rest code", async () => {
+  // A credentialed request that comes back 401 means the credential was
+  // rejected or never reached WordPress (e.g. a host stripping Authorization),
+  // so it is a credential failure, not a public-style login prompt.
+  for (const body of [
+    '{"code":"rest_not_logged_in"}',
+    '{"code":"rest_login_required"}',
+    '{"code":"rest_cannot_edit"}',
   ]) {
     const { fake, client } = harness({ authorization: AUTH });
     await client.discover();
-    fake.failNext(fault);
+    fake.failNext({ status: 401, body });
     assert.equal(
       await codeOf(client.getJson("/wp/v2/posts")),
-      "LOGIN_REQUIRED",
+      "BAD_CREDENTIALS",
+      body,
     );
   }
+});
+
+test("credential mapping: a credentialed 403 rights refusal stays LOGIN_REQUIRED", async () => {
+  const { fake, client } = harness({ authorization: AUTH });
+  await client.discover();
+  fake.failNext({ status: 403, body: '{"code":"rest_forbidden"}' });
+  assert.equal(await codeOf(client.getJson("/wp/v2/posts")), "LOGIN_REQUIRED");
 });
 
 async function errorOf(promise: Promise<unknown>): Promise<WordPressError> {

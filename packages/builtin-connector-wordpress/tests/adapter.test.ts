@@ -177,6 +177,21 @@ test("readiness: login with the wrong application password is reauth_required", 
   assert.ok(!result.message!.includes(CREDENTIAL.secret));
 });
 
+test("readiness: a credentialed 401 with no injected code is reauth_required (host strips Authorization)", async () => {
+  // The fake has no matching credential, so users/me answers its realistic
+  // default 401 rest_not_logged_in — exactly what a host stripping the
+  // Authorization header, or a revoked password, produces. A correct password
+  // that never reaches WordPress must still read as reauth_required, not
+  // login_required.
+  const h = harness({ flavor: "login", fake: siteFake() });
+  const result = await h.adapter.checkSyncReadiness!(
+    baseInput(wpConfig([]), credentialToken()),
+  );
+  assert.equal(result.ready, false);
+  assert.equal(result.reason, "reauth_required");
+  assert.equal(h.closed(), h.opened());
+});
+
 test("readiness: a malformed stored credential is reauth_required before any request", async () => {
   const h = harness({
     flavor: "login",
@@ -369,6 +384,57 @@ test("a password rejected during extract surfaces WORDPRESS_REAUTH_REQUIRED", as
       r.path.endsWith("/wp/v2/posts/1") ||
       (r.query.rest_route ?? "") === "/wp/v2/posts/1",
   );
+  await assert.rejects(
+    () =>
+      h.adapter.extract({
+        ...baseInput(wpConfig(sel("post:1")), credentialToken()),
+        item: {
+          externalId: "wordpress:post:1",
+          externalUri: null,
+          title: "Post 1",
+          mimeType: "text/markdown",
+          sizeBytes: null,
+          externalUpdatedAt: null,
+          contentHash: "h",
+          metadata: {},
+        },
+      }),
+    (error: unknown) =>
+      error instanceof WordPressAdapterError &&
+      error.code === "WORDPRESS_REAUTH_REQUIRED" &&
+      error.statusCode === 422,
+  );
+  assert.equal(h.closed(), h.opened());
+});
+
+test("a credentialed site that 401s every read (no injection) surfaces WORDPRESS_REAUTH_REQUIRED on discover", async () => {
+  // The whole REST surface answers 401 rest_not_logged_in to the credentialed
+  // connector. Unlike the public path (WORDPRESS_LOGIN_REQUIRED), a login
+  // connector reads this as a rejected credential and the orchestrator is told
+  // to reconnect rather than retry.
+  const h = harness({
+    flavor: "login",
+    fake: siteFake({ credential: CREDENTIAL, loginRequired: true }),
+  });
+  let error: unknown;
+  try {
+    await collect(
+      h.adapter.discoverPages!(baseInput(wpConfig([]), credentialToken())),
+    );
+  } catch (caught) {
+    error = caught;
+  }
+  assert.ok(error instanceof WordPressAdapterError);
+  assert.equal(error.code, "WORDPRESS_REAUTH_REQUIRED");
+  assert.equal(error.statusCode, 422);
+  assert.equal(h.closed(), h.opened());
+});
+
+test("a credentialed single read that 401s (no injection) surfaces WORDPRESS_REAUTH_REQUIRED on extract", async () => {
+  const h = harness({
+    flavor: "login",
+    fake: siteFake({ credential: CREDENTIAL, loginRequired: true }),
+  });
   await assert.rejects(
     () =>
       h.adapter.extract({

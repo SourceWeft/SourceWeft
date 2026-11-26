@@ -127,10 +127,17 @@ export async function scanSite(
   }
 
   /**
-   * Reads a whole route in id order. If `X-WP-Total` differs between the first
-   * and the last request of the route, the listing changed under the read, so
-   * it restarts (at most {@link ScanLimits.MAX_SCAN_RESTARTS} times); a read
-   * that never stabilises is an unstable scan, never a reconcilable one.
+   * Reads a whole route in id order. A read is only taken as authoritative when
+   * it is consistent two ways: `X-WP-Total` is unchanged between the first and
+   * the last request of the route, and the number of rows actually read is at
+   * least that total. The first check catches a listing that grew or shrank
+   * under the read; the second catches a site that reports a total it never
+   * delivers (a cache/proxy serving a stale total, or a plugin that caps
+   * `per_page` below what it advertises) — without it, a partial read would
+   * reconcile and archive the silently skipped sources. `>=` tolerates benign
+   * duplicate re-reads from id-asc offset drift. Either inconsistency restarts
+   * the route (at most {@link ScanLimits.MAX_SCAN_RESTARTS} times); a read that
+   * never stabilises is an unstable scan, never a reconcilable one.
    */
   async function listRoute(
     route: "posts" | "pages",
@@ -155,7 +162,7 @@ export async function scanSite(
         rows.push(...next.items);
         lastTotal = next.total;
       }
-      if (lastTotal === first.total) return rows;
+      if (lastTotal === first.total && rows.length >= lastTotal) return rows;
     }
     throw new ScanIncomplete("unstable");
   }
