@@ -1,12 +1,12 @@
-import type { ClientLimits } from "./client";
 import { WordPressError } from "./errors";
+import { HOME_HTML_BYTES, WORDPRESS_USER_AGENT } from "./limits";
 import {
-  HOME_HTML_BYTES,
-  MAX_RETRIES,
-  MAX_RETRY_DELAY_MS,
-  REQUEST_TIMEOUT_MS,
-  WORDPRESS_USER_AGENT,
-} from "./limits";
+  abortable,
+  createTransport,
+  discard,
+  type ClientLimits,
+  type Transport,
+} from "./transport";
 
 /**
  * A validated REST root. `pretty` is a `.../wp-json` base; `plain` is a
@@ -35,37 +35,6 @@ export type DiscoverRestRootInput = {
   requestTimeoutMs?: number;
   limits?: Partial<ClientLimits>;
 };
-
-class Timeout {}
-
-function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) {
-    promise.catch(() => undefined);
-    return Promise.reject(new Timeout());
-  }
-  return new Promise<T>((resolve, reject) => {
-    const onAbort = () => reject(new Timeout());
-    signal.addEventListener("abort", onAbort, { once: true });
-    promise.then(
-      (value) => {
-        signal.removeEventListener("abort", onAbort);
-        resolve(value);
-      },
-      (error: unknown) => {
-        signal.removeEventListener("abort", onAbort);
-        reject(error);
-      },
-    );
-  });
-}
-
-async function discard(response: Response): Promise<void> {
-  try {
-    await response.body?.cancel();
-  } catch {
-    // The body is being thrown away; a failed cancel changes nothing.
-  }
-}
 
 /** Reads at most `maxBytes` bytes of the home page and stops; the tag must be
  * within the cap or it is not seen. Never throws on a large body — it truncates. */
@@ -105,22 +74,6 @@ async function readUpTo(
   return out;
 }
 
-function retryAfterMs(
-  response: Response,
-  attempt: number,
-  now: () => number,
-  maxDelay: number,
-): number {
-  const backoff = Math.min(500 * (attempt + 1), maxDelay);
-  const header = response.headers.get("retry-after")?.trim();
-  if (!header) return backoff;
-  if (/^\d{1,9}$/.test(header))
-    return Math.min(Number(header) * 1000, maxDelay);
-  const at = Date.parse(header);
-  if (!Number.isNaN(at)) return Math.min(Math.max(0, at - now()), maxDelay);
-  return backoff;
-}
-
 /**
  * The first `<uri>` in a `Link` header whose `rel` lists `https://api.w.org/`.
  * A combined header carries several comma-separated values; a `rel` may be
@@ -153,11 +106,15 @@ function attribute(tag: string, name: string): string | null {
   return (match[1] ?? match[2] ?? match[3] ?? "").trim();
 }
 
-/** The `href` of the first `<link rel="...https://api.w.org/...">` tag. */
+/** The `href` of the first `<link rel="...https://api.w.org/...">` tag.
+ * HTML comments are stripped first, so a commented-out tag is never used. */
 function apiLinkFromHtml(html: string): string | null {
+  // A comment runs to its close or, when the read was truncated mid-comment,
+  // to the end of the window; either way nothing inside it is a live tag.
+  const live = html.replace(/<!--[\s\S]*?(?:-->|$)/g, " ");
   const re = /<link\b[^>]*>/gi;
   let match: RegExpExecArray | null;
-  while ((match = re.exec(html)) !== null) {
+  while ((match = re.exec(live)) !== null) {
     const rel = attribute(match[0], "rel");
     if (rel === null) continue;
     if (!rel.split(/\s+/).includes(API_REL)) continue;
@@ -227,75 +184,36 @@ function classifyRoot(
 }
 
 /**
- * Discovers a site's REST root (spec "REST root discovery", steps 1–3): fetch
- * the home page with `redirect: "manual"`, read the `api.w.org` link from a
- * `Link` header (the header wins) or the first `<link>` tag in the first
- * {@link HOME_HTML_BYTES} of HTML, and validate the candidate root. A redirect
- * is `BLOCKED_ENDPOINT` and is never followed; a non-conforming root is
+ * Discovers a site's REST root over a {@link Transport} (spec "REST root
+ * discovery", steps 1–3): fetch the home page with `redirect: "manual"`, read
+ * the `api.w.org` link from a `Link` header (the header wins) or the first
+ * `<link>` tag in the first {@link HOME_HTML_BYTES} of HTML, and validate the
+ * candidate root. A redirect is `BLOCKED_ENDPOINT`; a non-conforming root is
  * `BLOCKED_ENDPOINT`; a missing link is `NOT_A_WORDPRESS_SITE`. The `wp/v2`
  * namespace check (step 4) is the client's `getIndex`, not this function.
+ *
+ * The client calls this with its own transport, so a discovery request counts
+ * toward the same budget and gap as the client's REST reads.
  */
-export async function discoverRestRoot(
-  input: DiscoverRestRootInput,
+export async function discoverWith(
+  transport: Transport,
+  params: { siteBase: string; allowWpcom: boolean },
 ): Promise<RestRoot> {
-  const site = new URL(input.siteBase);
+  const site = new URL(params.siteBase);
   const siteOrigin = site.origin;
   const siteHost = site.host.toLowerCase();
   const siteBasePath =
     site.pathname === "/" ? "" : site.pathname.replace(/\/$/, "");
   const url = `${siteOrigin}${siteBasePath}/`;
 
-  const now = input.now ?? Date.now;
-  const external = input.signal;
-  const timeoutMs = input.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
-  const maxRetries = input.limits?.maxRetries ?? MAX_RETRIES;
-  const maxRetryDelayMs = input.limits?.maxRetryDelayMs ?? MAX_RETRY_DELAY_MS;
-
-  function wait(ms: number): Promise<void> {
-    if (input.sleep) return input.sleep(ms);
-    return new Promise<void>((resolve) => {
-      const onAbort = () => {
-        clearTimeout(timer);
-        resolve();
-      };
-      const timer = setTimeout(() => {
-        external?.removeEventListener("abort", onAbort);
-        resolve();
-      }, ms);
-      external?.addEventListener("abort", onAbort, { once: true });
-    });
-  }
-
-  let attempt = 0;
-  for (;;) {
-    if (external?.aborted) throw new WordPressError("SITE_UNREACHABLE");
-    const controller = new AbortController();
-    const signal = controller.signal;
-    const timer = setTimeout(() => controller.abort(new Timeout()), timeoutMs);
-    const onExternalAbort = () => controller.abort(new Timeout());
-    external?.addEventListener("abort", onExternalAbort, { once: true });
-
-    let retry = false;
-    let waitMs = Math.min(500 * (attempt + 1), maxRetryDelayMs);
-    let rateLimited = false;
-    try {
-      const response = await abortable(
-        input.fetch(url, {
-          method: "GET",
-          headers: {
-            Accept: "text/html,application/xhtml+xml",
-            "User-Agent": WORDPRESS_USER_AGENT,
-          },
-          redirect: "manual",
-          signal,
-        }),
-        signal,
-      );
+  return transport.request(
+    url,
+    {
+      Accept: "text/html,application/xhtml+xml",
+      "User-Agent": WORDPRESS_USER_AGENT,
+    },
+    async (response, signal) => {
       const { status } = response;
-      if (status >= 300 && status < 400) {
-        await discard(response);
-        throw new WordPressError("BLOCKED_ENDPOINT");
-      }
       if (status === 200) {
         let rootUrl = apiLinkFromHeader(response.headers.get("link"));
         if (rootUrl === null) {
@@ -312,44 +230,49 @@ export async function discoverRestRoot(
           siteOrigin,
           siteBasePath,
           siteHost,
-          input.allowWpcom,
+          params.allowWpcom,
         );
         if (root === null) throw new WordPressError("BLOCKED_ENDPOINT");
         return root;
       }
-      if (status === 429 || (status >= 500 && status <= 599)) {
-        rateLimited = status === 429;
-        if (status === 429) {
-          waitMs = retryAfterMs(response, attempt, now, maxRetryDelayMs);
-        }
-        await discard(response);
-        if (attempt >= maxRetries) {
-          throw new WordPressError(
-            rateLimited ? "RATE_LIMITED" : "SITE_UNREACHABLE",
-          );
-        }
-        retry = true;
-      } else {
-        await discard(response);
-        throw new WordPressError("NOT_A_WORDPRESS_SITE");
-      }
-    } catch (error) {
-      if (error instanceof WordPressError) throw error;
-      if (external?.aborted) throw new WordPressError("SITE_UNREACHABLE");
-      if (attempt >= maxRetries) throw new WordPressError("SITE_UNREACHABLE");
-      retry = true;
-    } finally {
-      clearTimeout(timer);
-      external?.removeEventListener("abort", onExternalAbort);
-    }
-    if (retry) {
-      await wait(waitMs);
-      attempt += 1;
-    }
-  }
+      await discard(response);
+      if (status >= 500) throw new WordPressError("SITE_UNREACHABLE");
+      throw new WordPressError("NOT_A_WORDPRESS_SITE");
+    },
+  );
 }
 
+/**
+ * Discovers a site's REST root with a fresh transport over `input.fetch`. The
+ * signature takes a raw `fetch` so it is independently testable; the client
+ * uses {@link discoverWith} with its own transport.
+ */
+export async function discoverRestRoot(
+  input: DiscoverRestRootInput,
+): Promise<RestRoot> {
+  const transport = createTransport({
+    fetch: input.fetch,
+    now: input.now,
+    sleep: input.sleep,
+    signal: input.signal,
+    requestTimeoutMs: input.requestTimeoutMs,
+    limits: input.limits,
+  });
+  return discoverWith(transport, {
+    siteBase: input.siteBase,
+    allowWpcom: input.allowWpcom,
+  });
+}
+
+// `/wp/v2/<resource>` or `/wp/v2/<resource>/<id>`; `/wp/v2/users/me` is the one
+// allowed non-numeric tail (login readiness reads the current user). Anything
+// with `..`, `?`, `#`, `%`, uppercase or an extra segment is refused.
 const ROUTE = /^\/wp\/v2\/[a-z]+(?:\/[0-9]+)?$/;
+const USERS_ME = "/wp/v2/users/me";
+
+function isAllowedRoute(route: string): boolean {
+  return route === USERS_ME || ROUTE.test(route);
+}
 
 function queryString(
   params: Record<string, string | number> | undefined,
@@ -368,14 +291,14 @@ function queryString(
  * Builds a request URL for a fixed `/wp/v2/...` route under a discovered root.
  * For a `plain` root the route goes into `rest_route` (slashes preserved) and
  * params follow it; for a `wpcom` root the `/wp/v2` prefix is dropped because
- * the base already carries it. A route outside `/wp/v2` is `CONFIG_INVALID`.
+ * the base already carries it. A route outside the allow-list is `CONFIG_INVALID`.
  */
 export function routeUrl(
   root: RestRoot,
   route: string,
   params?: Record<string, string | number>,
 ): string {
-  if (!ROUTE.test(route)) throw new WordPressError("CONFIG_INVALID");
+  if (!isAllowedRoute(route)) throw new WordPressError("CONFIG_INVALID");
   switch (root.kind) {
     case "pretty":
       return `${root.base}${route}${queryString(params, "?")}`;

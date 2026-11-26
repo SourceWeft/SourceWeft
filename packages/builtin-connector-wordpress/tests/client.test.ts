@@ -6,7 +6,11 @@ import {
   type CreateWordPressClientInput,
   type WordPressClient,
 } from "../src/client";
-import { WordPressError, type WordPressErrorCode } from "../src/errors";
+import {
+  WordPressError,
+  type WordPressErrorCode,
+  type WordPressRestCode,
+} from "../src/errors";
 import { MAX_REQUESTS, MIN_REQUEST_GAP_MS } from "../src/limits";
 import {
   createFakeWordPress,
@@ -140,8 +144,11 @@ test("a 404 on a route is a NotFound result, not an error", async () => {
 });
 
 test("a 429 with Retry-After is retried, then succeeds", async () => {
-  const { fake, client, sleeps } = harness();
+  const { fake, client, sleeps, clock } = harness();
   await client.discover();
+  // Past the gap that now follows the counted discovery request, so only the
+  // Retry-After delay is observed.
+  clock.t += MIN_REQUEST_GAP_MS;
   fake.failNext({ status: 429, headers: { "retry-after": "2" } });
   const res = await client.getJson("/wp/v2/posts", { per_page: 100 });
   assert.ok(!isNotFound(res));
@@ -149,8 +156,9 @@ test("a 429 with Retry-After is retried, then succeeds", async () => {
 });
 
 test("a persistent 429 is RATE_LIMITED after the retries", async () => {
-  const { fake, client, sleeps } = harness();
+  const { fake, client, sleeps, clock } = harness();
   await client.discover();
+  clock.t += MIN_REQUEST_GAP_MS;
   const before = client.requestCount();
   fake.failNext({ status: 429, headers: { "retry-after": "1" } }, 10);
   assert.equal(await codeOf(client.getJson("/wp/v2/posts")), "RATE_LIMITED");
@@ -159,13 +167,14 @@ test("a persistent 429 is RATE_LIMITED after the retries", async () => {
 });
 
 test("the request after the cap throws TOO_LARGE and is never sent", async () => {
-  const { fake, client } = harness({ limits: { maxRequests: 2 } });
+  // Budget 3: the discovery request plus two reads, then the next is refused.
+  const { fake, client } = harness({ limits: { maxRequests: 3 } });
   await client.discover();
   const home = fake.requests.length;
   await client.getJson("/wp/v2/posts");
   await client.getJson("/wp/v2/pages");
   assert.equal(await codeOf(client.getJson("/wp/v2/users")), "TOO_LARGE");
-  assert.equal(client.requestCount(), 2);
+  assert.equal(client.requestCount(), 3);
   assert.equal(fake.requests.length, home + 2);
 });
 
@@ -276,6 +285,104 @@ test("credential mapping: a rest_* coded 401/403 stays LOGIN_REQUIRED even with 
   }
 });
 
+async function errorOf(promise: Promise<unknown>): Promise<WordPressError> {
+  try {
+    await promise;
+  } catch (error) {
+    assert.ok(error instanceof WordPressError, String(error));
+    return error;
+  }
+  assert.fail("expected a WordPressError");
+}
+
+test("each recognised REST code is recorded on a 400/401/403 error", async () => {
+  const cases: [number, unknown, WordPressRestCode][] = [
+    [
+      400,
+      {
+        code: "rest_invalid_param",
+        data: {
+          status: 400,
+          details: { status: { code: "rest_forbidden_status" } },
+        },
+      },
+      "rest_forbidden_status",
+    ],
+    [400, { code: "rest_invalid_param" }, "rest_invalid_param"],
+    [403, { code: "rest_cannot_view" }, "rest_cannot_view"],
+    [403, { code: "rest_forbidden" }, "rest_forbidden"],
+    [401, { code: "rest_login_required" }, "rest_login_required"],
+    [401, { code: "incorrect_password" }, "incorrect_password"],
+    [403, { code: "invalid_username" }, "invalid_username"],
+    [401, { code: "rest_not_logged_in" }, "rest_not_logged_in"],
+    [401, { code: "rest_user_cannot_view" }, "rest_user_cannot_view"],
+  ];
+  for (const [status, body, expected] of cases) {
+    const { fake, client } = harness({ authorization: AUTH });
+    await client.discover();
+    fake.failNext({ status, body: JSON.stringify(body) });
+    const error = await errorOf(client.getJson("/wp/v2/posts"));
+    assert.equal(error.restCode, expected, expected);
+  }
+});
+
+test("rest_no_route (404) is recorded on the index error", async () => {
+  const { fake, client } = harness();
+  await client.discover();
+  fake.failNext({ status: 404, body: '{"code":"rest_no_route"}' });
+  const error = await errorOf(client.getIndex());
+  assert.equal(error.code, "NOT_A_WORDPRESS_SITE");
+  assert.equal(error.restCode, "rest_no_route");
+});
+
+test("rest_forbidden_status is read end-to-end from the fake's 400", async () => {
+  // A public client that asks for a draft gets the real rest_invalid_param /
+  // rest_forbidden_status body a live WordPress returns.
+  const { client } = harness();
+  const error = await errorOf(
+    client.getJson("/wp/v2/posts", { status: "draft" }),
+  );
+  assert.equal(error.code, "BAD_RESPONSE");
+  assert.equal(error.restCode, "rest_forbidden_status");
+});
+
+test("an unrecognised code or a non-JSON body leaves restCode unset", async () => {
+  for (const fault of [
+    { status: 400, body: '{"code":"rest_some_future_code"}' },
+    { status: 400, body: "<html>not json</html>" },
+    { status: 403, body: "" },
+  ]) {
+    const { fake, client } = harness();
+    await client.discover();
+    fake.failNext(fault);
+    const error = await errorOf(client.getJson("/wp/v2/posts"));
+    assert.equal(error.restCode, undefined, fault.body);
+  }
+});
+
+test("no response text reaches the error message or its serialised fields", async () => {
+  const { fake, client } = harness();
+  await client.discover();
+  fake.failNext({
+    status: 400,
+    body: JSON.stringify({
+      code: "rest_invalid_param",
+      message: "LEAKY-BODY-TEXT",
+      data: { params: { status: "LEAKY-BODY-TEXT" } },
+    }),
+  });
+  const error = await errorOf(client.getJson("/wp/v2/posts"));
+  assert.equal(error.restCode, "rest_invalid_param");
+  assert.ok(!error.message.includes("LEAKY-BODY-TEXT"));
+  const serialised = JSON.stringify({
+    code: error.code,
+    status: error.status,
+    message: error.message,
+    restCode: error.restCode,
+  });
+  assert.ok(!serialised.includes("LEAKY-BODY-TEXT"));
+});
+
 test("the credential is sent only to the site origin and never appears in an error or a URL", async () => {
   const { fake, client } = harness({ authorization: AUTH });
   await client.getIndex();
@@ -312,16 +419,16 @@ test("the credential is sent only to the site origin and never appears in an err
 
 test("requests are spaced by the minimum gap, measured with the injected clock", async () => {
   const { client, sleeps, clock } = harness();
+  // Discovery is the first counted request, so it owes no gap.
   await client.discover();
-  await client.getJson("/wp/v2/posts");
   assert.deepEqual(sleeps, []);
-  await client.getJson("/wp/v2/pages");
+  await client.getJson("/wp/v2/posts");
   assert.deepEqual(sleeps, [MIN_REQUEST_GAP_MS]);
   clock.t += 10_000;
-  await client.getJson("/wp/v2/categories");
+  await client.getJson("/wp/v2/pages");
   assert.deepEqual(sleeps, [MIN_REQUEST_GAP_MS]);
   clock.t += 100;
-  await client.getJson("/wp/v2/tags");
+  await client.getJson("/wp/v2/categories");
   assert.deepEqual(sleeps, [MIN_REQUEST_GAP_MS, MIN_REQUEST_GAP_MS - 100]);
 });
 
@@ -338,10 +445,15 @@ test("the client never touches the global fetch", async () => {
   }
 });
 
-test("MAX_REQUESTS is the real ceiling when no lower limit is given", async () => {
+test("discovery counts toward the request budget", async () => {
   const { client } = harness();
+  assert.equal(client.requestCount(), 0);
   await client.discover();
+  // Discovery runs on the client's own transport, so its home-page request is
+  // counted against MAX_REQUESTS like every REST read.
+  assert.equal(client.requestCount(), 1);
+  await client.getJson("/wp/v2/posts");
+  assert.equal(client.requestCount(), 2);
   // A smoke check that the production constant wires through unchanged.
   assert.ok(MAX_REQUESTS >= 2);
-  assert.equal(client.requestCount(), 0);
 });

@@ -1,23 +1,20 @@
-import { WordPressError, type WordPressErrorCode } from "./errors";
 import {
-  MAX_REQUESTS,
-  MAX_RESPONSE_BYTES,
-  MAX_RETRIES,
-  MAX_RETRY_DELAY_MS,
-  MIN_REQUEST_GAP_MS,
-  REQUEST_TIMEOUT_MS,
-  WORDPRESS_USER_AGENT,
-} from "./limits";
-import { discoverRestRoot, routeUrl, type RestRoot } from "./rest-root";
+  asWordPressRestCode,
+  WordPressError,
+  type WordPressErrorCode,
+  type WordPressRestCode,
+} from "./errors";
+import { MAX_RESPONSE_BYTES, WORDPRESS_USER_AGENT } from "./limits";
+import { discoverWith, routeUrl, type RestRoot } from "./rest-root";
 import { parseSiteUrl, siteHostOf } from "./site-url";
+import {
+  abortable,
+  createTransport,
+  discard,
+  type ClientLimits,
+} from "./transport";
 
-/** Limits a test may lower; production uses the constants in `limits.ts`. */
-export type ClientLimits = {
-  maxRequests: number;
-  maxRetries: number;
-  maxRetryDelayMs: number;
-  minRequestGapMs: number;
-};
+export type { ClientLimits } from "./transport";
 
 /** The REST root index: the site name and the namespaces it exposes. */
 export type WpIndex = { name: string | null; namespaces: string[] };
@@ -49,7 +46,7 @@ export type WordPressClient = {
     route: string,
     params?: Record<string, string | number>,
   ): Promise<WordPressJson | WordPressNotFound>;
-  /** Requests this client has issued (discovery is counted separately). */
+  /** Requests this client has issued, discovery included. */
   requestCount(): number;
 };
 
@@ -73,39 +70,8 @@ export type CreateWordPressClientInput = {
   limits?: Partial<ClientLimits>;
 };
 
-/** Error bodies (401/403/404) are read only for a REST `code`; this is plenty. */
+/** Error bodies (400/401/403/404) are read only for a REST `code`; this is plenty. */
 const ERROR_BODY_BYTES = 65_536;
-
-class Timeout {}
-
-function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) {
-    promise.catch(() => undefined);
-    return Promise.reject(new Timeout());
-  }
-  return new Promise<T>((resolve, reject) => {
-    const onAbort = () => reject(new Timeout());
-    signal.addEventListener("abort", onAbort, { once: true });
-    promise.then(
-      (value) => {
-        signal.removeEventListener("abort", onAbort);
-        resolve(value);
-      },
-      (error: unknown) => {
-        signal.removeEventListener("abort", onAbort);
-        reject(error);
-      },
-    );
-  });
-}
-
-async function discard(response: Response): Promise<void> {
-  try {
-    await response.body?.cancel();
-  } catch {
-    // The body is being thrown away; a failed cancel changes nothing.
-  }
-}
 
 /** Reads at most `maxBytes` bytes and cancels the stream the moment one more
  * arrives, so a hostile body is never fully read. Over the cap is TOO_LARGE. */
@@ -152,22 +118,6 @@ async function readCapped(
   return out;
 }
 
-function retryAfterMs(
-  response: Response,
-  attempt: number,
-  now: () => number,
-  maxDelay: number,
-): number {
-  const backoff = Math.min(500 * (attempt + 1), maxDelay);
-  const header = response.headers.get("retry-after")?.trim();
-  if (!header) return backoff;
-  if (/^\d{1,9}$/.test(header))
-    return Math.min(Number(header) * 1000, maxDelay);
-  const at = Date.parse(header);
-  if (!Number.isNaN(at)) return Math.min(Math.max(0, at - now()), maxDelay);
-  return backoff;
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -176,14 +126,44 @@ function decode(bytes: Uint8Array): string {
   return new TextDecoder("utf-8").decode(bytes);
 }
 
-/** The REST error `code` of a JSON body, if it is an object with one. */
-function errorCode(bytes: Uint8Array): string | null {
-  try {
-    const body: unknown = JSON.parse(decode(bytes));
-    return isRecord(body) && typeof body.code === "string" ? body.code : null;
-  } catch {
-    return null;
+/** The first recognised code under `data.details.*` of a `rest_invalid_param`
+ * body (e.g. `rest_forbidden_status`), or `undefined`. */
+function nestedDetailCode(
+  body: Record<string, unknown>,
+): WordPressRestCode | undefined {
+  const data = body.data;
+  if (!isRecord(data)) return undefined;
+  const details = data.details;
+  if (!isRecord(details)) return undefined;
+  for (const value of Object.values(details)) {
+    if (isRecord(value)) {
+      const code = asWordPressRestCode(value.code);
+      if (code !== undefined) return code;
+    }
   }
+  return undefined;
+}
+
+/** Parses an error body once: the raw top-level `code` (for the login/permission
+ * decision) and a recognised {@link WordPressRestCode} (for later tasks). An
+ * unrecognised code or a non-JSON body leaves `restCode` unset; nothing but the
+ * closed enum value is ever recorded. */
+function parseError(bytes: Uint8Array): {
+  rawCode: string | null;
+  restCode: WordPressRestCode | undefined;
+} {
+  let body: unknown;
+  try {
+    body = JSON.parse(decode(bytes));
+  } catch {
+    return { rawCode: null, restCode: undefined };
+  }
+  if (!isRecord(body)) return { rawCode: null, restCode: undefined };
+  const rawCode = typeof body.code === "string" ? body.code : null;
+  const top = asWordPressRestCode(rawCode);
+  const restCode =
+    top === "rest_invalid_param" ? (nestedDetailCode(body) ?? top) : top;
+  return { rawCode, restCode };
 }
 
 /** Maps a 401/403 to a login prompt or a credential failure (spec "Errors"). */
@@ -217,45 +197,28 @@ type RawResponse = { status: number; headers: Headers; bytes: Uint8Array };
  * validated site base, the discovered REST root and a fixed `/wp/v2` route:
  * nothing in a response body is ever requested. The `Authorization` value is
  * attached only to requests whose origin equals the site origin, so a
- * credential never leaves the site. Every failure is a {@link WordPressError}
- * with a fixed message: the site address, the credential and the body are never
- * forwarded, and no `cause` is set.
+ * credential never leaves the site (and discovery sends none). Every failure is
+ * a {@link WordPressError} with a fixed message: the site address, the
+ * credential and the body are never forwarded, and no `cause` is set. A 400/
+ * 401/403/404 error also records a recognised {@link WordPressRestCode} so a
+ * later task can map a more precise outcome without re-reading the body.
  */
 export function createWordPressClient(
   input: CreateWordPressClientInput,
 ): WordPressClient {
   const siteBase = parseSiteUrl(input.siteBase);
   const siteOrigin = `https://${siteHostOf(siteBase)}`;
-  const now = input.now ?? Date.now;
-  const external = input.signal;
-  const timeoutMs = input.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
   const maxBytes = input.maxResponseBytes ?? MAX_RESPONSE_BYTES;
-  const limits: ClientLimits = {
-    maxRequests: MAX_REQUESTS,
-    maxRetries: MAX_RETRIES,
-    maxRetryDelayMs: MAX_RETRY_DELAY_MS,
-    minRequestGapMs: MIN_REQUEST_GAP_MS,
-    ...input.limits,
-  };
+  const transport = createTransport({
+    fetch: input.fetch,
+    now: input.now,
+    sleep: input.sleep,
+    signal: input.signal,
+    requestTimeoutMs: input.requestTimeoutMs,
+    limits: input.limits,
+  });
 
-  let requestCount = 0;
-  let lastRequestAt: number | null = null;
   let rootPromise: Promise<RestRoot> | null = null;
-
-  function wait(ms: number): Promise<void> {
-    if (input.sleep) return input.sleep(ms);
-    return new Promise<void>((resolve) => {
-      const onAbort = () => {
-        clearTimeout(timer);
-        resolve();
-      };
-      const timer = setTimeout(() => {
-        external?.removeEventListener("abort", onAbort);
-        resolve();
-      }, ms);
-      external?.addEventListener("abort", onAbort, { once: true });
-    });
-  }
 
   /** The credential, but only when the request stays on the site's origin. */
   function authorizationFor(url: string): string | undefined {
@@ -269,112 +232,35 @@ export function createWordPressClient(
     }
   }
 
-  /** One logical GET: counts against the budget, spaces by the minimum gap,
-   * retries 429/5xx/network, refuses a 3xx, and returns the final response for
-   * the caller to map. A 200 or a 4xx is returned; a persistent 429 throws
-   * RATE_LIMITED; network or timeout throws SITE_UNREACHABLE. */
-  async function perform(
+  /** One GET over the shared transport. The transport owns the budget, gap,
+   * retries and the 3xx/429/network outcomes; this handler reads the final
+   * 200/4xx/5xx body (capped) and hands the status back for mapping. */
+  function perform(
     url: string,
     authorization: string | undefined,
   ): Promise<RawResponse> {
-    let attempt = 0;
-    for (;;) {
-      if (external?.aborted) throw new WordPressError("SITE_UNREACHABLE");
-      if (requestCount >= limits.maxRequests) {
-        throw new WordPressError("TOO_LARGE");
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+      "User-Agent": WORDPRESS_USER_AGENT,
+    };
+    if (authorization !== undefined) headers.Authorization = authorization;
+    return transport.request(url, headers, async (response, signal) => {
+      const { status } = response;
+      if (status === 200) {
+        const bytes = await readCapped(response, maxBytes, signal);
+        return { status, headers: response.headers, bytes };
       }
-      requestCount += 1;
-      if (lastRequestAt !== null) {
-        const elapsed = now() - lastRequestAt;
-        if (elapsed < limits.minRequestGapMs) {
-          await wait(limits.minRequestGapMs - elapsed);
-          if (external?.aborted) throw new WordPressError("SITE_UNREACHABLE");
-        }
+      if (status >= 500) {
+        await discard(response);
+        return { status, headers: response.headers, bytes: new Uint8Array(0) };
       }
-
-      const controller = new AbortController();
-      const signal = controller.signal;
-      const timer = setTimeout(
-        () => controller.abort(new Timeout()),
-        timeoutMs,
+      const bytes = await readCapped(
+        response,
+        Math.min(maxBytes, ERROR_BODY_BYTES),
+        signal,
       );
-      const onExternalAbort = () => controller.abort(new Timeout());
-      external?.addEventListener("abort", onExternalAbort, { once: true });
-
-      let retry = false;
-      let waitMs = Math.min(500 * (attempt + 1), limits.maxRetryDelayMs);
-      try {
-        const headers: Record<string, string> = {
-          Accept: "application/json",
-          "User-Agent": WORDPRESS_USER_AGENT,
-        };
-        if (authorization !== undefined) headers.Authorization = authorization;
-        const response = await abortable(
-          input.fetch(url, {
-            method: "GET",
-            headers,
-            // The host scope follows a cross-origin redirect unless told not to.
-            // `manual` hands any 3xx back, which is refused below: a credential
-            // never follows a redirect and no endpoint is reached indirectly.
-            redirect: "manual",
-            signal,
-          }),
-          signal,
-        );
-        const { status } = response;
-        if (status >= 300 && status < 400) {
-          await discard(response);
-          throw new WordPressError("BLOCKED_ENDPOINT");
-        }
-        if (status === 200) {
-          const bytes = await readCapped(response, maxBytes, signal);
-          return { status, headers: response.headers, bytes };
-        }
-        if (status === 429 || (status >= 500 && status <= 599)) {
-          if (status === 429) {
-            waitMs = retryAfterMs(
-              response,
-              attempt,
-              now,
-              limits.maxRetryDelayMs,
-            );
-          }
-          await discard(response);
-          if (attempt >= limits.maxRetries) {
-            if (status === 429) throw new WordPressError("RATE_LIMITED");
-            return {
-              status,
-              headers: response.headers,
-              bytes: new Uint8Array(0),
-            };
-          }
-          retry = true;
-        } else {
-          const bytes = await readCapped(
-            response,
-            Math.min(maxBytes, ERROR_BODY_BYTES),
-            signal,
-          );
-          return { status, headers: response.headers, bytes };
-        }
-      } catch (error) {
-        if (error instanceof WordPressError) throw error;
-        if (external?.aborted) throw new WordPressError("SITE_UNREACHABLE");
-        if (attempt >= limits.maxRetries) {
-          throw new WordPressError("SITE_UNREACHABLE");
-        }
-        retry = true;
-      } finally {
-        clearTimeout(timer);
-        external?.removeEventListener("abort", onExternalAbort);
-        // The gap is measured from the end of the response, body included.
-        lastRequestAt = now();
-      }
-      if (retry) {
-        await wait(waitMs);
-        attempt += 1;
-      }
-    }
+      return { status, headers: response.headers, bytes };
+    });
   }
 
   function indexUrl(root: RestRoot): string {
@@ -389,15 +275,11 @@ export function createWordPressClient(
   }
 
   function discover(): Promise<RestRoot> {
-    return (rootPromise ??= discoverRestRoot({
-      fetch: input.fetch,
+    // The client's own transport, so a discovery request counts against the
+    // same budget and gap as every REST read (it still sends no credential).
+    return (rootPromise ??= discoverWith(transport, {
       siteBase,
       allowWpcom: input.allowWpcom,
-      signal: input.signal,
-      now: input.now,
-      sleep: input.sleep,
-      requestTimeoutMs: input.requestTimeoutMs,
-      limits: input.limits,
     }));
   }
 
@@ -408,7 +290,7 @@ export function createWordPressClient(
       const root = await discover();
       const url = indexUrl(root);
       const authorization = authorizationFor(url);
-      const { status, headers, bytes } = await perform(url, authorization);
+      const { status, bytes } = await perform(url, authorization);
       if (status === 200) {
         let body: unknown;
         try {
@@ -426,13 +308,20 @@ export function createWordPressClient(
         const name = typeof body.name === "string" ? body.name : null;
         return { name, namespaces };
       }
+      const { rawCode, restCode } = parseError(bytes);
       if (status === 401 || status === 403) {
         throw new WordPressError(
-          authError(status, errorCode(bytes), authorization !== undefined),
+          authError(status, rawCode, authorization !== undefined),
+          restCode,
         );
       }
-      if (status === 404) throw new WordPressError("NOT_A_WORDPRESS_SITE");
-      throw new WordPressError("BAD_RESPONSE");
+      if (status === 404) {
+        throw new WordPressError("NOT_A_WORDPRESS_SITE", restCode);
+      }
+      throw new WordPressError(
+        "BAD_RESPONSE",
+        status === 400 ? restCode : undefined,
+      );
     },
 
     async getJson(route, params) {
@@ -454,16 +343,21 @@ export function createWordPressClient(
         };
       }
       if (status === 404) return new WordPressNotFound();
+      const { rawCode, restCode } = parseError(bytes);
       if (status === 401 || status === 403) {
         throw new WordPressError(
-          authError(status, errorCode(bytes), authorization !== undefined),
+          authError(status, rawCode, authorization !== undefined),
+          restCode,
         );
       }
-      throw new WordPressError("BAD_RESPONSE");
+      throw new WordPressError(
+        "BAD_RESPONSE",
+        status === 400 ? restCode : undefined,
+      );
     },
 
     requestCount() {
-      return requestCount;
+      return transport.requestCount();
     },
   };
 }

@@ -55,21 +55,67 @@ const WORDPRESS_ERROR_STATUS: Record<WordPressErrorCode, number> = {
 };
 
 /**
+ * The WordPress REST error codes this package recognises. This is a closed
+ * enum: a response `code` outside it is never recorded, so an error never
+ * carries arbitrary response text. Tasks 4/5/7 read {@link WordPressError.restCode}
+ * to tell, for example, `rest_forbidden_status` (an unauthorised `status`
+ * filter) apart from a plain `rest_invalid_param`.
+ */
+export type WordPressRestCode =
+  | "rest_forbidden_status"
+  | "rest_invalid_param"
+  | "rest_cannot_view"
+  | "rest_forbidden"
+  | "rest_login_required"
+  | "incorrect_password"
+  | "invalid_username"
+  | "rest_not_logged_in"
+  | "rest_no_route"
+  | "rest_user_cannot_view";
+
+const WORDPRESS_REST_CODES: ReadonlySet<string> = new Set<WordPressRestCode>([
+  "rest_forbidden_status",
+  "rest_invalid_param",
+  "rest_cannot_view",
+  "rest_forbidden",
+  "rest_login_required",
+  "incorrect_password",
+  "invalid_username",
+  "rest_not_logged_in",
+  "rest_no_route",
+  "rest_user_cannot_view",
+]);
+
+/** The value as a {@link WordPressRestCode}, or `undefined` if it is not one. */
+export function asWordPressRestCode(
+  value: unknown,
+): WordPressRestCode | undefined {
+  return typeof value === "string" && WORDPRESS_REST_CODES.has(value)
+    ? (value as WordPressRestCode)
+    : undefined;
+}
+
+/**
  * Error thrown by this package's WordPress layer. `apps/backend` copies
  * `status`, `code` and `message` onto a `ConnectorError`. The message is one of
  * the fixed strings above: it never carries the site address, a credential, an
  * id or a response body, and no `cause` is ever set. The application password
- * in particular never reaches an error.
+ * in particular never reaches an error. `restCode`, when set, is a recognised
+ * {@link WordPressRestCode} (a plain enum value, never response text): the
+ * client records it for a 400/401/403/404 so later tasks can map a more precise
+ * outcome without re-reading the body.
  */
 export class WordPressError extends Error {
   readonly status: number;
   readonly code: WordPressErrorCode;
+  readonly restCode?: WordPressRestCode;
 
-  constructor(code: WordPressErrorCode) {
+  constructor(code: WordPressErrorCode, restCode?: WordPressRestCode) {
     super(WORDPRESS_ERROR_MESSAGES[code]);
     this.name = "WordPressError";
     this.status = WORDPRESS_ERROR_STATUS[code];
     this.code = code;
+    if (restCode !== undefined) this.restCode = restCode;
   }
 }
 

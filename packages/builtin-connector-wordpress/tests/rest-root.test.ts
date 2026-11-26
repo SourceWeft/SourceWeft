@@ -139,6 +139,28 @@ test("a Link rel with several space-separated types is matched", async () => {
   assert.deepEqual(root, { kind: "pretty", base: `${SITE}/wp-json` });
 });
 
+test("a commented-out <link> tag is ignored; the real one wins", async () => {
+  const fake = createFakeWordPress({ siteBase: SITE, discovery: "none" });
+  fake.failNext({
+    status: 200,
+    headers: { "content-type": "text/html" },
+    body:
+      "<html><head>" +
+      `<!-- <link rel="https://api.w.org/" href="https://evil.example/wp-json/"> -->` +
+      `<link rel="https://api.w.org/" href="${SITE}/wp-json/">` +
+      "</head></html>",
+  });
+  const root = await discoverRestRoot({
+    fetch: fake.fetch,
+    siteBase: SITE,
+    allowWpcom: false,
+    now: () => 0,
+    sleep: async () => undefined,
+  });
+  assert.deepEqual(root, { kind: "pretty", base: `${SITE}/wp-json` });
+  assert.ok(fake.requests.every((r) => r.host !== "evil.example"));
+});
+
 test("no api.w.org link anywhere is NOT_A_WORDPRESS_SITE", async () => {
   const { code } = await codeOf({ siteBase: SITE, discovery: "none" });
   assert.equal(code, "NOT_A_WORDPRESS_SITE");
@@ -282,13 +304,42 @@ test("routeUrl drops the /wp/v2 prefix for a hosted root", () => {
   );
 });
 
-test("routeUrl rejects a route outside /wp/v2", () => {
+test("routeUrl allows users/me for each root kind (login readiness)", () => {
+  const pretty: RestRoot = { kind: "pretty", base: `${SITE}/wp-json` };
+  assert.equal(
+    routeUrl(pretty, "/wp/v2/users/me", { context: "edit" }),
+    `${SITE}/wp-json/wp/v2/users/me?context=edit`,
+  );
+  const plain: RestRoot = { kind: "plain", index: `${SITE}/?rest_route=/` };
+  assert.equal(
+    routeUrl(plain, "/wp/v2/users/me"),
+    `${SITE}/?rest_route=/wp/v2/users/me`,
+  );
+  const wpcom: RestRoot = {
+    kind: "wpcom",
+    base: "https://public-api.wordpress.com/wp/v2/sites/site.example",
+    host: "site.example",
+  };
+  assert.equal(
+    routeUrl(wpcom, "/wp/v2/users/me"),
+    "https://public-api.wordpress.com/wp/v2/sites/site.example/users/me",
+  );
+});
+
+test("routeUrl rejects a route outside the allow-list", () => {
   const root: RestRoot = { kind: "pretty", base: `${SITE}/wp-json` };
   for (const route of [
     "/wp/v1/posts",
     "posts",
     "/wp/v2/",
     "/wp/v2/posts/../x",
+    "/wp/v2/users/mine",
+    "/wp/v2/users/ME",
+    "/wp/v2/users/me/2",
+    "/wp/v2/users/me/",
+    "/wp/v2/posts/me",
+    "/wp/v2/Users/me",
+    "/wp/v2/users/1/me",
   ]) {
     assert.throws(
       () => routeUrl(root, route),

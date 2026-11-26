@@ -619,7 +619,7 @@ export function createFakeWordPress(
   };
 }
 
-/** A small site with two categories, a tag, a user, and two published posts. */
+/** Two published posts (ids 1–2) and one published page (id 3). */
 export function samplePosts(): FakePost[] {
   return [
     {

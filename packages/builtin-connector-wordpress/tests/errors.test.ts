@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  asWordPressRestCode,
   isWordPressError,
   WordPressError,
   WORDPRESS_ERROR_MESSAGES,
@@ -63,4 +64,24 @@ test("isWordPressError narrows only WordPressError instances", () => {
   assert.ok(!isWordPressError(new Error("x")));
   assert.ok(!isWordPressError(null));
   assert.ok(!isWordPressError({ code: "BAD_RESPONSE", status: 502 }));
+});
+
+test("restCode is unset by default and carried when given", () => {
+  assert.equal(new WordPressError("BAD_RESPONSE").restCode, undefined);
+  const withCode = new WordPressError("BAD_RESPONSE", "rest_forbidden_status");
+  assert.equal(withCode.restCode, "rest_forbidden_status");
+  // The message is unchanged by the extra field.
+  assert.equal(withCode.message, WORDPRESS_ERROR_MESSAGES.BAD_RESPONSE);
+});
+
+test("asWordPressRestCode accepts only the closed union", () => {
+  assert.equal(
+    asWordPressRestCode("rest_forbidden_status"),
+    "rest_forbidden_status",
+  );
+  assert.equal(asWordPressRestCode("incorrect_password"), "incorrect_password");
+  assert.equal(asWordPressRestCode("rest_some_future_code"), undefined);
+  assert.equal(asWordPressRestCode(""), undefined);
+  assert.equal(asWordPressRestCode(null), undefined);
+  assert.equal(asWordPressRestCode(42), undefined);
 });
