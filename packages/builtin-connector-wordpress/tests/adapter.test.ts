@@ -325,6 +325,73 @@ test("a kind/prefix mismatch is rejected before any request", async () => {
   assert.equal(h.closed(), h.opened());
 });
 
+// ---- mid-run credential rejection is the reconnect condition --------------
+
+test("a password rejected during discover surfaces WORDPRESS_REAUTH_REQUIRED", async () => {
+  const h = harness({
+    flavor: "login",
+    fake: siteFake({ credential: CREDENTIAL }),
+  });
+  // The site rejects the password on the first REST read of the scan.
+  h.fake.failNext(
+    { status: 401, body: JSON.stringify({ code: "incorrect_password" }) },
+    1,
+    (r) =>
+      r.path.includes("/wp/v2/") ||
+      (r.query.rest_route ?? "").startsWith("/wp/v2/"),
+  );
+  let error: unknown;
+  try {
+    await collect(
+      h.adapter.discoverPages!(baseInput(wpConfig([]), credentialToken())),
+    );
+  } catch (caught) {
+    error = caught;
+  }
+  assert.ok(error instanceof WordPressAdapterError);
+  assert.equal(error.code, "WORDPRESS_REAUTH_REQUIRED");
+  assert.equal(error.statusCode, 422);
+  assert.ok(typeof error.message === "string" && error.message.length > 0);
+  assert.ok(!error.message.includes(CREDENTIAL.secret));
+  assert.ok(!error.message.includes("site.example"));
+  assert.equal(h.closed(), h.opened());
+});
+
+test("a password rejected during extract surfaces WORDPRESS_REAUTH_REQUIRED", async () => {
+  const h = harness({
+    flavor: "login",
+    fake: siteFake({ credential: CREDENTIAL }),
+  });
+  h.fake.failNext(
+    { status: 401, body: JSON.stringify({ code: "incorrect_password" }) },
+    1,
+    (r) =>
+      r.path.endsWith("/wp/v2/posts/1") ||
+      (r.query.rest_route ?? "") === "/wp/v2/posts/1",
+  );
+  await assert.rejects(
+    () =>
+      h.adapter.extract({
+        ...baseInput(wpConfig(sel("post:1")), credentialToken()),
+        item: {
+          externalId: "wordpress:post:1",
+          externalUri: null,
+          title: "Post 1",
+          mimeType: "text/markdown",
+          sizeBytes: null,
+          externalUpdatedAt: null,
+          contentHash: "h",
+          metadata: {},
+        },
+      }),
+    (error: unknown) =>
+      error instanceof WordPressAdapterError &&
+      error.code === "WORDPRESS_REAUTH_REQUIRED" &&
+      error.statusCode === 422,
+  );
+  assert.equal(h.closed(), h.opened());
+});
+
 // ---- config: the public flavor never asks for unpublished content ---------
 
 test("the public flavor never sends a status parameter", async () => {

@@ -318,13 +318,28 @@ const describeItem = (
   meta: {},
 });
 
+/** A tombstone for a requested id that does not resolve, so the web presenter
+ * can show a "removed" badge; `kind` is the id's own prefix, as Discourse does. */
+const tombstone = (
+  id: string,
+  kind: string,
+): ConnectorSelectionDescribeItem => ({
+  id,
+  kind,
+  name: null,
+  detail: null,
+  exists: false,
+  meta: {},
+});
+
 /**
- * `<id>.describe`: the kind-qualified ids that resolve to a title, in request
- * order. The two content types are fixed labels; a category is named from the
- * site's category list; a post or page is read by id (the login connector may
- * read unpublished ones). An id that does not resolve — an unknown category, a
- * post or page that is gone or that this connector may not read — is omitted
- * from the result rather than returned as a tombstone.
+ * `<id>.describe`: one item per requested kind-qualified id, in request order.
+ * The two content types are fixed labels; a category is named from the site's
+ * category list; a post or page is read by id (the login connector may read
+ * unpublished ones). An id that does not resolve — an unknown category, a post
+ * or page that is gone or that this connector may not read — comes back as a
+ * tombstone (`exists: false`, `name: null`) so the platform can mark the
+ * selection as removed, never dropped.
  */
 export async function describeSelection(
   context: SelectionContext,
@@ -348,7 +363,11 @@ export async function describeSelection(
     if (head === "category") {
       if (categories === null) categories = (await loadTree(client)).byId;
       const category = categories.get(Number(id.slice(separator + 1)));
-      if (category) items.push(describeItem(id, "category", category.name));
+      items.push(
+        category
+          ? describeItem(id, "category", category.name)
+          : tombstone(id, "category"),
+      );
       continue;
     }
     const route = head === "post" ? "posts" : "pages";
@@ -359,7 +378,9 @@ export async function describeSelection(
       post = await fetchSingleItem(client, route, number, includeUnpublished);
       posts.set(key, post);
     }
-    if (post) items.push(describeItem(id, head, titleOf(post)));
+    items.push(
+      post ? describeItem(id, head, titleOf(post)) : tombstone(id, head),
+    );
   }
   return { items };
 }

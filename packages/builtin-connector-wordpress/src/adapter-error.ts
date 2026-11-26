@@ -40,14 +40,35 @@ export function unsupportedActionError(): WordPressAdapterError {
   );
 }
 
+/** The reconnect condition, with the `_REAUTH_REQUIRED` suffix the sync
+ * orchestrator keys on. A fixed message: never the site address, a credential or
+ * anything a site sent. */
+const REAUTH_REQUIRED_MESSAGE =
+  "The WordPress application password was not accepted. Reconnect the connector.";
+
 /**
- * Crosses a WordPress-layer failure over the adapter boundary: a
- * {@link WordPressError} keeps its own fixed status and message and takes the
- * `WORDPRESS_` prefix on its code (no cause is carried); anything else (an item
- * skip, a programming error) is rethrown untouched. Always throws.
+ * Crosses a WordPress-layer failure over the adapter boundary (discover, extract
+ * and the selection actions — never readiness, which uses {@link readinessFailure}
+ * on the raw error): a {@link WordPressError} keeps its own fixed status and
+ * message and takes the `WORDPRESS_` prefix on its code (no cause is carried);
+ * anything else (an item skip, a programming error) is rethrown untouched.
+ *
+ * The one exception is `BAD_CREDENTIALS` (only the login flavor can produce it):
+ * a rejected Application Password is the reconnect condition, not a retryable
+ * failure, so it becomes a 422 `WORDPRESS_REAUTH_REQUIRED` whose `_REAUTH_REQUIRED`
+ * suffix the orchestrator recognises to mark the account for reconnect rather
+ * than retrying. The package-level `BAD_CREDENTIALS` code is unchanged, and
+ * readiness still surfaces it as the `reauth_required` reason. Always throws.
  */
 export function mapWordPressError(error: unknown): never {
   if (error instanceof WordPressError) {
+    if (error.code === "BAD_CREDENTIALS") {
+      throw new WordPressAdapterError(
+        422,
+        "WORDPRESS_REAUTH_REQUIRED",
+        REAUTH_REQUIRED_MESSAGE,
+      );
+    }
     throw new WordPressAdapterError(
       error.status,
       `WORDPRESS_${error.code}`,

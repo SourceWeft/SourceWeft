@@ -169,21 +169,47 @@ async function describeResult(
   return result as unknown as ConnectorSelectionDescribeResult;
 }
 
-test("describe maps known ids to titles and omits the unknown", async () => {
+test("describe maps known ids to titles and tombstones the unknown, in order", async () => {
   const result = await describeResult([
     "type:post",
     "category:10",
     "category:999",
     "post:1",
     "post:9999",
+    "page:9999",
   ]);
+  // One item per requested id, in request order; unknown ids are tombstones.
   assert.deepEqual(
-    result.items.map((i) => [i.id, i.kind, i.name]),
+    result.items.map((i) => [i.id, i.kind, i.name, i.exists]),
     [
-      ["type:post", "type", "All posts"],
-      ["category:10", "category", "News"],
-      ["post:1", "post", "Hello"],
+      ["type:post", "type", "All posts", true],
+      ["category:10", "category", "News", true],
+      ["category:999", "category", null, false],
+      ["post:1", "post", "Hello", true],
+      ["post:9999", "post", null, false],
+      ["page:9999", "page", null, false],
     ],
+  );
+  // The tombstone carries the exact ConnectorSelectionDescribeItem field set.
+  assert.deepEqual(result.items[2], {
+    id: "category:999",
+    kind: "category",
+    name: null,
+    detail: null,
+    exists: false,
+    meta: {},
+  });
+});
+
+test("describe keeps the 100-id bound", async () => {
+  const ids = Array.from({ length: 100 }, (_, i) => `post:${i + 1}`);
+  const result = await describeResult(ids);
+  assert.equal(result.items.length, 100);
+  await assert.rejects(
+    () => describeResult([...ids, "post:101"]),
+    (error: unknown) =>
+      error instanceof WordPressAdapterError &&
+      error.code === "WORDPRESS_INVALID_REQUEST",
   );
 });
 

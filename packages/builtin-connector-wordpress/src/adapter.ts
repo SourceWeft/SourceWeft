@@ -259,7 +259,7 @@ export function createWordPressAdapter(
         logger,
       });
     } catch (error) {
-      mapWordPressError(error);
+      throw mapWordPressError(error);
     } finally {
       await scope?.close();
     }
