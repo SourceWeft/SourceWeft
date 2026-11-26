@@ -5,6 +5,10 @@
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
 
+    <!-- The activity is locked to portrait. Declared as not required so the
+         lock does not narrow the devices the app can be installed on. -->
+    <uses-feature android:name="android.hardware.screen.portrait" android:required="false" />
+
     <application
         android:icon="@mipmap/ic_launcher"
         android:label="${applicationLabel}"
@@ -13,6 +17,7 @@
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
             android:launchMode="singleTask"
+            android:screenOrientation="portrait"
             android:label="${applicationLabel}"
             android:name=".MainActivity"
             android:exported="true">

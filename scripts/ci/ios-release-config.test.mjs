@@ -159,6 +159,31 @@ test("the first release targets iPhone only, in the project spec and the Xcode p
   assert.deepEqual(families, ["1", "1"]);
 });
 
+// The app has no landscape layout. Tauri keeps the tracked Info.plist's own
+// keys when it merges the layers, and the project spec regenerates that file,
+// so both must say portrait only, with no per-device variant widening it.
+test("the app supports portrait only, in the tracked Info.plist and the project spec", () => {
+  const info = read(trackedInfo);
+  assert.match(
+    info,
+    /<key>UISupportedInterfaceOrientations<\/key>\s*<array>\s*<string>UIInterfaceOrientationPortrait<\/string>\s*<\/array>/,
+  );
+  const spec = read(resolve(apple, "project.yml"));
+  assert.match(
+    spec,
+    /\n {8}UISupportedInterfaceOrientations:\n {10}- UIInterfaceOrientationPortrait\n {8}\w/,
+  );
+  for (const [name, text] of [
+    ["Info.plist", info],
+    ["project.yml", spec],
+    ["Info.ios.plist", read(resolve(tauri, "Info.ios.plist"))],
+    ["Info.ios.dev.plist", read(resolve(tauri, "Info.ios.dev.plist"))],
+  ]) {
+    assert.doesNotMatch(text, /UIInterfaceOrientationLandscape/, name);
+    assert.doesNotMatch(text, /UISupportedInterfaceOrientations~/, name);
+  }
+});
+
 test("Sign in with Apple is permitted to the page and entitled in the app", () => {
   for (const name of ["main.json", "production-web.json"])
     assert(

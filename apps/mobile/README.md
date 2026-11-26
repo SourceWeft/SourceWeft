@@ -98,6 +98,12 @@ The first release targets iPhone only (`TARGETED_DEVICE_FAMILY` is `1` in
 `project.yml` and the Xcode project). iPad support can be added later, but a
 released app cannot drop a device family.
 
+The app is portrait only on both platforms; it has no landscape layout. On iOS
+`UISupportedInterfaceOrientations` lists portrait alone in `project.yml` and the
+tracked `Info.plist`. On Android the activity in `AndroidManifest.xml` sets
+`android:screenOrientation="portrait"`, and the portrait feature is declared as
+not required so the lock does not narrow the devices the app installs on.
+
 ### Info.plist layers
 
 Tauri rewrites `gen/apple/sourceweft-mobile_iOS/Info.plist` on every iOS build

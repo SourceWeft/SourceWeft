@@ -81,6 +81,27 @@ test("repository mobile versions and explicit Android versionCode are consistent
   assert(config.versionCode > 0);
 });
 
+// The app has no landscape layout. Declaring the portrait feature as not
+// required keeps the lock from narrowing the devices that can install the app.
+test("the Android activity is locked to portrait without requiring the portrait feature", () => {
+  const manifest = readFileSync(
+    fileURLToPath(
+      new URL(
+        "../../apps/mobile/src-tauri/gen/android/app/src/main/AndroidManifest.xml",
+        import.meta.url,
+      ),
+    ),
+    "utf8",
+  );
+  const activities = manifest.match(/<activity\b[^>]*>/g);
+  assert.equal(activities.length, 1);
+  assert.match(activities[0], /android:screenOrientation="portrait"/);
+  assert.match(
+    manifest,
+    /<uses-feature android:name="android\.hardware\.screen\.portrait" android:required="false" \/>/,
+  );
+});
+
 test("build replaces template launcher icons without replacing app themes", (t) => {
   const root = mkdtempSync(join(tmpdir(), "sourceweft-android-icons-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
