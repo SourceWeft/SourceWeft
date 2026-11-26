@@ -55,7 +55,14 @@ import type {
   ForumCheckResult,
   GenericCredentialAddInput,
   GenericCredentialCheckInput,
+  SiteAddInput,
+  SiteCheckInput,
+  SiteCheckResult,
 } from "./types";
+import {
+  WORDPRESS_CONNECTOR_TYPE,
+  WORDPRESS_LOGIN_CONNECTOR_TYPE,
+} from "./wordpress-site-url";
 
 /** A catalog type whose add flow collects a stored credential: a username and
  * app password (WebDAV) or a library ID and API key (Zotero). Both the add
@@ -1616,6 +1623,96 @@ export function useConnectors(input: {
     ],
   );
 
+  // Pre-create readiness check for a WordPress site. The access choice decides
+  // the connector type and whether the Application Password travels with the
+  // request; the secret is only in the request body, never cached here. An
+  // empty selection is ready (it means every published post and page), so a
+  // reachable site answers `ready: true`.
+  const handleCheckSite = useCallback(
+    async (input: SiteCheckInput): Promise<SiteCheckResult> => {
+      if (!workspaceId) {
+        toast.error(t("toasts.connectors.noWorkspace"));
+        return { ready: false, reason: "no_workspace", message: "" };
+      }
+      const result = await connectorsClient.checkConfig(
+        workspaceId,
+        input.access === "login"
+          ? {
+              connectorType: WORDPRESS_LOGIN_CONNECTOR_TYPE,
+              configJson: {
+                siteUrl: input.siteUrl,
+                items: [],
+                includeUnpublished: input.includeUnpublished,
+              },
+              credential: {
+                username: input.credential.username,
+                secret: input.credential.secret,
+              },
+            }
+          : {
+              connectorType: WORDPRESS_CONNECTOR_TYPE,
+              configJson: { siteUrl: input.siteUrl, items: [] },
+            },
+      );
+      return {
+        ready: result.ready,
+        reason: result.reason ?? "",
+        message: result.message ?? "",
+      };
+    },
+    [workspaceId, t],
+  );
+
+  // Create a WordPress connector. The public choice creates `wordpress` with no
+  // credential; the login choice creates `wordpress_login` with the Application
+  // Password and the drafts/private flag. An empty selection means every
+  // published post and page, so the connector is ready and a first sync starts;
+  // the member can narrow the selection from its settings afterwards. Rejects on
+  // any create failure so the dialog stays open and shows the reason.
+  const handleAddSite = useCallback(
+    async (input: SiteAddInput) => {
+      if (!workspaceId) {
+        const message = t("toasts.connectors.noWorkspace");
+        toast.error(message);
+        throw new Error(message);
+      }
+      const connectorType =
+        input.access === "login"
+          ? WORDPRESS_LOGIN_CONNECTOR_TYPE
+          : WORDPRESS_CONNECTOR_TYPE;
+      const created = await connectorsClient.create(workspaceId, {
+        connectorType,
+        name: input.name,
+        ...(input.access === "login"
+          ? {
+              configJson: {
+                siteUrl: input.siteUrl,
+                items: [],
+                includeUnpublished: input.includeUnpublished,
+              },
+              credential: {
+                username: input.credential.username,
+                secret: input.credential.secret,
+              },
+            }
+          : { configJson: { siteUrl: input.siteUrl, items: [] } }),
+        periodicIndexingEnabled: input.periodicIndexingEnabled,
+        indexingFrequencyMinutes: 360,
+      });
+      trackConnectorConnected({ connectorType });
+      await refreshConnectors();
+      toast.success(
+        t("toasts.connectors.connectedFallback", {
+          name: created.connector.name,
+        }),
+      );
+      await handleSyncConnector(
+        mapConnectorToUi(created.connector, t, displayLocale),
+      );
+    },
+    [displayLocale, handleSyncConnector, refreshConnectors, workspaceId, t],
+  );
+
   // Pre-create readiness check for a credential connector. A WebDAV input runs
   // the adapter's check against the whole-endpoint root; a generic input (the
   // Zotero dialog) brings its own connector type, config and credential. It
@@ -1992,6 +2089,8 @@ export function useConnectors(input: {
     handleAddFeed,
     handleCheckForum,
     handleAddForum,
+    handleCheckSite,
+    handleAddSite,
     handleCheckCredential,
     handleAddCredential,
     rotateCredentialConnector,

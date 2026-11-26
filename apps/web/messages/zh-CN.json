@@ -3490,7 +3490,8 @@
         "availableAddFeed": "添加公开 RSS 或 Atom 订阅源的网址。",
         "availableLoginFlow": "在浏览器中登录 {name} 以进行连接。",
         "availableAddApiKey": "使用只读 API 密钥添加 Zotero 文库。",
-        "availableAddForum": "使用网址添加公开的 Discourse 论坛。"
+        "availableAddForum": "使用网址添加公开的 Discourse 论坛。",
+        "availableAddSite": "使用网址添加 WordPress 站点。"
       },
       "syncBlock": {
         "pagesLimit": "页数额度已用完。上次同步索引了 {count} 条内容后暂停，额度恢复后会自动继续同步。",
@@ -3700,6 +3701,58 @@
           "blocked_endpoint": "无法使用此网址：此部署可能不允许连接该网址，或者该论坛会重定向到另一个网址。请输入论坛自己的首页网址（即它重定向到的网址）。",
           "rate_limited": "论坛当前正在限制请求。请稍等片刻后重试。",
           "config_invalid": "论坛网址或更新方式无效。"
+        }
+      },
+      "wordpress": {
+        "siteUrlLabel": "站点网址",
+        "siteUrlHint": "WordPress 站点首页的网址，例如 https://blog.example.com。如果站点会重新导向，请填写它实际使用的网址（带或不带 www）。",
+        "wordpressComNote": "WordPress.com 托管的站点仅支持公开方式。",
+        "accessLabel": "访问方式",
+        "accessPublic": "公开站点",
+        "accessPublicHint": "索引任何人都能阅读的已发布文章和页面。适用于自托管站点和 WordPress.com 站点。",
+        "accessLogin": "使用应用程序密码登录",
+        "accessLoginHint": "适用于自托管站点。除非在下方包含草稿和私密文章，否则仅读取已发布内容。",
+        "usernameLabel": "用户名",
+        "passwordLabel": "应用程序密码",
+        "appPasswordHint": "在 WordPress 个人资料页面创建应用程序密码（用户，然后个人资料，然后应用程序密码）。它可随时撤销，且与登录密码不同。",
+        "includeUnpublishedLabel": "包含草稿和私密文章",
+        "includeUnpublishedWarning": "工作区的每位成员都将看到草稿和私密文章，即使成员在该站点没有账户。",
+        "nameLabel": "名称（可选）",
+        "dialog": {
+          "title": "连接 WordPress 站点",
+          "description": "输入 WordPress 站点网址并选择读取方式。SourceWeft 会先检查站点，然后你再选择要索引的文章和页面。",
+          "check": "检查站点",
+          "checking": "检查中…",
+          "reachable": "站点可访问",
+          "reachableHint": "接下来添加该连接器。你可以在其设置中缩小索引范围。",
+          "add": "添加站点",
+          "autoSync": "自动同步",
+          "autoSyncHint": "定期检查新增和变更的文章。默认关闭；你随时可以手动同步。",
+          "invalidUrl": "请输入以 https:// 开头的站点网址，不能带用户名、端口号、查询字符串或 # 片段，也不能是 IP 地址或 localhost；主机名含非英文字符时，请使用 ASCII（punycode）形式。",
+          "invalidUsername": "请输入不含冒号的用户名。",
+          "passwordRequired": "请输入应用程序密码。",
+          "checkFailed": "无法检查该站点。请重试。",
+          "nameConflict": "此工作区中已存在同名连接器。请更改名称，或使用现有连接器。",
+          "accountConflict": "此工作区中已存在针对该站点和用户名的连接器。",
+          "credentialNotAllowed": "此部署不允许使用此站点网址。",
+          "addFailed": "添加站点失败。"
+        },
+        "rotate": {
+          "title": "重新连接 WordPress",
+          "description": "输入 {name} 的用户名和新的应用程序密码。新凭据将替换已存储的凭据。",
+          "save": "重新连接",
+          "failed": "无法更新凭据。请重试。"
+        },
+        "readiness": {
+          "config_invalid": "站点网址无效。",
+          "unreachable": "无法访问该站点。请稍等片刻后重试。",
+          "not_a_wordpress_site": "此网址不是 WordPress 站点。请使用该站点首页的网址。",
+          "rest_disabled": "此站点的 REST API 已关闭，因此无法读取其文章。请重新开启 WordPress REST API，或移除屏蔽它的插件。",
+          "login_required": "此站点需要登录才能读取内容。请改为选择“使用应用程序密码登录”。",
+          "reauth_required": "站点拒绝了该用户名或应用程序密码。请检查后重试。",
+          "insufficient_permission": "此账户无法读取草稿和私密文章。请使用具有相应权限的账户，或关闭“包含草稿和私密文章”。",
+          "blocked_endpoint": "无法使用此网址：此部署可能不允许连接该网址，或该站点会重新导向到其他网址。请填写站点自身使用的网址（带或不带 www）。",
+          "rate_limited": "该站点当前正在限制请求。请稍等片刻后重试。"
         }
       },
       "gmail": {
@@ -3953,6 +4006,40 @@
             "browser": {
               "description": "打开分类查看其子分类和主题，然后勾选要索引的内容。",
               "root": "论坛",
+              "emptyContainer": "这里还没有内容。"
+            }
+          },
+          "wordpress": {
+            "itemsTitle": "文章和页面",
+            "itemsDescription": "选择要索引的内容类型、分类、文章或页面。分类会包含其子分类及其文章。开启自动同步后，所选内容会按连接器的同步计划保持同步。",
+            "choose": "选择要索引的内容",
+            "empty": "未选择任何内容，因此会索引所有已发布的文章和页面。选择内容类型、分类、文章或页面可仅索引这些内容。",
+            "kinds": {
+              "type": "内容类型",
+              "category": "分类",
+              "post": "文章",
+              "page": "页面"
+            },
+            "browser": {
+              "description": "打开内容类型或分类查看其条目，然后勾选要索引的内容。",
+              "root": "站点",
+              "emptyContainer": "这里还没有内容。"
+            }
+          },
+          "wordpress_login": {
+            "itemsTitle": "文章和页面",
+            "itemsDescription": "选择要索引的内容类型、分类、文章或页面。分类会包含其子分类及其文章。开启自动同步后，所选内容会按连接器的同步计划保持同步。",
+            "choose": "选择要索引的内容",
+            "empty": "未选择任何内容，因此会索引所有已发布的文章和页面。选择内容类型、分类、文章或页面可仅索引这些内容。",
+            "kinds": {
+              "type": "内容类型",
+              "category": "分类",
+              "post": "文章",
+              "page": "页面"
+            },
+            "browser": {
+              "description": "打开内容类型或分类查看其条目，然后勾选要索引的内容。",
+              "root": "站点",
               "emptyContainer": "这里还没有内容。"
             }
           }

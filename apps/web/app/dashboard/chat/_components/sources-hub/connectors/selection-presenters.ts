@@ -11,6 +11,7 @@
 import {
   Building2,
   File,
+  FileStack,
   FileText,
   Folder,
   FolderGit2,
@@ -58,6 +59,34 @@ export type SelectionPresenter = {
  * the full externalId looks like `file:id:abc`). Keep in sync with the
  * `file:` prefix in packages/builtin-connector-dropbox/src/adapter.ts. */
 const DROPBOX_FILE_EXTERNAL_PREFIX = "file:";
+
+/**
+ * Both WordPress connectors index their posts and pages. A selected post or
+ * page is its own source: its externalId is `wordpress:<post|page>:<id>` — the
+ * item id is already the kind-qualified `post:<id>` / `page:<id>`, so prefixing
+ * `wordpress:` yields the externalId the adapter emits. A content type (`type:
+ * post` / `type:page`) and a category (`category:<id>`) are containers: the
+ * items inside them are sources of their own, with no per-container count. Keep
+ * the `wordpress:` prefix in sync with packages/builtin-connector-wordpress.
+ */
+const WORDPRESS_PRESENTER: SelectionPresenter = {
+  kindIcons: {
+    type: FileStack,
+    category: FolderTree,
+    post: FileText,
+    page: File,
+  },
+  indexing: {
+    externalIdFor(item) {
+      return item.kind === "post" || item.kind === "page"
+        ? `wordpress:${item.id}`
+        : null;
+    },
+    containerIndexedCount() {
+      return null;
+    },
+  },
+};
 
 export const selectionPresenters: Record<string, SelectionPresenter> = {
   dropbox: {
@@ -151,13 +180,19 @@ export const selectionPresenters: Record<string, SelectionPresenter> = {
       },
     },
   },
+  wordpress: WORDPRESS_PRESENTER,
+  // The Application Password connector browses and indexes the same way; both
+  // emit `wordpress:<post|page>:<id>` sources, so they share one presenter.
+  wordpress_login: WORDPRESS_PRESENTER,
 };
 
 const FALLBACK_PRESENTER: SelectionPresenter = { kindIcons: {} };
 
 /** The presenter for a connector type, or a generic fallback (R7) when the
  * type has no entry: no icons and no indexing. */
-export function selectionPresenterFor(connectorType: string): SelectionPresenter {
+export function selectionPresenterFor(
+  connectorType: string,
+): SelectionPresenter {
   return selectionPresenters[connectorType] ?? FALLBACK_PRESENTER;
 }
 

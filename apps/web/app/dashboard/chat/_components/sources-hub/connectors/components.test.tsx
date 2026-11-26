@@ -45,6 +45,7 @@ async function card(input: {
   const handlers = {
     onAddApiKey: vi.fn(),
     onAddForum: vi.fn(),
+    onAddSite: vi.fn(),
     onAddCredential: vi.fn(),
     onAddLoginFlow: vi.fn(),
     onAddFeed: vi.fn(),
@@ -174,6 +175,7 @@ test("an add-only RSS card offers Add feed and never starts OAuth", async () => 
   const handlers = {
     onAddApiKey: vi.fn(),
     onAddForum: vi.fn(),
+    onAddSite: vi.fn(),
     onAddCredential: vi.fn(),
     onAddLoginFlow: vi.fn(),
     onCancelConnector: vi.fn(),
@@ -211,6 +213,7 @@ test("an add-only WebDAV card offers Connect and calls onAddCredential, never OA
   const handlers = {
     onAddApiKey: vi.fn(),
     onAddForum: vi.fn(),
+    onAddSite: vi.fn(),
     onAddFeed: vi.fn(),
     onAddLoginFlow: vi.fn(),
     onCancelConnector: vi.fn(),
@@ -248,6 +251,7 @@ test("an add-only Nextcloud card offers Connect and calls onAddLoginFlow, never 
   const handlers = {
     onAddApiKey: vi.fn(),
     onAddForum: vi.fn(),
+    onAddSite: vi.fn(),
     onAddCredential: vi.fn(),
     onAddFeed: vi.fn(),
     onCancelConnector: vi.fn(),
@@ -287,6 +291,7 @@ test("an add-only Zotero card offers Connect and calls onAddApiKey, never OAuth"
     onAddCredential: vi.fn(),
     onAddFeed: vi.fn(),
     onAddForum: vi.fn(),
+    onAddSite: vi.fn(),
     onAddLoginFlow: vi.fn(),
     onCancelConnector: vi.fn(),
     onConfigure: vi.fn(),
@@ -327,6 +332,7 @@ test("an add-only Discourse card offers Connect and calls onAddForum, never OAut
     onAddCredential: vi.fn(),
     onAddFeed: vi.fn(),
     onAddLoginFlow: vi.fn(),
+    onAddSite: vi.fn(),
     onCancelConnector: vi.fn(),
     onConfigure: vi.fn(),
     onConnectConnector: vi.fn(),
@@ -359,6 +365,48 @@ test("an add-only Discourse card offers Connect and calls onAddForum, never OAut
   expect(handlers.onReconnectConnector).not.toHaveBeenCalled();
 });
 
+test("an add-only WordPress card offers Connect and calls onAddSite, never OAuth", async () => {
+  const wordpress = connectorCatalog.find((entry) => entry.id === "wordpress")!;
+  const onAddSite = vi.fn();
+  const handlers = {
+    onAddApiKey: vi.fn(),
+    onAddCredential: vi.fn(),
+    onAddFeed: vi.fn(),
+    onAddForum: vi.fn(),
+    onAddLoginFlow: vi.fn(),
+    onCancelConnector: vi.fn(),
+    onConfigure: vi.fn(),
+    onConnectConnector: vi.fn(),
+    onCreateConnector: vi.fn(),
+    onDisconnect: vi.fn(),
+    onReconnectConnector: vi.fn(),
+  };
+  const mounted = await mountWithIntl(
+    createElement(ConnectorCatalogCard, {
+      item: wordpress,
+      connector: null,
+      status: { kind: "available", label: "Available", detail: "Ready" },
+      onAddSite,
+      ...handlers,
+    }),
+  );
+  const buttons = Array.from(mounted.container.querySelectorAll("button"));
+  const action = buttons[buttons.length - 1]!;
+
+  expect(action.textContent).toBe("Connect");
+  await act(async () => action.click());
+
+  expect(onAddSite).toHaveBeenCalledWith(wordpress);
+  expect(handlers.onAddApiKey).not.toHaveBeenCalled();
+  expect(handlers.onAddCredential).not.toHaveBeenCalled();
+  expect(handlers.onAddFeed).not.toHaveBeenCalled();
+  expect(handlers.onAddForum).not.toHaveBeenCalled();
+  expect(handlers.onAddLoginFlow).not.toHaveBeenCalled();
+  expect(handlers.onConnectConnector).not.toHaveBeenCalled();
+  expect(handlers.onCreateConnector).not.toHaveBeenCalled();
+  expect(handlers.onReconnectConnector).not.toHaveBeenCalled();
+});
+
 describe("connector-scoped readiness summary", () => {
   // A real translator, so `t.has` answers for keys that exist or do not.
   const t = createTranslator({
@@ -378,6 +426,23 @@ describe("connector-scoped readiness summary", () => {
           "discourse",
         ),
       ).toBe(text);
+    },
+  );
+
+  const wordpressCopy = en.dashboardSourcesHub.connectors.wordpress.readiness;
+
+  test.each(Object.entries(wordpressCopy))(
+    "a WordPress %s reason uses the WordPress copy for both connector types",
+    (reason, text) => {
+      for (const type of ["wordpress", "wordpress_login"]) {
+        expect(
+          formatConnectorReadinessSummary(
+            { reason, message: "server message" },
+            t,
+            type,
+          ),
+        ).toBe(text);
+      }
     },
   );
 

@@ -41,6 +41,7 @@ function baseProps(
     onCheckCredential: vi.fn(),
     onCheckFeed: vi.fn(),
     onCheckForum: vi.fn(),
+    onCheckSite: vi.fn(),
     onConnectConnector: vi.fn(),
     onCopyWebhook: vi.fn(),
     onCreateConnector: vi.fn(),
@@ -50,6 +51,7 @@ function baseProps(
     onSubmitCredential: vi.fn(),
     onSubmitFeed: vi.fn(),
     onSubmitForum: vi.fn(),
+    onSubmitSite: vi.fn(),
     onSyncConnector: vi.fn(),
     onToggleConnectorStatus: vi.fn(),
   };
@@ -79,8 +81,8 @@ function baseProps(
  * container). */
 function gmailCard() {
   const articles = Array.from(document.querySelectorAll("article"));
-  const article = articles.find((node) =>
-    node.querySelector("h4")?.textContent?.trim() === "Gmail",
+  const article = articles.find(
+    (node) => node.querySelector("h4")?.textContent?.trim() === "Gmail",
   );
   if (!article) throw new Error("Gmail catalog card not found");
   return article;
@@ -104,9 +106,9 @@ test("today's indexable Gmail manifest still opens the mode-choice dialog", asyn
 
   await click(buttonWithText(gmailCard(), "Connect"));
 
-  expect(
-    document.body.textContent?.includes("Choose how to use Gmail"),
-  ).toBe(true);
+  expect(document.body.textContent?.includes("Choose how to use Gmail")).toBe(
+    true,
+  );
   expect(
     document.body.textContent?.includes("Connect Gmail through Composio"),
   ).toBe(false);
@@ -126,9 +128,9 @@ test("a tools-only, Composio-brokered Gmail manifest shows the broker notice ins
   expect(
     document.body.textContent?.includes("Connect Gmail through Composio"),
   ).toBe(true);
-  expect(
-    document.body.textContent?.includes("Choose how to use Gmail"),
-  ).toBe(false);
+  expect(document.body.textContent?.includes("Choose how to use Gmail")).toBe(
+    false,
+  );
   expect(handlers.onConnectConnector).not.toHaveBeenCalled();
 
   await click(buttonWithText(document.body, "Continue to Google"));
@@ -175,9 +177,9 @@ test("a tools-only Gmail manifest with no broker connects directly, with no dial
   expect(
     document.body.textContent?.includes("Connect Gmail through Composio"),
   ).toBe(false);
-  expect(
-    document.body.textContent?.includes("Choose how to use Gmail"),
-  ).toBe(false);
+  expect(document.body.textContent?.includes("Choose how to use Gmail")).toBe(
+    false,
+  );
 });
 
 test("a tools-only Gmail manifest drops the 'Optional indexing' chip, keeping the others", async () => {
@@ -276,7 +278,8 @@ test("the RSS card opens the add-feed dialog and the dialog's callbacks reach th
 
   const dialog = document.querySelector('[role="dialog"][data-state="open"]');
   const addButtons = Array.from(document.querySelectorAll("button")).filter(
-    (node) => node.textContent?.trim() === "Add feed" && !rssCard.contains(node),
+    (node) =>
+      node.textContent?.trim() === "Add feed" && !rssCard.contains(node),
   );
   expect(dialog).not.toBeNull();
   await click(addButtons[addButtons.length - 1]!);
@@ -288,6 +291,54 @@ test("the RSS card opens the add-feed dialog and the dialog's callbacks reach th
   });
   expect(handlers.onConnectConnector).not.toHaveBeenCalled();
   expect(document.querySelector('input[name="feedUrl"]')).toBeNull();
+});
+
+test("one WordPress card opens the site dialog and the public path reaches the hook", async () => {
+  const { props, handlers } = baseProps({
+    availableConnectorTypes: ["wordpress", "wordpress_login"],
+  });
+  handlers.onCheckSite.mockResolvedValue({
+    ready: true,
+    reason: "",
+    message: "",
+  });
+  handlers.onSubmitSite.mockResolvedValue(undefined);
+  await mountWithIntl(createElement(ManageConnectorsDialog, props));
+  const cards = Array.from(document.querySelectorAll("article")).filter(
+    (node) => node.querySelector("h4")?.textContent?.trim() === "WordPress",
+  );
+  // The login type never adds a second card.
+  expect(cards).toHaveLength(1);
+
+  expect(document.querySelector('input[name="wordpressSiteUrl"]')).toBeNull();
+  await click(buttonWithText(cards[0]!, "Connect"));
+
+  const urlField = document.querySelector<HTMLInputElement>(
+    'input[name="wordpressSiteUrl"]',
+  )!;
+  expect(urlField).not.toBeNull();
+  typeInto(urlField, "https://blog.example.com");
+  await flush(3);
+  await click(buttonWithText(document.body, "Check site"));
+  await flush(5);
+  expect(handlers.onCheckSite).toHaveBeenCalledWith({
+    access: "public",
+    siteUrl: "https://blog.example.com",
+    includeUnpublished: false,
+  });
+
+  await click(buttonWithText(document.body, "Add site"));
+  await flush(5);
+
+  expect(handlers.onSubmitSite).toHaveBeenCalledWith({
+    access: "public",
+    siteUrl: "https://blog.example.com",
+    includeUnpublished: false,
+    name: "WordPress",
+    periodicIndexingEnabled: false,
+  });
+  expect(handlers.onConnectConnector).not.toHaveBeenCalled();
+  expect(document.querySelector('input[name="wordpressSiteUrl"]')).toBeNull();
 });
 
 test("the Discourse card opens the forum dialog and its callbacks reach the hook", async () => {

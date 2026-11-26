@@ -3490,7 +3490,8 @@
         "availableAddFeed": "Add the URL of a public RSS or Atom feed.",
         "availableLoginFlow": "Sign in to {name} in your browser to connect.",
         "availableAddApiKey": "Add a Zotero library with a read-only API key.",
-        "availableAddForum": "Add a public Discourse forum by its address."
+        "availableAddForum": "Add a public Discourse forum by its address.",
+        "availableAddSite": "Add a WordPress site by its address."
       },
       "syncBlock": {
         "pagesLimit": "Ingestion pages are used up. The last run indexed {count} items before pausing; syncing resumes automatically when pages are available.",
@@ -3700,6 +3701,58 @@
           "blocked_endpoint": "This address can't be used: this deployment may not allow connections to it, or the forum redirects to a different address. Enter the forum's own home-page address (the address it redirects to).",
           "rate_limited": "The forum is limiting requests right now. Wait a moment and try again.",
           "config_invalid": "The forum address or refresh mode is not valid."
+        }
+      },
+      "wordpress": {
+        "siteUrlLabel": "Site address",
+        "siteUrlHint": "The address of the WordPress site's home page, for example https://blog.example.com. If the site redirects, enter the address it actually uses (with or without www).",
+        "wordpressComNote": "WordPress.com hosted sites are supported with the public option only.",
+        "accessLabel": "Access",
+        "accessPublic": "Public site",
+        "accessPublicHint": "Index the published posts and pages anyone can read. Works for self-hosted and WordPress.com sites.",
+        "accessLogin": "Sign in with an Application Password",
+        "accessLoginHint": "For self-hosted sites. Reads only published content unless you include drafts and private posts below.",
+        "usernameLabel": "Username",
+        "passwordLabel": "Application password",
+        "appPasswordHint": "Create an Application Password in your WordPress profile screen (Users, then Profile, then Application Passwords). It can be revoked at any time, and is different from your login password.",
+        "includeUnpublishedLabel": "Include drafts and private posts",
+        "includeUnpublishedWarning": "Every workspace member will see drafts and private posts, even members who have no account on the site.",
+        "nameLabel": "Name (optional)",
+        "dialog": {
+          "title": "Connect a WordPress site",
+          "description": "Enter a WordPress site address and choose how to read it. SourceWeft checks the site first, then you choose the posts and pages to index.",
+          "check": "Check site",
+          "checking": "Checking...",
+          "reachable": "Site reachable",
+          "reachableHint": "Next, add the connector. You can narrow what it indexes in its settings.",
+          "add": "Add site",
+          "autoSync": "Sync automatically",
+          "autoSyncHint": "Check for new and changed posts on a schedule. Off by default; you can sync manually anytime.",
+          "invalidUrl": "Enter the site's address starting with https://, without a username, port, query or #fragment. IP addresses and localhost are not allowed. A host name with non-ASCII characters must be written in its ASCII (punycode) form.",
+          "invalidUsername": "Enter a username without a colon.",
+          "passwordRequired": "Enter the Application Password.",
+          "checkFailed": "Could not check the site. Try again.",
+          "nameConflict": "A connector with this name already exists in this workspace. Change the name, or use the existing one.",
+          "accountConflict": "A connector for this site and username already exists in this workspace.",
+          "credentialNotAllowed": "This site address is not allowed by this deployment.",
+          "addFailed": "Failed to add the site."
+        },
+        "rotate": {
+          "title": "Reconnect WordPress",
+          "description": "Enter the username and a new Application Password for {name}. The new credentials replace the stored ones.",
+          "save": "Reconnect",
+          "failed": "Could not update the credentials. Try again."
+        },
+        "readiness": {
+          "config_invalid": "The site address is not valid.",
+          "unreachable": "The site could not be reached. Try again in a moment.",
+          "not_a_wordpress_site": "This address is not a WordPress site. Use the address of the site's home page.",
+          "rest_disabled": "This site's REST API is turned off, so its posts can't be read. Turn the WordPress REST API back on, or remove the plugin that blocks it.",
+          "login_required": "This site needs a login to read its content. Choose \"Sign in with an Application Password\" instead.",
+          "reauth_required": "The site rejected the username or Application Password. Check them and try again.",
+          "insufficient_permission": "This account cannot read drafts and private posts. Use an account with those permissions, or turn off \"Include drafts and private posts\".",
+          "blocked_endpoint": "This address can't be used: this deployment may not allow connections to it, or the site redirects to a different address. Enter the address the site itself uses (with or without www).",
+          "rate_limited": "The site is limiting requests right now. Wait a moment and try again."
         }
       },
       "gmail": {
@@ -3953,6 +4006,40 @@
             "browser": {
               "description": "Open a category to see its subcategories and topics, then tick what to index.",
               "root": "Forum",
+              "emptyContainer": "Nothing here yet."
+            }
+          },
+          "wordpress": {
+            "itemsTitle": "Posts and pages",
+            "itemsDescription": "Choose the content types, categories, posts or pages to index. A category includes its subcategories and their posts. Everything selected is kept in sync on the connector's schedule when automatic sync is on.",
+            "choose": "Choose content to index",
+            "empty": "Nothing chosen, so all published posts and pages are indexed. Choose content types, categories, posts or pages to index only those.",
+            "kinds": {
+              "type": "Content types",
+              "category": "Categories",
+              "post": "Posts",
+              "page": "Pages"
+            },
+            "browser": {
+              "description": "Open a content type or category to see its items, then tick what to index.",
+              "root": "Site",
+              "emptyContainer": "Nothing here yet."
+            }
+          },
+          "wordpress_login": {
+            "itemsTitle": "Posts and pages",
+            "itemsDescription": "Choose the content types, categories, posts or pages to index. A category includes its subcategories and their posts. Everything selected is kept in sync on the connector's schedule when automatic sync is on.",
+            "choose": "Choose content to index",
+            "empty": "Nothing chosen, so all published posts and pages are indexed. Choose content types, categories, posts or pages to index only those.",
+            "kinds": {
+              "type": "Content types",
+              "category": "Categories",
+              "post": "Posts",
+              "page": "Pages"
+            },
+            "browser": {
+              "description": "Open a content type or category to see its items, then tick what to index.",
+              "root": "Site",
               "emptyContainer": "Nothing here yet."
             }
           }

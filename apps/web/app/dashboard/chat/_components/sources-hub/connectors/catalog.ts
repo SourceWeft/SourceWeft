@@ -9,6 +9,7 @@ import {
   ListChecks,
   Mail,
   MessagesSquare,
+  Newspaper,
   Rss,
   Server,
   SquareKanban,
@@ -226,17 +227,58 @@ export const connectorCatalog: ConnectorCatalogItem[] = [
     supportsWebhook: false,
     addMode: "forum_url",
   },
+  {
+    id: "wordpress",
+    name: "WordPress",
+    category: "Knowledge & Docs",
+    description:
+      "Index the posts and pages of a WordPress site, by content type, category or single item, and keep them in sync.",
+    capabilities: ["Posts and pages", "Categories", "Scheduled sync"],
+    requiresBackendRegistration: true,
+    // A generic Lucide newspaper mark, per the icon rules: no WordPress
+    // artwork is shipped.
+    icon: Newspaper,
+    isIndexable: true,
+    supportsActions: false,
+    supportsPeriodicSync: true,
+    supportsWebhook: false,
+    addMode: "site_url",
+  },
+  {
+    // The Application Password connector has no picker card of its own: the one
+    // `wordpress` card creates it when the member chooses the login option.
+    // This hidden entry only resolves the name, icon, readiness copy and
+    // rotate (reconnect) dialog for existing `wordpress_login` rows. `credential`
+    // addMode routes reconnect to the rotate dialog; it never shows an add card.
+    id: "wordpress_login",
+    name: "WordPress",
+    category: "Knowledge & Docs",
+    description:
+      "Index the posts and pages of a WordPress site with an Application Password, including drafts and private posts when chosen.",
+    capabilities: ["Posts and pages", "Categories", "Scheduled sync"],
+    requiresBackendRegistration: true,
+    hiddenInPicker: true,
+    icon: Newspaper,
+    isIndexable: true,
+    supportsActions: false,
+    supportsPeriodicSync: true,
+    supportsWebhook: false,
+    addMode: "credential",
+  },
 ];
 
 // Some connectors ship behind a backend rollout gate; hide each until the API
-// registers its type as available.
+// registers its type as available. A `hiddenInPicker` entry is never a picker
+// card (it exists only to resolve rows of a product's second backend type, e.g.
+// `wordpress_login`), so it is filtered out whether or not it is registered.
 export function connectorCatalogForAvailableTypes(
   availableConnectorTypes: readonly string[],
 ): ConnectorCatalogItem[] {
   return connectorCatalog.filter(
     (item) =>
-      !item.requiresBackendRegistration ||
-      availableConnectorTypes.includes(item.id),
+      !item.hiddenInPicker &&
+      (!item.requiresBackendRegistration ||
+        availableConnectorTypes.includes(item.id)),
   );
 }
 

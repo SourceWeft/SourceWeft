@@ -23,14 +23,7 @@ test("catalog lists only implemented connectors", () => {
       "github",
       "linear",
     ]).map((i) => i.id),
-  ).toEqual([
-    "notion",
-    "gmail",
-    "google_drive",
-    "dropbox",
-    "github",
-    "linear",
-  ]);
+  ).toEqual(["notion", "gmail", "google_drive", "dropbox", "github", "linear"]);
 });
 
 test("Gmail stays hidden in the catalog until the backend registers it", () => {
@@ -690,8 +683,11 @@ describe("zotero catalog entry", () => {
     };
 
     test(`${catalogName} has the Zotero copy keys`, () => {
-      const { zotero: copy, detail, selection } =
-        messages.dashboardSourcesHub.connectors;
+      const {
+        zotero: copy,
+        detail,
+        selection,
+      } = messages.dashboardSourcesHub.connectors;
       expect(copy.libraryIdHintPersonal?.trim()).toBeTruthy();
       expect(copy.libraryIdHintGroup?.trim()).toBeTruthy();
       expect(copy.apiKeyHint).toContain("zotero.org/settings/keys");
@@ -798,12 +794,21 @@ describe("discourse catalog entry", () => {
     };
 
     test(`${catalogName} has the Discourse copy keys`, () => {
-      const { discourse: copy, detail, selection } =
-        messages.dashboardSourcesHub.connectors;
+      const {
+        discourse: copy,
+        detail,
+        selection,
+      } = messages.dashboardSourcesHub.connectors;
       expect(copy.forumUrlHint?.trim()).toBeTruthy();
       expect(copy.refreshLightHint?.trim()).toBeTruthy();
       expect(copy.refreshDeepHint?.trim()).toBeTruthy();
-      for (const key of ["title", "privateNote", "check", "add", "invalidUrl"]) {
+      for (const key of [
+        "title",
+        "privateNote",
+        "check",
+        "add",
+        "invalidUrl",
+      ]) {
         expect(copy.dialog[key]?.trim(), key).toBeTruthy();
       }
       for (const reason of DISCOURSE_READINESS_REASONS) {
@@ -815,6 +820,141 @@ describe("discourse catalog entry", () => {
       expect(byType.kinds.topic?.trim()).toBeTruthy();
       expect(byType.disabledReason.restricted?.trim()).toBeTruthy();
       expect(byType.empty?.trim()).toBeTruthy();
+    });
+  }
+});
+
+describe("wordpress catalog entry", () => {
+  const wordpress = connectorCatalog.find((item) => item.id === "wordpress")!;
+  const wordpressLogin = connectorCatalog.find(
+    (item) => item.id === "wordpress_login",
+  )!;
+
+  test("one picker card, shown only once the backend registers the type", () => {
+    expect(
+      connectorCatalogForAvailableTypes(["notion", "rss"]).map((i) => i.id),
+    ).not.toContain("wordpress");
+    const ids = connectorCatalogForAvailableTypes([
+      "notion",
+      "wordpress",
+      "wordpress_login",
+    ]).map((i) => i.id);
+    expect(ids.filter((id) => id === "wordpress")).toEqual(["wordpress"]);
+    // The login type is never its own picker card, even when registered.
+    expect(ids).not.toContain("wordpress_login");
+  });
+
+  test("the public card is the add-only site entry", () => {
+    expect(wordpress).toMatchObject({
+      id: "wordpress",
+      name: "WordPress",
+      category: "Knowledge & Docs",
+      requiresBackendRegistration: true,
+      isIndexable: true,
+      supportsActions: false,
+      supportsPeriodicSync: true,
+      supportsWebhook: false,
+      addMode: "site_url",
+      capabilities: ["Posts and pages", "Categories", "Scheduled sync"],
+    });
+    expect(wordpress.icon).toBeDefined();
+    expect(wordpress.hiddenInPicker).toBeUndefined();
+    expect(wordpress.postOAuthMode).toBeUndefined();
+  });
+
+  test("the login type is a hidden entry that still resolves name and icon for its rows", () => {
+    expect(wordpressLogin).toMatchObject({
+      id: "wordpress_login",
+      name: "WordPress",
+      hiddenInPicker: true,
+      requiresBackendRegistration: true,
+      // `credential` addMode routes a reauth to the rotate dialog.
+      addMode: "credential",
+    });
+    expect(wordpressLogin.icon).toBe(wordpress.icon);
+  });
+
+  test("neither WordPress type ever shows as connected, however many connectors exist", () => {
+    for (const type of ["wordpress", "wordpress_login"] as const) {
+      const entry = connectorCatalog.find((item) => item.id === type)!;
+      const connectors = ["a", "b"].map((id) => ({
+        id,
+        name: `WordPress ${id}`,
+        status: "active" as const,
+        meta: "",
+        raw: {
+          id,
+          connectorType: type,
+          status: "active",
+          configJson: { siteUrl: "https://blog.example.com", items: [] },
+          lastError: null,
+          lastIndexedAt: null,
+        } as unknown as SourceConnector,
+      }));
+      expect(getCatalogConnector(entry, connectors)).toBeNull();
+    }
+  });
+
+  const WORDPRESS_READINESS_REASONS = [
+    "config_invalid",
+    "unreachable",
+    "not_a_wordpress_site",
+    "rest_disabled",
+    "login_required",
+    "reauth_required",
+    "insufficient_permission",
+    "blocked_endpoint",
+    "rate_limited",
+  ];
+
+  for (const catalogName of ["en", "zh-CN"] as const) {
+    const messages = (catalogName === "en" ? en : zhCN) as unknown as {
+      dashboardSourcesHub: {
+        connectors: {
+          wordpress: {
+            dialog: Record<string, string>;
+            readiness: Record<string, string>;
+            rotate: Record<string, string>;
+            siteUrlLabel: string;
+            passwordLabel: string;
+            appPasswordHint: string;
+            includeUnpublishedWarning: string;
+            wordpressComNote: string;
+          };
+          detail: Record<string, string>;
+          selection: {
+            byType: Record<string, { kinds: Record<string, string> }>;
+          };
+        };
+      };
+    };
+
+    test(`${catalogName} has the WordPress copy keys`, () => {
+      const {
+        wordpress: copy,
+        detail,
+        selection,
+      } = messages.dashboardSourcesHub.connectors;
+      expect(copy.siteUrlLabel?.trim()).toBeTruthy();
+      expect(copy.passwordLabel?.trim()).toBeTruthy();
+      expect(copy.appPasswordHint?.trim()).toBeTruthy();
+      expect(copy.includeUnpublishedWarning?.trim()).toBeTruthy();
+      expect(copy.wordpressComNote?.trim()).toBeTruthy();
+      for (const key of ["title", "check", "add", "invalidUrl"]) {
+        expect(copy.dialog[key]?.trim(), key).toBeTruthy();
+      }
+      expect(copy.rotate.save?.trim()).toBeTruthy();
+      for (const reason of WORDPRESS_READINESS_REASONS) {
+        expect(copy.readiness[reason]?.trim(), reason).toBeTruthy();
+      }
+      // The public type's login_required copy points at the login option.
+      expect(detail.availableAddSite?.trim()).toBeTruthy();
+      for (const type of ["wordpress", "wordpress_login"] as const) {
+        const byType = selection.byType[type]!;
+        for (const kind of ["type", "category", "post", "page"]) {
+          expect(byType.kinds[kind]?.trim(), `${type}.${kind}`).toBeTruthy();
+        }
+      }
     });
   }
 });

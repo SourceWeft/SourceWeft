@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   Building2,
   File,
+  FileStack,
   FileText,
   Folder,
   FolderGit2,
@@ -287,6 +288,61 @@ describe("selectionPresenters.discourse", () => {
     ).toBeNull();
   });
 });
+
+describe.each(["wordpress", "wordpress_login"] as const)(
+  "selectionPresenters.%s",
+  (type) => {
+    const presenter = selectionPresenters[type]!;
+    const entry = (id: string, kind: string) =>
+      ({
+        id,
+        kind,
+        name: id,
+        detail: null,
+        selectable: true,
+        expandable: kind === "type" || kind === "category",
+        disabledReason: null,
+        size: null,
+        modifiedAt: null,
+      }) as never;
+
+    test("registers an icon for every selection kind", () => {
+      expect(presenter.kindIcons.type).toBe(FileStack);
+      expect(presenter.kindIcons.category).toBe(FolderTree);
+      expect(presenter.kindIcons.post).toBe(FileText);
+      expect(presenter.kindIcons.page).toBe(File);
+    });
+
+    test("is indexed, so saving a selection triggers a sync", () => {
+      expect(presenter.indexing).toBeDefined();
+    });
+
+    test("a post or page maps to its own source; a type or category maps to none", () => {
+      expect(presenter.indexing?.externalIdFor(entry("post:42", "post"))).toBe(
+        "wordpress:post:42",
+      );
+      expect(presenter.indexing?.externalIdFor(entry("page:7", "page"))).toBe(
+        "wordpress:page:7",
+      );
+      expect(
+        presenter.indexing?.externalIdFor(entry("type:post", "type")),
+      ).toBeNull();
+      expect(
+        presenter.indexing?.externalIdFor(entry("category:3", "category")),
+      ).toBeNull();
+    });
+
+    test("a container's indexed sources cannot be counted", () => {
+      expect(
+        presenter.indexing?.containerIndexedCount({
+          item: entry("category:3", "category"),
+          described: null,
+          sources: [],
+        }),
+      ).toBeNull();
+    });
+  },
+);
 
 describe("selectionPresenterFor", () => {
   test("returns the dropbox entry for type dropbox", () => {
