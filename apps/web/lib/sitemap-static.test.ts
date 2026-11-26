@@ -46,7 +46,7 @@ it("propagates an editorial catalog outage instead of dropping its URLs", async 
   mocks.collections.mockRejectedValueOnce(new Error("offline"));
   await expect(buildStaticSitemap()).rejects.toThrow("offline");
 });
-it("leaves /blog out of the sitemap until an article is published", async () => {
+it("lists /blog once an article is published, and never the articles themselves", async () => {
   mocks.counts.mockResolvedValue({ counts: {}, total: 0 });
   const empty = await buildStaticSitemap();
   expect(empty.some((e) => e.url === SITE_URL + "/blog")).toBe(false);
@@ -54,6 +54,7 @@ it("leaves /blog out of the sitemap until an article is published", async () => 
   mocks.blogEntries.mockResolvedValue([
     {
       articleId: "a1",
+      canonicalUrl: null,
       locale: "en",
       publishedAt: null,
       updatedAt: null,
@@ -62,7 +63,9 @@ it("leaves /blog out of the sitemap until an article is published", async () => 
   ]);
   const withPost = await buildStaticSitemap();
   expect(withPost.some((e) => e.url === SITE_URL + "/blog")).toBe(true);
-  expect(withPost.some((e) => e.url === SITE_URL + "/blog/hello")).toBe(true);
+  // Articles live in the blog sitemap; listing them here too would submit
+  // every article URL twice.
+  expect(withPost.some((e) => e.url === SITE_URL + "/blog/hello")).toBe(false);
 });
 it("lists /pricing only when checkout is available", async () => {
   mocks.counts.mockResolvedValue({ counts: {}, total: 0 });
@@ -82,4 +85,16 @@ it("lists /pricing only when checkout is available", async () => {
   });
   const withCheckout = await buildStaticSitemap();
   expect(withCheckout.some((e) => e.url === SITE_URL + "/pricing")).toBe(true);
+});
+it("lists the About & method page with its three languages", async () => {
+  mocks.counts.mockResolvedValue({ counts: {}, total: 0 });
+  const entries = await buildStaticSitemap();
+  const method = entries.filter((e) => e.url === SITE_URL + "/about/method");
+  expect(method).toHaveLength(1);
+  expect(method[0]?.alternates?.languages).toEqual({
+    en: SITE_URL + "/about/method",
+    "zh-CN": SITE_URL + "/zh-CN/about/method",
+    "zh-TW": SITE_URL + "/zh-TW/about/method",
+  });
+  expect(method[0]?.lastModified).toBeUndefined();
 });

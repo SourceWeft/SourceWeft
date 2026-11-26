@@ -105,6 +105,7 @@ import { remoteMcpClientConfig } from "../_components/mcp-install";
 import { mcpClaimHref } from "../../../../lib/mcp-claims";
 import { McpReadmeCollapse } from "../_components/mcp-readme-collapse";
 import { McpScoreCard } from "../_components/mcp-score";
+import { MethodLink } from "../../about/method/method-link";
 import { McpToolChangeLog } from "../_components/mcp-tool-change-log";
 
 // Not build-time prerendered: canonical/JSON-LD embed the public site URL, which
@@ -872,11 +873,17 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                   {t("overviewHeading")}
                 </SectionHeading>
                 {aiOverview ? (
-                  <McpAiOverviewView
-                    className="last:mb-0"
-                    overview={aiOverview}
-                    requestedLocale={overviewLocale}
-                  />
+                  <>
+                    <McpAiOverviewView
+                      className="mb-0"
+                      overview={aiOverview}
+                      requestedLocale={overviewLocale}
+                    />
+                    <MethodLink
+                      className="mb-4 mt-2 text-zinc-500 last:mb-0 dark:text-zinc-400"
+                      topic="overview"
+                    />
+                  </>
                 ) : (
                   <McpFactsPanel
                     className={`${panelClassName} mb-4 last:mb-0`}
@@ -1089,6 +1096,10 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                     {tScore("heading")}
                   </SectionHeading>
                   <McpScoreCard score={score} />
+                  <MethodLink
+                    className="mt-2 text-zinc-500 dark:text-zinc-400"
+                    topic="score"
+                  />
                 </section>
               ) : null}
 

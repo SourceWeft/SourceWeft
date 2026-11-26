@@ -73,6 +73,7 @@ export function SourceWeftFooter({
 
   const companyLinks = [
     [addLocalePrefix("/about", localePrefix), t("links.about")],
+    [addLocalePrefix("/about/method", localePrefix), t("links.method")],
     [addLocalePrefix("/changelog", localePrefix), t("links.changelog")],
   ] as const;
   const legalLinks = [

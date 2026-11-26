@@ -35,6 +35,7 @@ import {
   parseMcpBrowseState,
   type McpSearchParams,
 } from "./_components/mcp-browse";
+import { BlogGuidesSection } from "../blog/_components/blog-link-sections";
 import { McpListingView, McpSearchForm } from "./_components/mcp-listing";
 import {
   mcpCategoryNames,
@@ -419,6 +420,8 @@ export default async function PublicMcpMarketPage({
           ) : null}
         </div>
       ) : null}
+
+      {listView ? null : <BlogGuidesSection directory="mcp" />}
 
       {listView ? null : <McpFaqSection />}
 

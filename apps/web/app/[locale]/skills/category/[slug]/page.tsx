@@ -13,6 +13,7 @@ import { JsonLd } from "../../../../_components/seo/json-ld";
 import { SkillIcon } from "../../../../_components/site-icons";
 import { resolveInitialLandingAuthState } from "../../../../_landing/auth-state-server";
 import { SourceWeftFooter } from "../../../../_landing/components/sourceweft-footer";
+import { BlogGuidesSection } from "../../../blog/_components/blog-link-sections";
 import { SourceWeftHeader } from "../../../../_landing/components/sourceweft-header";
 import { marketingContainerClassName } from "../../../../_landing/components/marketing-container";
 import {
@@ -264,6 +265,8 @@ export default async function PublicSkillCategoryPage({
         }
         total={categoriesResponse.total}
       />
+
+      <BlogGuidesSection categorySlug={category.slug} directory="skills" />
 
       <SourceWeftFooter authState={authState} />
     </main>

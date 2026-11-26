@@ -159,7 +159,7 @@ test("the public page's overview, server-rendered in zh-CN", async () => {
     locale: "zh-CN",
   });
   expect(serverOutline(node, "zh-CN")).toMatchInlineSnapshot(`
-    "<section aria-label="AI 生成的概览" class="mb-4 rounded-lg border border-dashed bg-muted/30 p-4 text-sm" data-testid="skill-ai-overview">
+    "<section aria-label="AI 生成的概览" class="rounded-lg border border-dashed bg-muted/30 p-4 text-sm mb-0" data-testid="skill-ai-overview">
       <div class="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
         <svg aria-hidden="true" class="lucide lucide-sparkles size-3.5" fill="none" height="24" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" stroke="currentColor" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg">
         <span>
@@ -185,7 +185,10 @@ test("the public page's overview, server-rendered in zh-CN", async () => {
           <dt class="text-xs font-medium text-muted-foreground">
             "运行要求"
           <dd class="whitespace-pre-line text-foreground/90">
-            "Python 3 and **pypdf**.""
+            "Python 3 and **pypdf**."
+    <p class="text-xs mb-4 mt-2 text-zinc-500 dark:text-zinc-400">
+      <a class="underline underline-offset-4 opacity-80 transition-opacity hover:opacity-100" href="/zh-CN/about/method#overviews">
+        "AI 概览如何生成和校验""
   `);
 });
 

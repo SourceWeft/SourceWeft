@@ -174,7 +174,7 @@ test("public sitemap index and root-level shard files survive a real image resta
   expect(urls.length).toBeGreaterThan(0);
   for (const url of urls) {
     expect(url.pathname).toMatch(
-      /^\/sitemap-(static|skills|mcp)-[0-9a-f]+\.xml$/,
+      /^\/sitemap-(static|blog|skills|mcp)-[0-9a-f]+\.xml$/,
     );
     if (process.env.SELFHOST_PHASE === "restart") expect(url.origin).toBe(base);
   }

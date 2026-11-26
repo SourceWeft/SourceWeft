@@ -53,6 +53,7 @@ import {
   SkillVerifiedBadge,
 } from "../_components/skills-display";
 import { SkillInstallOptions } from "../_components/skill-install-options";
+import { MethodLink } from "../../about/method/method-link";
 import { SkillTile } from "../_components/skill-logo";
 import {
   commitUrl,
@@ -872,6 +873,7 @@ export default async function PublicSkillDetailPage({
                       <li key={flag}>{scanFlagLabel(flag, scanFlagLabels)}</li>
                     ))}
                   </ul>
+                  <MethodLink className="mt-3" topic="scan" />
                 </section>
               ) : null}
 

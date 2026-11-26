@@ -73,15 +73,6 @@ export async function buildStaticSitemap(): Promise<MetadataRoute.Sitemap> {
     isIndexableListing(count),
   );
 
-  // Group each article's published locale variants so every entry can carry
-  // hreflang links to its real translations (never an untranslated locale).
-  const blogUrlsByArticle = new Map<string, Record<string, string>>();
-  for (const entry of blogPosts) {
-    const group = blogUrlsByArticle.get(entry.articleId) ?? {};
-    group[entry.locale] = `${SITE_URL}${entry.urlPath}`;
-    blogUrlsByArticle.set(entry.articleId, group);
-  }
-
   return [
     {
       alternates: sitemapLocaleAlternates("/"),
@@ -94,6 +85,12 @@ export async function buildStaticSitemap(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: "monthly",
       priority: 0.5,
       url: `${SITE_URL}/about`,
+    },
+    {
+      alternates: sitemapLocaleAlternates("/about/method"),
+      changeFrequency: "monthly",
+      priority: 0.5,
+      url: `${SITE_URL}/about/method`,
     },
     ...(hasPricingPage
       ? [
@@ -127,7 +124,8 @@ export async function buildStaticSitemap(): Promise<MetadataRoute.Sitemap> {
       priority: 0.3,
       url: `${SITE_URL}/terms`,
     },
-    // An empty listing is a thin page; submit /blog once it has articles.
+    // An empty listing is a thin page; submit /blog once it has articles. The
+    // articles themselves are listed in the blog sitemap (`sitemap-blog-*`).
     ...(blogPosts.length > 0
       ? [
           {
@@ -150,18 +148,6 @@ export async function buildStaticSitemap(): Promise<MetadataRoute.Sitemap> {
       priority: 0.7,
       url: `${SITE_URL}/skills`,
     },
-    ...blogPosts.map((post) => {
-      const languages = blogUrlsByArticle.get(post.articleId) ?? {};
-      return {
-        changeFrequency: "monthly" as const,
-        lastModified: post.updatedAt ?? post.publishedAt ?? undefined,
-        priority: 0.5,
-        url: `${SITE_URL}${post.urlPath}`,
-        ...(Object.keys(languages).length > 1
-          ? { alternates: { languages } }
-          : {}),
-      };
-    }),
     ...indexableCategories.map((category) => ({
       alternates: sitemapLocaleAlternates(mcpCategoryPath(category.slug)),
       changeFrequency: "weekly" as const,

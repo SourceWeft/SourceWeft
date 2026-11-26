@@ -55,6 +55,7 @@ export type BlogSitemapEntry = {
   locale: BlogLocale;
   slug: string;
   urlPath: string;
+  canonicalUrl: string | null;
   updatedAt: Date | null;
   publishedAt: Date | null;
 };
@@ -194,6 +195,47 @@ export async function listPublishedBlogPosts(
     .map((row) => mapSummaryRow(row, browsingLocale));
 }
 
+// Only the rows written in `locale`, with no default-language fallback: what a
+// per-language feed lists and what "previous / next article" walks through.
+export async function listPublishedBlogPostsInLocale(locale: Locale) {
+  return (await cachedBlogPostRows(locale)).map((row) =>
+    mapSummaryRow(row, locale),
+  );
+}
+
+// How long a page that is not part of the blog waits for its article links.
+// A warm cache answers at once and a cold read of a reachable database takes
+// milliseconds; only an unreachable host comes near this, and without the
+// bound the page would wait for the TCP connect timeout.
+export const BLOG_LINK_BLOCK_TIMEOUT_MS = 2_000;
+
+// For link blocks on pages that are not part of the blog (home, directories):
+// those pages must keep rendering when the blog tables cannot be read, so a
+// failed or slow read is logged and the block is left out. A read that was
+// given up on keeps running and fills the cache for the next request.
+export async function listBlogPostsForLinkBlock(
+  browsingLocale: Locale,
+  timeoutMs: number = BLOG_LINK_BLOCK_TIMEOUT_MS,
+) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      listPublishedBlogPosts(browsingLocale),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`Blog read exceeded ${timeoutMs} ms`)),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } catch (error) {
+    console.error("Blog link block unavailable", error);
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 const cachedBlogTagRows = unstable_cache(
   async (locales: string[]) => (await queryPublishedBlogTagRows(locales)).rows,
   ["blog-published-tags"],
@@ -323,6 +365,7 @@ type BlogSitemapRow = {
   article_id: string;
   locale: string;
   slug: string;
+  canonical_url: string | null;
   updated_at: Date | string | null;
   published_at: Date | string | null;
 };
@@ -336,7 +379,7 @@ const cachedBlogSitemapRows = unstable_cache(
 async function queryBlogSitemapRows() {
   return getPool().query<BlogSitemapRow>(
     `
-      select article_id, locale, slug, updated_at, published_at
+      select article_id, locale, slug, canonical_url, updated_at, published_at
       from blog_posts
       where sync_enabled = true
         and status = 'published'
@@ -359,6 +402,7 @@ export async function listPublishedBlogSitemapEntries() {
           locale: row.locale as BlogLocale,
           slug: row.slug,
           urlPath: addLocalePrefix(blogPostPath(row.slug), row.locale as Locale),
+          canonicalUrl: row.canonical_url,
           updatedAt: normalizeDate(row.updated_at),
           publishedAt: normalizeDate(row.published_at),
         }) satisfies BlogSitemapEntry,
