@@ -95,6 +95,32 @@ test.each([
   assert.equal(native.installSandboxRuntime.mock.calls.length, 0);
 });
 
+test("a working runtime from an older app version is refreshed once", async () => {
+  native.localHostStatus.mockResolvedValue({
+    readiness: { state: "ready" },
+    runtime: {
+      appVersion: "2",
+      installedAppVersion: "1",
+      updateAvailable: true,
+    },
+  });
+  await installSandboxRuntimeAutomatically();
+  assert.equal(native.installSandboxRuntime.mock.calls.length, 1);
+});
+
+test("a current runtime is left alone", async () => {
+  native.localHostStatus.mockResolvedValue({
+    readiness: { state: "ready" },
+    runtime: {
+      appVersion: "2",
+      installedAppVersion: "2",
+      updateAvailable: false,
+    },
+  });
+  await installSandboxRuntimeAutomatically();
+  assert.equal(native.installSandboxRuntime.mock.calls.length, 0);
+});
+
 test("a browser never asks the host anything", async () => {
   native.isAvailable.mockReturnValue(false);
   await installSandboxRuntimeAutomatically();

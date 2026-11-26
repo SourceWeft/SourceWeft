@@ -144,6 +144,7 @@ export function LocalHostPanel() {
       </div>
       <LocalSandboxSetupCard
         readiness={status?.readiness}
+        runtime={status?.runtime}
         onChanged={applyReadiness}
       />
       <div className="space-y-3 rounded-lg border p-4">
@@ -230,7 +231,9 @@ export function LocalHostPanel() {
       </div>
       {status?.storageInitialized && <LocalTaskFolderSetting />}
       <div className="space-y-3 rounded-lg border p-4">
-        <h3 className="font-medium">{t("localHost.workingDirectoriesTitle")}</h3>
+        <h3 className="font-medium">
+          {t("localHost.workingDirectoriesTitle")}
+        </h3>
         <p className="text-sm text-muted-foreground">
           {t("localHost.workingDirectoriesDescription")}
         </p>

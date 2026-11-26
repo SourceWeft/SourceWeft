@@ -5,6 +5,7 @@ import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
   desktopBridge,
   type SandboxReadiness,
+  type SandboxRuntimeInfo,
 } from "../../../../lib/desktop-bridge";
 import { sandboxSetupCard } from "../../../../lib/sandbox-setup";
 import {
@@ -14,12 +15,17 @@ import {
 
 type Props = {
   readiness: SandboxReadiness | undefined;
+  runtime?: SandboxRuntimeInfo;
   /** Called with the readiness returned by an install, or undefined to re-read the status. */
   onChanged: (readiness?: SandboxReadiness) => void | Promise<void>;
 };
 
 /** "Set up local execution": shown only while the host reports `needsSetup`. */
-export function LocalSandboxSetupCard({ readiness, onChanged }: Props) {
+export function LocalSandboxSetupCard({
+  readiness,
+  runtime,
+  onChanged,
+}: Props) {
   const t = useTranslations("dashboardSettings");
   const card = sandboxSetupCard(readiness);
   const [busy, setBusy] = useState<"setup" | "check" | null>(null);
@@ -39,7 +45,34 @@ export function LocalSandboxSetupCard({ readiness, onChanged }: Props) {
   const installing =
     install.phase === "installing" || Boolean(card?.installing);
   const locked = busy !== null || installing;
-  if (!card) return null;
+  if (!card) {
+    // A working runtime from an older app version: offer the refresh the app also starts itself.
+    if (readiness?.state !== "ready" || !runtime?.updateAvailable) return null;
+    return (
+      <div
+        className="space-y-3 rounded-lg border p-4"
+        data-testid="local-sandbox-update"
+      >
+        <h3 className="font-medium">{t("localHost.setup.updateTitle")}</h3>
+        <p className="text-sm text-muted-foreground">
+          {t("localHost.setup.updateDescription")}
+        </p>
+        <Button
+          disabled={installing}
+          onClick={() => void installSandboxRuntime().catch(() => {})}
+        >
+          {installing
+            ? t("localHost.setup.installing")
+            : t("localHost.setup.update")}
+        </Button>
+        {install.phase === "failed" && install.error && (
+          <p role="alert" className="text-sm text-destructive">
+            {install.error}
+          </p>
+        )}
+      </div>
+    );
+  }
   const shownError =
     error ??
     (card.action === "install" && install.phase === "failed"

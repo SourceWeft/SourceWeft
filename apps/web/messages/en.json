@@ -1404,7 +1404,10 @@
         "elevatedSetupDescription": "A one-time administrator step is needed. It installs the SourceWeft sandbox helper under Program Files and creates a restricted sandbox account and network rules for it on this PC. Windows will ask for your approval; SourceWeft never sees your password.",
         "elevatedSetup": "Set up (needs administrator approval)",
         "elevatedSetupRunning": "Setting up…",
-        "checkAgain": "Check again"
+        "checkAgain": "Check again",
+        "updateTitle": "Update the sandbox runtime",
+        "updateDescription": "This computer’s sandbox runtime came from an earlier version of the app. The app refreshes it automatically; click Update if that has not happened.",
+        "update": "Update sandbox runtime"
       },
       "remoteAccessTitle": "Allow access from other devices",
       "remoteAccessDescription": "Let your other devices use this computer with the same account. They can access task folders and authorized working directories. You can still work on this computer when remote access is off.",

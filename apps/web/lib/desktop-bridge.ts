@@ -83,6 +83,18 @@ export type SandboxReadiness =
     }
   | { state: "unsupported" };
 
+/**
+ * The installed sandbox runtime next to this app. `updateAvailable` is true when the runtime
+ * was installed by another app version and this version publishes its own. Mirrors the Rust
+ * `RuntimeInfo`; absent on older builds.
+ */
+export type SandboxRuntimeInfo = {
+  appVersion: string;
+  installedAppVersion?: string;
+  installedSrtVersion?: string;
+  updateAvailable: boolean;
+};
+
 /** Native capability discovery only; does not authorize local execution. */
 export type LocalHostStatus = {
   protocolVersion: number;
@@ -93,6 +105,7 @@ export type LocalHostStatus = {
   connected: boolean;
   connectionError: string | null;
   readiness?: SandboxReadiness;
+  runtime?: SandboxRuntimeInfo;
 };
 
 /**
