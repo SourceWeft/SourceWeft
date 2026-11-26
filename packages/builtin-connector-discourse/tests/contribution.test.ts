@@ -71,7 +71,10 @@ function valid(schema: any, value: unknown): boolean {
 }
 
 const config = discourseConnectorContribution.configSchema;
-const item = (id: string, kind: string) => ({ id, kind });
+// A selection item: ids are kind-qualified (`topic:12`), `kind` repeats the
+// prefix, and the number alone may collide between the two kinds.
+const item = (n: string, kind: string) => ({ id: `${kind}:${n}`, kind });
+const raw = (id: string, kind: string) => ({ id, kind });
 const base = {
   forumUrl: "https://forum.example.com",
   items: [] as unknown[],
@@ -90,6 +93,13 @@ test("the config schema accepts a bare forum, a subfolder forum and selected ite
       ...base,
       items: [item("12", "category"), item("12", "topic"), item("9", "topic")],
       refresh: "deep",
+    }),
+  );
+  // The same number under both kinds is two distinct selections.
+  assert.ok(
+    valid(config, {
+      ...base,
+      items: [raw("category:12", "category"), raw("topic:12", "topic")],
     }),
   );
   assert.ok(valid(config, { ...base, items: [item("1234567890", "topic")] }));
@@ -126,14 +136,20 @@ test("the config schema rejects malformed forum URLs", () => {
 
 test("the config schema rejects malformed items, refresh values and extra keys", () => {
   const bad: Record<string, unknown>[] = [
-    { ...base, items: [item("1", "tag")] },
-    { ...base, items: [item("0", "topic")] },
-    { ...base, items: [item("012", "topic")] },
-    { ...base, items: [item("abc", "topic")] },
-    { ...base, items: [item("12345678901", "topic")] },
-    { ...base, items: [item("", "topic")] },
-    { ...base, items: [{ id: "1", kind: "topic", extra: 1 }] },
-    { ...base, items: [{ id: "1" }] },
+    { ...base, items: [raw("tag:3", "tag")] },
+    { ...base, items: [raw("12", "topic")] },
+    { ...base, items: [raw("12", "category")] },
+    { ...base, items: [raw("tag:3", "topic")] },
+    { ...base, items: [raw("category:0", "category")] },
+    { ...base, items: [raw("category:", "category")] },
+    { ...base, items: [raw("topic:012", "topic")] },
+    { ...base, items: [raw("topic:abc", "topic")] },
+    { ...base, items: [raw("topic:12345678901", "topic")] },
+    { ...base, items: [raw("", "topic")] },
+    { ...base, items: [raw("Topic:1", "topic")] },
+    { ...base, items: [raw("topic:1 ", "topic")] },
+    { ...base, items: [{ id: "topic:1", kind: "topic", extra: 1 }] },
+    { ...base, items: [{ id: "topic:1" }] },
     { ...base, items: [item("1", "topic"), item("1", "topic")] },
     {
       ...base,
@@ -179,9 +195,15 @@ test("the browse, search and describe action inputs are validated", () => {
   const [browse, search, describe] = discourseConnectorContribution.actions;
   assert.ok(valid(browse.inputSchema, {}));
   assert.ok(valid(browse.inputSchema, { containerId: null }));
-  assert.ok(valid(browse.inputSchema, { containerId: "12", cursor: "x" }));
-  assert.equal(valid(browse.inputSchema, { containerId: "0" }), false);
-  assert.equal(valid(browse.inputSchema, { containerId: "abc" }), false);
+  assert.ok(valid(browse.inputSchema, { containerId: "category:5" }));
+  assert.ok(
+    valid(browse.inputSchema, { containerId: "category:12", cursor: "x" }),
+  );
+  assert.equal(valid(browse.inputSchema, { containerId: "topic:5" }), false);
+  assert.equal(valid(browse.inputSchema, { containerId: "5" }), false);
+  assert.equal(valid(browse.inputSchema, { containerId: "category:0" }), false);
+  assert.equal(valid(browse.inputSchema, { containerId: "category:" }), false);
+  assert.equal(valid(browse.inputSchema, { containerId: "tag:3" }), false);
   assert.equal(valid(browse.inputSchema, { cursor: "x".repeat(4097) }), false);
   assert.equal(valid(browse.inputSchema, { other: 1 }), false);
 
@@ -196,32 +218,51 @@ test("the browse, search and describe action inputs are validated", () => {
   );
   assert.equal(valid(search.inputSchema, { query: "a", other: 1 }), false);
 
-  assert.ok(valid(describe.inputSchema, { items: [item("1", "topic")] }));
-  assert.equal(valid(describe.inputSchema, { items: [] }), false);
+  assert.ok(valid(describe.inputSchema, { ids: ["topic:1", "category:2"] }));
+  assert.ok(valid(describe.inputSchema, { ids: ["category:12", "topic:12"] }));
+  assert.equal(valid(describe.inputSchema, { ids: [] }), false);
   assert.equal(valid(describe.inputSchema, {}), false);
   assert.equal(
-    valid(describe.inputSchema, { items: [item("1", "tag")] }),
+    valid(describe.inputSchema, { items: [item("1", "topic")] }),
     false,
   );
+  assert.equal(valid(describe.inputSchema, { ids: ["12"] }), false);
+  assert.equal(valid(describe.inputSchema, { ids: ["tag:3"] }), false);
+  assert.equal(valid(describe.inputSchema, { ids: ["category:0"] }), false);
+  assert.equal(valid(describe.inputSchema, { ids: ["category:"] }), false);
   assert.equal(
-    valid(describe.inputSchema, { items: [item("0", "topic")] }),
+    valid(describe.inputSchema, { ids: ["topic:1"], items: [] }),
     false,
   );
   assert.ok(
     valid(describe.inputSchema, {
-      items: Array.from({ length: 100 }, (_, i) =>
-        item(String(i + 1), "topic"),
-      ),
+      ids: Array.from({ length: 100 }, (_, i) => `topic:${i + 1}`),
     }),
   );
   assert.equal(
     valid(describe.inputSchema, {
-      items: Array.from({ length: 101 }, (_, i) =>
-        item(String(i + 1), "topic"),
-      ),
+      ids: Array.from({ length: 101 }, (_, i) => `topic:${i + 1}`),
     }),
     false,
   );
+});
+
+// The schema only fixes the outer shape; Task 2's parseForumUrl does the
+// semantic checks. This test pins the gap so it stays deliberate and visible.
+test("schema accepts shapes that parseForumUrl rejects later", () => {
+  for (const forumUrl of [
+    "https://127.0.0.1",
+    "https://2130706433",
+    "https://0x7f.1",
+    "https://localhost",
+    "https://forum..example.com",
+    "https://-forum.example.com",
+    "https://example.com/a//b",
+    "https://example.com/a/../b",
+    "https://example.com/./a",
+  ]) {
+    assert.ok(valid(config, { ...base, forumUrl }), forumUrl);
+  }
 });
 
 test("limits hold the documented values", () => {

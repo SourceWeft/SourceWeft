@@ -6,12 +6,25 @@ import { MAX_SELECTED_ITEMS } from "./limits";
  * and hyphens, so no userinfo, port, IPv6 literal, query or fragment) and an
  * optional subfolder path. The host's public fetch refuses private addresses at
  * request time; this pattern only fixes the shape.
+ *
+ * The pattern still admits shapes that `parseForumUrl` (Task 2) must reject:
+ * IPv4, decimal and hex numeric hosts, `localhost`, empty or malformed labels
+ * (`a..b`, a leading or trailing dot or hyphen), `.` and `..` path segments,
+ * and `//` inside the path.
  */
 export const DISCOURSE_FORUM_URL_PATTERN =
   "^https://[A-Za-z0-9.-]{1,253}(/[A-Za-z0-9._~/-]{0,300})?$";
 
-/** A Discourse category or topic id: a positive decimal of at most 10 digits. */
-export const DISCOURSE_ID_PATTERN = "^[1-9][0-9]{0,9}$";
+/**
+ * A selection id is kind-qualified, `category:<n>` or `topic:<n>`, because
+ * category and topic numbers collide. `<n>` is a positive decimal of at most 10
+ * digits. An item's separate `kind` must equal the id prefix (the adapter
+ * checks that).
+ */
+export const DISCOURSE_ID_PATTERN = "^(category|topic):[1-9][0-9]{0,9}$";
+
+/** A browse container is always a category. */
+export const DISCOURSE_CATEGORY_ID_PATTERN = "^category:[1-9][0-9]{0,9}$";
 
 const itemSchema = {
   type: "object",
@@ -56,7 +69,7 @@ export const discourseConnectorContribution = {
         properties: {
           containerId: {
             type: ["string", "null"],
-            pattern: DISCOURSE_ID_PATTERN,
+            pattern: DISCOURSE_CATEGORY_ID_PATTERN,
           },
           cursor: { type: "string", maxLength: 4096 },
         },
@@ -85,7 +98,7 @@ export const discourseConnectorContribution = {
       id: "discourse.describe",
       title: "Describe Discourse items",
       description:
-        "Return the name, kind and existence of the selected Discourse categories and topics.",
+        "Return the name, kind and existence of the selected Discourse categories and topics, identified by kind-qualified ids such as category:12 or topic:34.",
       capabilities: ["connector_read"],
       risk: "low",
       requiresApproval: false,
@@ -93,13 +106,13 @@ export const discourseConnectorContribution = {
       inputSchema: {
         type: "object",
         additionalProperties: false,
-        required: ["items"],
+        required: ["ids"],
         properties: {
-          items: {
+          ids: {
             type: "array",
             minItems: 1,
             maxItems: 100,
-            items: itemSchema,
+            items: { type: "string", pattern: DISCOURSE_ID_PATTERN },
           },
         },
       },
@@ -108,7 +121,7 @@ export const discourseConnectorContribution = {
   // Non-secret configuration only: the forum and what to index from it. An
   // empty `items` list indexes every public category. `uniqueItems` compares
   // whole objects, and an item holds only `id` and `kind`, so it is exactly
-  // uniqueness by kind and id.
+  // uniqueness by kind and id (the id carries the kind prefix too).
   configSchema: {
     type: "object",
     additionalProperties: false,

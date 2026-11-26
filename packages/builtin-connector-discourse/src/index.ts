@@ -2,6 +2,7 @@ export {
   discourseConnectorContribution,
   DISCOURSE_FORUM_URL_PATTERN,
   DISCOURSE_ID_PATTERN,
+  DISCOURSE_CATEGORY_ID_PATTERN,
 } from "./contribution";
 export { builtinDiscourseConnectorCapabilityManifest } from "./manifest";
 export { toBackendDiscourseManifest } from "./backend-manifest";
