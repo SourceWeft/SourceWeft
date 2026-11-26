@@ -44,6 +44,10 @@ export type ScanSiteInput = {
   now?: () => number;
   limits?: Partial<ScanLimits>;
   signal?: AbortSignal;
+  /** Receives a fixed event name and a fixed-reason meta only. */
+  logger?: {
+    warn?(message: string, meta?: Record<string, unknown>): void;
+  };
 };
 
 const DEFAULTS: ScanLimits = {
@@ -54,28 +58,22 @@ const DEFAULTS: ScanLimits = {
   MAX_SCAN_RESTARTS,
 };
 
-/**
- * Shown to the member when the scan stopped because the selection is larger
- * than one sync can index (an item, request, tag or time cap). It archives
- * nothing and carries no site address, id or response text.
- */
-export const NARROW_SELECTION_WARNING =
-  "This WordPress selection is too large to index in a single sync. Narrow it to fewer categories, posts or pages.";
+/** The fixed event an incomplete scan logs; the only variable is its reason. */
+export const SCAN_INCOMPLETE_EVENT = "wordpress_scan_incomplete";
 
 /**
- * Shown to the member when the site kept changing while a listing was read, so
- * the scan could not get one consistent view. It archives nothing and will be
- * retried on the next sync.
+ * Why a scan stopped without a reconcilable result. `too_large` is any cap (an
+ * item, request or tag-id ceiling), `timeout` is the wall-clock deadline, and
+ * `unstable` is a listing that kept changing past the restart budget. These are
+ * the whole content of the member-facing notice: no site address, id or
+ * response text is ever logged.
  */
-export const SITE_CHANGED_WARNING =
-  "The WordPress site changed while it was being read, so this sync made no changes. It will be retried on the next sync.";
-
-type IncompleteReason = "narrow" | "unstable";
+export type ScanIncompleteReason = "too_large" | "timeout" | "unstable";
 
 /** Thrown inside a scan when it must give up without raising a platform error:
- * the run then yields an empty, non-reconciling page with a fixed warning. */
+ * the run then yields an empty, non-reconciling page and logs the reason. */
 class ScanIncomplete extends Error {
-  constructor(readonly reason: IncompleteReason) {
+  constructor(readonly reason: ScanIncompleteReason) {
     super(reason);
     this.name = "ScanIncomplete";
   }
@@ -108,11 +106,11 @@ function singleIsGone(error: unknown): boolean {
  * (`reconcileMissing: true`), so a selected category or single that is gone
  * simply lists nothing and its sources are archived. A scan that hits a cap or
  * the deadline, or that could never read a listing consistently, instead
- * returns an empty, non-reconciling page (`complete: false`,
- * `reconcileMissing: false`) with a fixed warning, so partial data never
- * archives anything. Every other failure — a login wall, a rate limit, a 5xx,
- * a 404 mid-listing, a malformed body, a `link` under another host — propagates
- * as a {@link WordPressError}; nothing is skipped and half-indexed.
+ * returns an empty, non-reconciling page (`reconcileMissing: false`) and logs a
+ * fixed-reason warning, so the run succeeds and partial data archives nothing.
+ * Every other failure — a login wall, a rate limit, a 5xx, a 404 mid-listing, a
+ * malformed body, a `link` under another host — propagates as a
+ * {@link WordPressError}; nothing is skipped and half-indexed.
  */
 export async function scanSite(
   input: ScanSiteInput,
@@ -125,9 +123,9 @@ export async function scanSite(
   /** Enforced before every client call so the caps bound the whole scan. */
   function budget(): void {
     signal?.throwIfAborted();
-    if (now() >= deadline) throw new ScanIncomplete("narrow");
+    if (now() >= deadline) throw new ScanIncomplete("timeout");
     if (client.requestCount() >= limits.MAX_REQUESTS) {
-      throw new ScanIncomplete("narrow");
+      throw new ScanIncomplete("too_large");
     }
   }
 
@@ -137,7 +135,7 @@ export async function scanSite(
     const key = `wordpress:${item.type}:${item.id}`;
     if (found.has(key)) return;
     found.set(key, item);
-    if (found.size > limits.MAX_ITEMS) throw new ScanIncomplete("narrow");
+    if (found.size > limits.MAX_ITEMS) throw new ScanIncomplete("too_large");
   }
 
   async function fetchSingle(
@@ -225,7 +223,7 @@ export async function scanSite(
       for (const tag of item.tagIds) tagIds.add(tag);
       if (item.authorId !== null) authorIds.add(item.authorId);
     }
-    if (tagIds.size > limits.MAX_TAG_IDS) throw new ScanIncomplete("narrow");
+    if (tagIds.size > limits.MAX_TAG_IDS) throw new ScanIncomplete("too_large");
 
     budget();
     const tagList = tagIds.size > 0 ? await client.listTags([...tagIds]) : [];
@@ -265,16 +263,13 @@ export async function scanSite(
     return await run();
   } catch (error) {
     if (!(error instanceof ScanIncomplete)) throw error;
+    // A complete, non-reconciling page: the run succeeds and archives nothing.
+    input.logger?.warn?.(SCAN_INCOMPLETE_EVENT, { reason: error.reason });
     return {
       items: [],
-      complete: false,
+      complete: true,
       reconcileMissing: false,
       checkpoint: null,
-      warnings: [
-        error.reason === "unstable"
-          ? SITE_CHANGED_WARNING
-          : NARROW_SELECTION_WARNING,
-      ],
     };
   }
 }

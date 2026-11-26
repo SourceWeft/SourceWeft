@@ -4,9 +4,9 @@ import type { ConnectorDiscoveryPage } from "@sourceweft/contracts";
 import { createWordPressClient, type WordPressClient } from "../src/client";
 import { WordPressError } from "../src/errors";
 import {
-  NARROW_SELECTION_WARNING,
   scanSite,
-  SITE_CHANGED_WARNING,
+  SCAN_INCOMPLETE_EVENT,
+  type ScanIncompleteReason,
   type ScanLimits,
 } from "../src/scan";
 import type { SelectionItem } from "../src/selection-scope";
@@ -45,18 +45,28 @@ function harness(
   return { fake, client };
 }
 
+type WarnCall = { message: string; meta?: Record<string, unknown> };
+
 type ScanOptions = {
   items?: SelectionItem[];
   includeUnpublished?: boolean;
   now?: () => number;
   limits?: Partial<ScanLimits>;
   signal?: AbortSignal;
+  warnings?: WarnCall[];
 };
 
 function scan(
   client: WordPressClient,
   options: ScanOptions = {},
 ): Promise<ConnectorDiscoveryPage> {
+  const logger = options.warnings
+    ? {
+        warn(message: string, meta?: Record<string, unknown>) {
+          options.warnings?.push({ message, meta });
+        },
+      }
+    : undefined;
   return scanSite({
     client,
     items: options.items ?? [],
@@ -65,7 +75,24 @@ function scan(
     now: options.now,
     limits: options.limits,
     signal: options.signal,
+    logger,
   });
+}
+
+/** Asserts a scan ended incomplete: a successful, non-reconciling, empty page,
+ * and a single fixed-reason warning with nothing else in it. */
+function assertIncomplete(
+  page: ConnectorDiscoveryPage,
+  warnings: WarnCall[],
+  reason: ScanIncompleteReason,
+): void {
+  assert.equal(page.complete, true);
+  assert.equal(page.reconcileMissing, false);
+  assert.deepEqual(page.items, []);
+  assert.equal(page.checkpoint, null);
+  assert.deepEqual(warnings, [
+    { message: SCAN_INCOMPLETE_EVENT, meta: { reason } },
+  ]);
 }
 
 const item = (id: string): SelectionItem => ({
@@ -224,11 +251,9 @@ test("a total that keeps moving gives the incomplete, non-reconciling result", a
     10,
     (r) => r.path.endsWith("/wp/v2/posts") && r.query.page === "2",
   );
-  const page = await scan(client);
-  assert.equal(page.complete, false);
-  assert.equal(page.reconcileMissing, false);
-  assert.deepEqual(page.items, []);
-  assert.deepEqual(page.warnings, [SITE_CHANGED_WARNING]);
+  const warnings: WarnCall[] = [];
+  const page = await scan(client, { warnings });
+  assertIncomplete(page, warnings, "unstable");
 });
 
 // ------------------------------------------------------- drafts and status
@@ -274,32 +299,47 @@ test("a link under another host aborts the scan with LINK_HOST_MISMATCH", async 
 
 test("the item cap ends the scan incomplete and archives nothing", async () => {
   const { client } = harness({ fake: { posts: manyPosts(3) } });
-  const page = await scan(client, { limits: { MAX_ITEMS: 1 } });
-  assert.equal(page.complete, false);
-  assert.equal(page.reconcileMissing, false);
-  assert.deepEqual(page.items, []);
-  assert.deepEqual(page.warnings, [NARROW_SELECTION_WARNING]);
+  const warnings: WarnCall[] = [];
+  const page = await scan(client, { limits: { MAX_ITEMS: 1 }, warnings });
+  assertIncomplete(page, warnings, "too_large");
 });
 
 test("the request cap ends the scan incomplete and archives nothing", async () => {
   const { client } = harness({ fake: { posts: manyPosts(3) } });
-  const page = await scan(client, { limits: { MAX_REQUESTS: 2 } });
-  assert.equal(page.complete, false);
-  assert.equal(page.reconcileMissing, false);
-  assert.deepEqual(page.warnings, [NARROW_SELECTION_WARNING]);
+  const warnings: WarnCall[] = [];
+  const page = await scan(client, { limits: { MAX_REQUESTS: 2 }, warnings });
+  assertIncomplete(page, warnings, "too_large");
+});
+
+test("too many distinct tag ids ends the scan incomplete and archives nothing", async () => {
+  const { client } = harness({
+    fake: {
+      tags: [
+        { id: 1, name: "A" },
+        { id: 2, name: "B" },
+      ],
+      posts: [
+        { id: 1, tags: [1] },
+        { id: 2, tags: [2] },
+      ],
+    },
+  });
+  const warnings: WarnCall[] = [];
+  const page = await scan(client, { limits: { MAX_TAG_IDS: 1 }, warnings });
+  assertIncomplete(page, warnings, "too_large");
 });
 
 test("the wall-clock deadline ends the scan incomplete and archives nothing", async () => {
   const { client } = harness({ fake: { posts: manyPosts(3) } });
   let calls = 0;
   const now = () => (calls++ === 0 ? 0 : 1_000_000);
+  const warnings: WarnCall[] = [];
   const page = await scan(client, {
     now,
     limits: { SCAN_TIMEOUT_MS: 1_000 },
+    warnings,
   });
-  assert.equal(page.complete, false);
-  assert.equal(page.reconcileMissing, false);
-  assert.deepEqual(page.warnings, [NARROW_SELECTION_WARNING]);
+  assertIncomplete(page, warnings, "timeout");
 });
 
 // ----------------------------------------------------- half-read listing
