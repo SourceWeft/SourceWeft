@@ -79,3 +79,8 @@ test("table columns are 欄 in Taiwan usage while 列表 and 列出 stay", () =>
   assert.equal(toTaiwanTraditional("对话列表"), "對話列表");
   assert.equal(toTaiwanTraditional("列出工具"), "列出工具");
 });
+
+test("a forum post is 貼文 in Taiwan, not 帖子", () => {
+  assert.equal(toTaiwanTraditional("定期检查新增的帖子"), "定期檢查新增的貼文");
+  assert.equal(toTaiwanTraditional("已删除的帖子"), "已刪除的貼文");
+});

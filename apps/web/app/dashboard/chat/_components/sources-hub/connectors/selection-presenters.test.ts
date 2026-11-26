@@ -9,6 +9,7 @@ import {
   FolderTree,
   Globe,
   LibraryBig,
+  MessageSquare,
   SquareKanban,
   Users,
 } from "lucide-react";
@@ -230,6 +231,56 @@ describe("selectionPresenters.zotero", () => {
     expect(
       presenter.indexing?.containerIndexedCount({
         item: collection,
+        described: null,
+        sources: [],
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("selectionPresenters.discourse", () => {
+  const presenter = selectionPresenters.discourse!;
+  const category = {
+    id: "category:7",
+    kind: "category",
+    name: "Support",
+    detail: null,
+    selectable: true,
+    expandable: true,
+    disabledReason: null,
+    size: null,
+    modifiedAt: null,
+  } as never;
+  const topic = {
+    id: "topic:42",
+    kind: "topic",
+    name: "How do I reset my password?",
+    detail: null,
+    selectable: true,
+    expandable: false,
+    disabledReason: null,
+    size: null,
+    modifiedAt: null,
+  } as never;
+
+  test("registers an icon for category and for topic", () => {
+    expect(presenter.kindIcons.category).toBe(FolderTree);
+    expect(presenter.kindIcons.topic).toBe(MessageSquare);
+  });
+
+  test("is indexed, so saving a selection triggers a sync", () => {
+    expect(presenter.indexing).toBeDefined();
+  });
+
+  test("a topic maps to its own source; a category is a container that maps to none", () => {
+    expect(presenter.indexing?.externalIdFor(topic)).toBe("discourse:topic:42");
+    expect(presenter.indexing?.externalIdFor(category)).toBeNull();
+  });
+
+  test("a category's indexed sources cannot be counted", () => {
+    expect(
+      presenter.indexing?.containerIndexedCount({
+        item: category,
         described: null,
         sources: [],
       }),

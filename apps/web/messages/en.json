@@ -3489,7 +3489,8 @@
         "available": "Ready to connect with {name} OAuth.",
         "availableAddFeed": "Add the URL of a public RSS or Atom feed.",
         "availableLoginFlow": "Sign in to {name} in your browser to connect.",
-        "availableAddApiKey": "Add a Zotero library with a read-only API key."
+        "availableAddApiKey": "Add a Zotero library with a read-only API key.",
+        "availableAddForum": "Add a public Discourse forum by its address."
       },
       "syncBlock": {
         "pagesLimit": "Ingestion pages are used up. The last run indexed {count} items before pausing; syncing resumes automatically when pages are available.",
@@ -3664,6 +3665,41 @@
           "save": "Reconnect",
           "failed": "Could not update the API key. Try again.",
           "libraryUnknown": "This connector's library details are missing, so its key cannot be replaced here."
+        }
+      },
+      "discourse": {
+        "forumUrlLabel": "Forum address",
+        "forumUrlHint": "The address of the forum's home page, for example https://forum.example.com. Only public forums are supported.",
+        "nameLabel": "Name (optional)",
+        "refreshLabel": "Keeping topics up to date",
+        "refreshLight": "Light",
+        "refreshLightHint": "Picks up new replies, deleted posts, and changes to titles and categories. Fast.",
+        "refreshDeep": "Deep",
+        "refreshDeepHint": "Also picks up edits to older posts. Slower, because every topic is read again.",
+        "dialog": {
+          "title": "Connect a Discourse forum",
+          "description": "Enter the address of a public Discourse forum. SourceWeft checks that it can read the forum, then you choose the categories or topics to index.",
+          "privateNote": "Private forums that require a login are not supported.",
+          "check": "Check forum",
+          "checking": "Checking...",
+          "reachable": "Forum reachable",
+          "reachableHint": "Next, choose the categories or topics to index.",
+          "add": "Add forum",
+          "autoSync": "Sync automatically",
+          "autoSyncHint": "Check for new and changed posts on a schedule. Off by default; you can sync manually anytime.",
+          "invalidUrl": "Enter the forum's address starting with https://, without a username, port, query or #fragment. IP addresses and localhost are not allowed.",
+          "checkFailed": "Could not check the forum. Try again.",
+          "nameConflict": "A connector with this name already exists in this workspace. Change the name, or use the existing one.",
+          "addFailed": "Failed to add the forum."
+        },
+        "readiness": {
+          "selection_required": "Forum reachable · Choose categories or topics to index",
+          "login_required": "This forum requires a login. Private forums are not supported.",
+          "not_a_discourse_site": "This address is not a Discourse forum. Use the address of the forum's home page.",
+          "forum_unreachable": "The forum could not be reached. Try again in a moment.",
+          "blocked_endpoint": "This deployment does not allow connections to this address.",
+          "rate_limited": "The forum is limiting requests right now. Wait a moment and try again.",
+          "config_invalid": "The forum address or refresh mode is not valid."
         }
       },
       "gmail": {
@@ -3900,6 +3936,24 @@
               "description": "Open a collection to see its subcollections, then tick the collections to index.",
               "root": "Library",
               "emptyContainer": "This collection has no subcollections."
+            }
+          },
+          "discourse": {
+            "itemsTitle": "Categories and topics",
+            "itemsDescription": "Choose the categories and topics to index. A category includes its subcategories and their topics. Everything selected is kept in sync on the connector's schedule.",
+            "choose": "Choose categories and topics",
+            "empty": "Nothing selected yet. Choose categories or topics to start indexing.",
+            "kinds": {
+              "category": "Categories",
+              "topic": "Topics"
+            },
+            "disabledReason": {
+              "restricted": "This category is restricted and cannot be indexed"
+            },
+            "browser": {
+              "description": "Open a category to see its subcategories and topics, then tick what to index.",
+              "root": "Forum",
+              "emptyContainer": "Nothing here yet."
             }
           }
         }

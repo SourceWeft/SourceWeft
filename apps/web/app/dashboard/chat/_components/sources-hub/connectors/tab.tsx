@@ -99,7 +99,11 @@ export function ConnectorsTab({
               (item) => item.id === connector.raw.connectorType,
             );
             const subtitle =
-              formatConnectorReadinessSummary(readiness, t) ??
+              formatConnectorReadinessSummary(
+                readiness,
+                t,
+                connector.raw.connectorType,
+              ) ??
               compactConnectorProviderMeta(connector, t);
             return (
               <div

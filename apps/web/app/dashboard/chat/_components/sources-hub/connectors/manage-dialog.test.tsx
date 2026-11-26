@@ -17,6 +17,16 @@ vi.mock("@/lib/billing-edition/capabilities", () => ({
   useBillingAvailable: () => false,
 }));
 
+// The forum dialog's Radix Checkbox measures itself with a ResizeObserver,
+// which jsdom does not provide.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+(globalThis as { ResizeObserver?: unknown }).ResizeObserver ??=
+  ResizeObserverStub;
+
 afterEach(unmountAll);
 
 function baseProps(
@@ -30,6 +40,7 @@ function baseProps(
     onCancelConnector: vi.fn(),
     onCheckCredential: vi.fn(),
     onCheckFeed: vi.fn(),
+    onCheckForum: vi.fn(),
     onConnectConnector: vi.fn(),
     onCopyWebhook: vi.fn(),
     onCreateConnector: vi.fn(),
@@ -38,6 +49,7 @@ function baseProps(
     onOpenSettings: vi.fn(),
     onSubmitCredential: vi.fn(),
     onSubmitFeed: vi.fn(),
+    onSubmitForum: vi.fn(),
     onSyncConnector: vi.fn(),
     onToggleConnectorStatus: vi.fn(),
   };
@@ -276,4 +288,56 @@ test("the RSS card opens the add-feed dialog and the dialog's callbacks reach th
   });
   expect(handlers.onConnectConnector).not.toHaveBeenCalled();
   expect(document.querySelector('input[name="feedUrl"]')).toBeNull();
+});
+
+test("the Discourse card opens the forum dialog and its callbacks reach the hook", async () => {
+  const { props, handlers } = baseProps({
+    availableConnectorTypes: ["discourse"],
+  });
+  handlers.onCheckForum.mockResolvedValue({
+    ready: false,
+    reason: "selection_required",
+    message: "",
+  });
+  handlers.onSubmitForum.mockResolvedValue(undefined);
+  await mountWithIntl(createElement(ManageConnectorsDialog, props));
+  const card = Array.from(document.querySelectorAll("article")).find(
+    (node) => node.querySelector("h4")?.textContent?.trim() === "Discourse",
+  )!;
+
+  expect(document.querySelector('input[name="forumUrl"]')).toBeNull();
+  await click(buttonWithText(card, "Connect"));
+
+  const urlField = document.querySelector<HTMLInputElement>(
+    'input[name="forumUrl"]',
+  )!;
+  expect(urlField).not.toBeNull();
+  typeInto(urlField, "https://forum.example.com");
+  await flush(3);
+  await click(buttonWithText(document.body, "Check forum"));
+  await flush(5);
+  expect(handlers.onCheckForum).toHaveBeenCalledWith({
+    connectorType: "discourse",
+    configJson: {
+      forumUrl: "https://forum.example.com",
+      items: [],
+      refresh: "light",
+    },
+  });
+
+  await click(buttonWithText(document.body, "Add forum"));
+  await flush(5);
+
+  expect(handlers.onSubmitForum).toHaveBeenCalledWith({
+    connectorType: "discourse",
+    name: "Discourse",
+    configJson: {
+      forumUrl: "https://forum.example.com",
+      items: [],
+      refresh: "light",
+    },
+    periodicIndexingEnabled: false,
+  });
+  expect(handlers.onConnectConnector).not.toHaveBeenCalled();
+  expect(document.querySelector('input[name="forumUrl"]')).toBeNull();
 });

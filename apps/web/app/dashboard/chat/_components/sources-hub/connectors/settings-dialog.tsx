@@ -210,7 +210,11 @@ export function ConnectorSettingsDialog({
     ? t("connectors.overview.needsAttention")
     : connector?.raw.syncBlock
       ? t("connectors.status.blocked")
-      : (formatConnectorReadinessSummary(readiness, t) ??
+      : (formatConnectorReadinessSummary(
+          readiness,
+          t,
+          connector?.raw.connectorType,
+        ) ??
         (connector
           ? t(`connectors.statusLabel.${connector.status}`)
           : undefined));

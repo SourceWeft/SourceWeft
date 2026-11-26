@@ -19,6 +19,7 @@ import {
   Globe,
   LibraryBig,
   type LucideIcon,
+  MessageSquare,
   SquareKanban,
   Users,
 } from "lucide-react";
@@ -128,6 +129,22 @@ export const selectionPresenters: Record<string, SelectionPresenter> = {
     indexing: {
       externalIdFor() {
         return null;
+      },
+      containerIndexedCount() {
+        return null;
+      },
+    },
+  },
+  // Discourse indexes its topics, so a selection syncs after it is saved. Each
+  // topic is its own source (`discourse:topic:<id>`, the id being the
+  // kind-qualified `topic:<id>`), so a selected topic shows its index state. A
+  // category is a container: its topics are sources of their own, with no
+  // per-category count. An empty selection indexes nothing.
+  discourse: {
+    kindIcons: { category: FolderTree, topic: MessageSquare },
+    indexing: {
+      externalIdFor(item) {
+        return item.kind === "topic" ? `discourse:${item.id}` : null;
       },
       containerIndexedCount() {
         return null;

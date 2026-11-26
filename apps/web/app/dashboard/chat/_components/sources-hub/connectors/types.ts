@@ -45,8 +45,9 @@ export type ConnectorCatalogItem = {
    * endpoint, a username and an app password (WebDAV); `login_flow` sends the
    * member to the provider's own browser login and the backend collects the
    * credential (Nextcloud); `api_key` asks for a library ID and a read-only API
-   * key (Zotero). */
-  addMode?: "feed_url" | "credential" | "login_flow" | "api_key";
+   * key (Zotero); `forum_url` asks for a public forum's address and the
+   * categories and topics are chosen after it exists (Discourse). */
+  addMode?: "feed_url" | "credential" | "login_flow" | "api_key" | "forum_url";
   isIndexable: boolean;
   supportsPeriodicSync: boolean;
   supportsActions: boolean;
@@ -102,6 +103,25 @@ export type CredentialCheckResult = ConnectorReadinessState & {
   /** Adapter-specific facts of the check (Zotero reports `notesAccess`). Only
    * present when the server returned any. */
   metadata?: Record<string, unknown>;
+};
+
+/** A readiness check or create for a connector that needs no credential
+ * (Discourse), built by that type's dialog: the type and its config. */
+export type ForumCheckInput = {
+  connectorType: string;
+  configJson: Record<string, unknown>;
+};
+
+export type ForumAddInput = ForumCheckInput & {
+  name: string;
+  periodicIndexingEnabled: boolean;
+};
+
+/** Outcome of the pre-create forum check: the readiness verdict. A reachable
+ * forum with nothing chosen yet reports `ready: false` with the reason
+ * `selection_required`, which the dialog treats as success. */
+export type ForumCheckResult = ConnectorReadinessState & {
+  ready: boolean;
 };
 
 /** The WebDAV credential check input: an endpoint and its username/password. */
