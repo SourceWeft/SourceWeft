@@ -7,13 +7,9 @@ import type {
 import type { DavClient, DavEntry } from "./dav-client";
 import { normalizeEtag } from "./etag";
 import { WebDavError } from "./errors";
+import { webdavFlavor, type WebDavFlavor } from "./flavor";
 import { MAX_DEPTH, MAX_ENTRIES, SCAN_TIMEOUT_MS } from "./limits";
-import {
-  isStrictDescendant,
-  samePath,
-  toExternalId,
-  toRequestUrl,
-} from "./paths";
+import { isStrictDescendant, samePath, toExternalId } from "./paths";
 
 export type DiscoveryLimits = {
   /** Deepest collection level below a root the walk descends into. */
@@ -35,6 +31,13 @@ export type DiscoveryOptions = {
   endpoint: URL;
   /** Normalized roots (each a decoded path with a trailing slash). */
   roots: string[];
+  /** The flavor that derives item identity/metadata and decides readability,
+   * and whose `extraProps` the depth-1 listings request. Defaults to the plain
+   * WebDAV flavor. */
+  flavor?: WebDavFlavor;
+  /** The canonical server URL from config, passed through to the flavor's item
+   * identity. Absent for plain WebDAV. */
+  server?: string;
   limits?: Partial<DiscoveryLimits>;
   now?: () => number;
   logger?: { warn?(message: string, meta?: Record<string, unknown>): void };
@@ -91,23 +94,36 @@ function contentHashOf(entry: DavEntry): string | null {
   return createHash("sha256").update(`${size}|${modified}`).digest("hex");
 }
 
-/** One discovered file as a `ConnectorItem`. The request URL is always rebuilt
- * from the validated, decoded path, never from the raw server href. */
+/** One discovered file as a `ConnectorItem`, or `null` when the flavor assigns
+ * it no stable identity (e.g. a Nextcloud file with no file id), in which case
+ * the caller skips it like an unreadable file. The item id, URI and metadata
+ * come from the flavor (for plain WebDAV: the decoded path, the rebuilt request
+ * URL and `{ path, etag }`); the title, type, size, timestamp and content hash
+ * are derived from the decoded path and the entry the same way for every
+ * flavor. */
 function toItem(
+  flavor: WebDavFlavor,
   endpoint: URL,
-  externalId: string,
+  server: string | undefined,
+  relativePath: string,
   entry: DavEntry,
-): ConnectorItem {
-  const name = lastSegment(externalId);
+): ConnectorItem | null {
+  const name = lastSegment(relativePath);
+  const identity = flavor.itemIdentity(entry, {
+    endpoint,
+    server,
+    relativePath,
+  });
+  if (identity === null) return null;
   return {
-    externalId,
-    externalUri: toRequestUrl(endpoint, externalId),
+    externalId: identity.externalId,
+    externalUri: identity.externalUri,
     title: name,
     mimeType: discoveryMimeType(name, entry.contentType),
     sizeBytes: entry.contentLength,
     externalUpdatedAt: entry.lastModified,
     contentHash: contentHashOf(entry),
-    metadata: { path: externalId, etag: entry.etag },
+    metadata: identity.metadata,
   };
 }
 
@@ -136,6 +152,8 @@ export async function* discoverWebDavPages(
   options: DiscoveryOptions,
 ): AsyncGenerator<ConnectorDiscoveryPage> {
   const { client, endpoint, roots, logger } = options;
+  const flavor = options.flavor ?? webdavFlavor;
+  const server = options.server;
   const now = options.now ?? Date.now;
   const limits: DiscoveryLimits = {
     ...DEFAULT_DISCOVERY_LIMITS,
@@ -151,6 +169,13 @@ export async function* discoverWebDavPages(
     }
   }
 
+  // Every item externalId emitted so far in this scan (across pages and roots).
+  // A flavor whose identity is not path-based (Nextcloud: `nc:<fileId>`) can
+  // reach the same id by two in-scope paths — an internal share or an external
+  // mount listed twice, or a hostile server echoing one file id on two hrefs —
+  // and must still emit that item only once.
+  const emittedIds = new Set<string>();
+  let duplicateItems = 0;
   let entryCount = 0;
   let incomplete = false;
   let outOfScope = 0;
@@ -173,7 +198,10 @@ export async function* discoverWebDavPages(
     let entries: DavEntry[];
     const requestStart = now();
     try {
-      entries = await client.propfind(current.path, 1, stats);
+      entries = await client.propfind(current.path, 1, {
+        stats,
+        extraProps: flavor.extraProps,
+      });
     } catch (error) {
       propfindMs += now() - requestStart;
       if (
@@ -206,16 +234,19 @@ export async function* discoverWebDavPages(
     let childEntries = 0;
     let inScopeChildren = 0;
     for (const entry of entries) {
-      const externalId = toExternalId(endpoint, entry.href);
-      if (externalId !== null && samePath(externalId, current.path)) {
+      // The decoded path relative to the endpoint. Scope, traversal and
+      // extract stay keyed off this path for every flavor, even when a flavor's
+      // own item identity (externalId/externalUri) is not path-based.
+      const relativePath = toExternalId(endpoint, entry.href);
+      if (relativePath !== null && samePath(relativePath, current.path)) {
         // The collection's own self entry: expected, not a child, not an item.
         selfSeen = true;
         continue;
       }
       // Any other response is a child the server listed for this collection.
       childEntries += 1;
-      if (externalId === null) continue;
-      if (!isStrictDescendant(current.path, externalId)) {
+      if (relativePath === null) continue;
+      if (!isStrictDescendant(current.path, relativePath)) {
         // Only entries strictly below the listed collection (and therefore
         // below a selected root) are in scope. A parent, sibling or any path
         // the server lists outside the collection is dropped and counted, so a
@@ -237,14 +268,28 @@ export async function* discoverWebDavPages(
           incomplete = true;
           continue;
         }
-        const childPath = asCollectionPath(externalId);
+        const childPath = asCollectionPath(relativePath);
         if (!seen.has(childPath)) {
           seen.add(childPath);
           queue.push({ path: childPath, depth: childDepth });
         }
-      } else {
-        items.push(toItem(endpoint, externalId, entry));
+      } else if (flavor.isReadable(entry)) {
+        const item = toItem(flavor, endpoint, server, relativePath, entry);
+        if (item !== null) {
+          if (emittedIds.has(item.externalId)) {
+            // The same identity reached by a second in-scope path: emit it once
+            // (first by walk order wins). A duplicate is expected for shared or
+            // mounted subtrees, so it does not make the scan incomplete.
+            duplicateItems += 1;
+          } else {
+            emittedIds.add(item.externalId);
+            items.push(item);
+          }
+        }
       }
+      // A file the flavor reports as unreadable, or assigns no stable identity
+      // to, is simply not indexed. It was listed and is in scope, so it does not
+      // make the scan incomplete.
     }
 
     if (!capped) {
@@ -279,6 +324,12 @@ export async function* discoverWebDavPages(
     // Common and not itself fatal (servers that echo parents/siblings): a
     // fixed-message warning with only a count.
     logger?.warn?.("webdav_scan_out_of_scope_entries", { count: outOfScope });
+  }
+  if (duplicateItems > 0) {
+    // In-scope paths that resolved to an already-emitted identity: one
+    // fixed-message warning with only a count, never per item. Not fatal and
+    // never marks the scan incomplete.
+    logger?.warn?.("webdav_scan_duplicate_items", { count: duplicateItems });
   }
   if (droppedResponses > 0) {
     logger?.warn?.("webdav_scan_dropped_responses", {

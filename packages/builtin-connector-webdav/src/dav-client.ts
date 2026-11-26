@@ -50,14 +50,24 @@ export type DavServerInfo = { dav: string | null; allow: string | null };
  * 403 or 423, which means the listing did not fully describe the collection. */
 export type PropfindStats = { dropped: number };
 
+/** Per-call PROPFIND options. `extraProps` names provider-specific property
+ * elements (e.g. `oc:fileid`) to request in addition to the standard set; they
+ * are added to the request body only when present, so a plain WebDAV listing
+ * sends exactly the historical body. `stats` is the out-parameter above. */
+export type PropfindOptions = {
+  extraProps?: readonly string[];
+  stats?: PropfindStats;
+};
+
 export type DavClient = {
   /** PROPFIND of `path` (decoded, under the endpoint) at depth 0 or 1. When
-   * `stats` is given it is filled with per-resource drop counts for the
-   * listing (see {@link PropfindStats}). */
+   * `options.stats` is given it is filled with per-resource drop counts for the
+   * listing (see {@link PropfindStats}); `options.extraProps` adds extra
+   * property elements to the request body (see {@link PropfindOptions}). */
   propfind(
     path: string,
     depth: 0 | 1,
-    stats?: PropfindStats,
+    options?: PropfindOptions,
   ): Promise<DavEntry[]>;
   /** GET of a file, capped at `maxBytes` (declared length and streamed). */
   get(
@@ -80,12 +90,34 @@ export type CreateDavClientInput = {
   requestTimeoutMs?: number;
 };
 
-const PROPFIND_BODY =
-  '<?xml version="1.0" encoding="utf-8"?>' +
-  '<d:propfind xmlns:d="DAV:"><d:prop>' +
+const OWNCLOUD_NS = "http://owncloud.org/ns";
+
+const BASE_PROPS =
   "<d:resourcetype/><d:getetag/><d:getlastmodified/>" +
-  "<d:getcontentlength/><d:getcontenttype/>" +
-  "</d:prop></d:propfind>";
+  "<d:getcontentlength/><d:getcontenttype/>";
+
+/**
+ * The PROPFIND request body. With no `extraProps` it is byte-for-byte the
+ * historical WebDAV body. When `extraProps` are requested, the `oc:` namespace
+ * is declared (only if an `oc:` prop is asked for) and each property element is
+ * appended after the standard set.
+ */
+function propfindBody(extraProps: readonly string[]): string {
+  const declareOc = extraProps.some((prop) => prop.startsWith("oc:"));
+  const open =
+    '<d:propfind xmlns:d="DAV:"' +
+    (declareOc ? ` xmlns:oc="${OWNCLOUD_NS}"` : "") +
+    ">";
+  const extra = extraProps.map((prop) => `<${prop}/>`).join("");
+  return (
+    '<?xml version="1.0" encoding="utf-8"?>' +
+    open +
+    "<d:prop>" +
+    BASE_PROPS +
+    extra +
+    "</d:prop></d:propfind>"
+  );
+}
 
 /** The host's policy error is duck-typed: this package cannot import backend code. */
 function isEndpointNotAllowed(error: unknown): boolean {
@@ -306,7 +338,7 @@ export function createDavClient(input: CreateDavClientInput): DavClient {
   }
 
   return {
-    async propfind(path, depth, stats) {
+    async propfind(path, depth, options) {
       const url = toRequestUrl(endpoint, path);
       return request(
         "PROPFIND",
@@ -317,7 +349,7 @@ export function createDavClient(input: CreateDavClientInput): DavClient {
             "Content-Type": "application/xml; charset=utf-8",
             Accept: "application/xml, text/xml;q=0.9",
           },
-          body: PROPFIND_BODY,
+          body: propfindBody(options?.extraProps ?? []),
         },
         async (response, signal) => {
           if (response.status !== 207) {
@@ -332,7 +364,7 @@ export function createDavClient(input: CreateDavClientInput): DavClient {
           );
           return parseMultistatus(
             new TextDecoder("utf-8").decode(bytes),
-            stats,
+            options?.stats,
           );
         },
       );

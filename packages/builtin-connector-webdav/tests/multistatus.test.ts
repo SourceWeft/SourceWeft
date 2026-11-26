@@ -130,6 +130,142 @@ test("a named resource with only a bare status (no propstat) is counted as dropp
   assert.equal(stats.dropped, 1);
 });
 
+test("reads oc:fileid, oc:permissions and oc:owner-id when present", () => {
+  const xml =
+    `<d:multistatus xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">` +
+    `<d:response><d:href>/f.txt</d:href><d:propstat><d:prop>` +
+    `<d:resourcetype/><d:getetag>"e"</d:getetag>` +
+    `<oc:fileid>12345</oc:fileid><oc:permissions>RGDNVW</oc:permissions>` +
+    `<oc:owner-id>alice</oc:owner-id>` +
+    `</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>` +
+    `</d:multistatus>`;
+  const [entry] = parseMultistatus(xml);
+  assert.equal(entry?.fileId, "12345");
+  assert.equal(entry?.permissions, "RGDNVW");
+  assert.equal(entry?.ownerId, "alice");
+});
+
+test("the oc: fields are absent (not present) on a plain WebDAV entry", () => {
+  const xml =
+    `<d:multistatus xmlns:d="DAV:">` +
+    `<d:response><d:href>/f.txt</d:href><d:propstat><d:prop>` +
+    `<d:resourcetype/><d:getetag>"e"</d:getetag>` +
+    `</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>` +
+    `</d:multistatus>`;
+  const [entry] = parseMultistatus(xml);
+  assert.ok(entry);
+  assert.equal("fileId" in entry, false);
+  assert.equal("permissions" in entry, false);
+  assert.equal("ownerId" in entry, false);
+});
+
+test("an oc:fileid element that is present but empty reads as null", () => {
+  const xml =
+    `<d:multistatus xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">` +
+    `<d:response><d:href>/f.txt</d:href><d:propstat><d:prop>` +
+    `<d:resourcetype/><oc:fileid/>` +
+    `</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>` +
+    `</d:multistatus>`;
+  const [entry] = parseMultistatus(xml);
+  assert.ok(entry);
+  assert.equal("fileId" in entry, true);
+  assert.equal(entry.fileId, null);
+});
+
+test("oc: elements under a non-owncloud namespace are ignored", () => {
+  // The prefix is `oc` but it is bound to a foreign namespace, so a non-Nextcloud
+  // server cannot masquerade by emitting a literally-named `oc:fileid`.
+  const xml =
+    `<d:multistatus xmlns:d="DAV:" xmlns:oc="urn:example:evil">` +
+    `<d:response><d:href>/f.txt</d:href><d:propstat><d:prop>` +
+    `<d:resourcetype/><oc:fileid>12345</oc:fileid>` +
+    `</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>` +
+    `</d:multistatus>`;
+  const [entry] = parseMultistatus(xml);
+  assert.ok(entry);
+  assert.equal("fileId" in entry, false);
+});
+
+test("oc: properties bound to the owncloud namespace under any prefix are read", () => {
+  // The owncloud namespace is bound to the prefix `nc`, not `oc`; the property
+  // is still an owncloud file id because the namespace URI is what matters.
+  const xml =
+    `<d:multistatus xmlns:d="DAV:" xmlns:nc="http://owncloud.org/ns">` +
+    `<d:response><d:href>/f.txt</d:href><d:propstat><d:prop>` +
+    `<d:resourcetype/><nc:fileid>778899</nc:fileid>` +
+    `</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>` +
+    `</d:multistatus>`;
+  const [entry] = parseMultistatus(xml);
+  assert.equal(entry?.fileId, "778899");
+});
+
+test("an oc:fileid that does not match the id pattern is treated as no file id", () => {
+  for (const bad of ["12 34", "a/b", "../etc", "x".repeat(65), "<script>"]) {
+    const xml =
+      `<d:multistatus xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">` +
+      `<d:response><d:href>/f.txt</d:href><d:propstat><d:prop>` +
+      `<d:resourcetype/><oc:fileid>${bad
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")}</oc:fileid>` +
+      `</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>` +
+      `</d:multistatus>`;
+    const [entry] = parseMultistatus(xml);
+    assert.ok(entry);
+    // The element was present, so the key exists, but the value is unusable.
+    assert.equal("fileId" in entry, true);
+    assert.equal(entry.fileId, null, bad);
+  }
+});
+
+test("a valid id pattern (letters, digits, underscore, hyphen) is accepted", () => {
+  const xml =
+    `<d:multistatus xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">` +
+    `<d:response><d:href>/f.txt</d:href><d:propstat><d:prop>` +
+    `<d:resourcetype/><oc:fileid>oc_12-AB</oc:fileid>` +
+    `</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>` +
+    `</d:multistatus>`;
+  assert.equal(parseMultistatus(xml)[0]?.fileId, "oc_12-AB");
+});
+
+test("oc:permissions longer than the cap is dropped to null", () => {
+  const over = "R".repeat(33);
+  const xml =
+    `<d:multistatus xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">` +
+    `<d:response><d:href>/f.txt</d:href><d:propstat><d:prop>` +
+    `<d:resourcetype/><oc:permissions>${over}</oc:permissions>` +
+    `</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>` +
+    `</d:multistatus>`;
+  const [entry] = parseMultistatus(xml);
+  assert.equal("permissions" in entry!, true);
+  assert.equal(entry!.permissions, null);
+});
+
+test("oc:owner-id longer than the cap is dropped to null", () => {
+  const over = "o".repeat(257);
+  const xml =
+    `<d:multistatus xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">` +
+    `<d:response><d:href>/f.txt</d:href><d:propstat><d:prop>` +
+    `<d:resourcetype/><oc:owner-id>${over}</oc:owner-id>` +
+    `</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>` +
+    `</d:multistatus>`;
+  const [entry] = parseMultistatus(xml);
+  assert.equal("ownerId" in entry!, true);
+  assert.equal(entry!.ownerId, null);
+});
+
+test("owncloud props are read only from a 2xx propstat", () => {
+  const xml =
+    `<d:multistatus xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">` +
+    `<d:response><d:href>/f.txt</d:href>` +
+    `<d:propstat><d:prop><d:resourcetype/></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat>` +
+    `<d:propstat><d:prop><oc:fileid>404id</oc:fileid></d:prop><d:status>HTTP/1.1 404 Not Found</d:status></d:propstat>` +
+    `</d:response></d:multistatus>`;
+  const [entry] = parseMultistatus(xml);
+  assert.ok(entry);
+  assert.equal("fileId" in entry, false);
+});
+
 test("malformed XML, wrong root and HTML fail with a fixed error", () => {
   for (const xml of [
     fixture("malformed.xml"),

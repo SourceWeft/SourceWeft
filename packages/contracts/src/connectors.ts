@@ -125,10 +125,15 @@ const noneAuthManifestSchema = z.object({
  * A connector authorized by a username and secret the member enters directly
  * (e.g. WebDAV Basic auth), stored as an encrypted account. It has no OAuth
  * exchange or refresh. `scheme` names how the credential is presented.
+ *
+ * `flow: "login_flow"` marks a connector whose credential is obtained through a
+ * server-driven browser login (the adapter implements
+ * `ConnectorAdapter.credentialFlow`) instead of being typed by the member.
  */
 const credentialAuthManifestSchema = z.object({
   kind: z.literal("credential"),
   scheme: z.literal("basic"),
+  flow: z.literal("login_flow").optional(),
 });
 
 const connectorAuthManifestSchema = z.discriminatedUnion("kind", [
@@ -498,6 +503,69 @@ export const connectorCredentialStatusSchema = z.object({
 });
 export type ConnectorCredentialStatus = z.infer<
   typeof connectorCredentialStatusSchema
+>;
+
+/**
+ * Credential login flow (`auth.flow: "login_flow"`): the backend starts a
+ * server-driven browser login, the member approves it on the provider's own
+ * page, and the backend polls until the provider hands over the credential.
+ * The poll token and the resulting secret never reach the browser; only the
+ * opaque `flowId` does.
+ */
+const credentialFlowLoginUrlSchema = z
+  .string()
+  .url()
+  .refine((value) => /^https?:\/\//i.test(value), {
+    message: "loginUrl must be an http or https URL",
+  });
+
+export const startCredentialFlowRequestSchema = z
+  .object({
+    serverUrl: z.string().trim().min(1).max(2048),
+    name: z.string().trim().min(1).max(200),
+    // When present, at least one and at most twenty folders: an empty list would
+    // pass start and then fail after approval, orphaning the issued app password.
+    roots: z.array(z.string().max(512)).min(1).max(20).optional(),
+    periodicIndexingEnabled: z.boolean().optional(),
+    /** Present when reconnecting an existing connector. */
+    connectorId: z.string().trim().min(1).optional(),
+  })
+  .strict();
+export type StartCredentialFlowRequest = z.infer<
+  typeof startCredentialFlowRequestSchema
+>;
+
+export const startCredentialFlowResponseSchema = z
+  .object({
+    flowId: z.string().min(16).max(128),
+    loginUrl: credentialFlowLoginUrlSchema,
+  })
+  .strict();
+export type StartCredentialFlowResponse = z.infer<
+  typeof startCredentialFlowResponseSchema
+>;
+
+export const pollCredentialFlowRequestSchema = z
+  .object({
+    flowId: z.string().min(16).max(128),
+  })
+  .strict();
+export type PollCredentialFlowRequest = z.infer<
+  typeof pollCredentialFlowRequestSchema
+>;
+
+export const pollCredentialFlowResponseSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("pending") }).strict(),
+  z.object({ status: z.literal("expired") }).strict(),
+  z
+    .object({
+      status: z.literal("connected"),
+      connector: sourceConnectorSchema,
+    })
+    .strict(),
+]);
+export type PollCredentialFlowResponse = z.infer<
+  typeof pollCredentialFlowResponseSchema
 >;
 
 export const createConnectorRequestSchema = z.object({
@@ -1101,6 +1169,42 @@ export interface ConnectorPersonalDataSupport {
   readProfile(input: { accessToken: string }): Promise<ConnectorAccountProfile>;
 }
 
+/**
+ * Credential login flow hook (auth `{ kind: "credential", flow: "login_flow" }`
+ * only). The platform runs the flow; the adapter knows the provider protocol.
+ */
+export interface ConnectorCredentialFlow {
+  /**
+   * Begin a provider login for `serverUrl` and return the URL the member must
+   * open, plus the `pending` data `poll` will need.
+   *
+   * `pending` is opaque to the platform, which stores it encrypted and treats it
+   * as secret. Adapters must put only what `poll` needs in it (for example a
+   * poll endpoint and token) and nothing else; it is never returned to a client.
+   */
+  start(input: {
+    serverUrl: string;
+    config: Record<string, unknown>;
+  }): Promise<{ loginUrl: string; pending: Record<string, unknown> }>;
+  /** Check whether the member has approved the login yet. */
+  poll(input: { pending: Record<string, unknown> }): Promise<
+    | { status: "pending" }
+    | {
+        status: "authorized";
+        credential: ConnectorCredentialInput;
+        config: Record<string, unknown>;
+      }
+  >;
+  /**
+   * Best-effort cleanup of a credential the provider already issued when the
+   * connector could not be created afterwards.
+   */
+  discard?(input: {
+    config: Record<string, unknown>;
+    credential: ConnectorCredentialInput;
+  }): Promise<void>;
+}
+
 export interface ConnectorAdapter {
   capabilityId?: string;
   getManifest(): ConnectorManifest;
@@ -1139,6 +1243,12 @@ export interface ConnectorAdapter {
     config: Record<string, unknown>,
     credential: ConnectorCredentialInput,
   ): string;
+  /**
+   * Credential auth with `flow: "login_flow"` only: a server-driven browser
+   * login that yields the credential. Required exactly when the manifest
+   * declares `flow: "login_flow"`; absent otherwise.
+   */
+  credentialFlow?: ConnectorCredentialFlow;
   checkSyncReadiness?(
     input: ConnectorDiscoverInput,
   ): Promise<ConnectorSyncReadinessResult>;

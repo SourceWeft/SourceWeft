@@ -59,6 +59,7 @@ import { ConnectorSettingsDialog } from "./connectors/settings-dialog";
 import { ConnectorsTab } from "./connectors/tab";
 import { ConnectorDisconnectDialog } from "./connectors/disconnect-dialog";
 import { RotateCredentialDialog } from "./connectors/rotate-credential-dialog";
+import { AddLoginFlowDialog } from "./connectors/add-login-flow-dialog";
 import {
   useConnectors,
   type TrackConnectorSyncRun,
@@ -495,6 +496,13 @@ export function SourcesHub({
     rotateCredentialConnector,
     setRotateCredentialConnector,
     handleRotateCredential,
+    loginFlowState,
+    setLoginFlowState,
+    handleAddLoginFlow,
+    handleStartLoginFlow,
+    handlePollLoginFlow,
+    handleCancelLoginFlow,
+    handleLoginFlowConnected,
     handleToggleConnectorStatus,
     handleSaveConnectorSettings,
     handleConfirmDisconnectConnector,
@@ -1474,6 +1482,7 @@ export function SourcesHub({
         initialTab={manageConnectorsInitialTab}
         isLoading={isLoadingConnectors}
         loadingError={connectorsLoadingError}
+        onAddLoginFlow={handleAddLoginFlow}
         onCancelConnector={handleCancelConnector}
         onCheckCredential={handleCheckCredential}
         onCheckFeed={handleCheckFeed}
@@ -1546,6 +1555,25 @@ export function SourcesHub({
           return handleRotateCredential(rotateCredentialConnector, input);
         }}
         open={rotateCredentialConnector !== null}
+      />
+
+      <AddLoginFlowDialog
+        onCancel={handleCancelLoginFlow}
+        onConnected={handleLoginFlowConnected}
+        onOpenChange={(open) => {
+          if (!open) setLoginFlowState(null);
+        }}
+        onPoll={handlePollLoginFlow}
+        onStart={handleStartLoginFlow}
+        open={loginFlowState !== null}
+        reconnect={
+          loginFlowState?.mode === "reconnect"
+            ? {
+                connectorName: loginFlowState.connectorName ?? "",
+                serverUrl: loginFlowState.serverUrl ?? "",
+              }
+            : null
+        }
       />
 
       {workspaceId ? (

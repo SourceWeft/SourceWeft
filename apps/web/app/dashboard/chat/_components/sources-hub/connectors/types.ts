@@ -42,8 +42,10 @@ export type ConnectorCatalogItem = {
   /** Add-only connector: there is no account to authorize, and each entry is
    * its own connector, so the card never reads as connected and its action
    * adds another one. `feed_url` asks for a feed URL; `credential` asks for an
-   * endpoint, a username and an app password (WebDAV). */
-  addMode?: "feed_url" | "credential";
+   * endpoint, a username and an app password (WebDAV); `login_flow` sends the
+   * member to the provider's own browser login and the backend collects the
+   * credential (Nextcloud). */
+  addMode?: "feed_url" | "credential" | "login_flow";
   isIndexable: boolean;
   supportsPeriodicSync: boolean;
   supportsActions: boolean;

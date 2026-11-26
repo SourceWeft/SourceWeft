@@ -14,6 +14,7 @@ import {
 import { buttonVariants } from "@sourceweft/ui-web/components/ui/button";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 
+import { connectorCatalog } from "./catalog";
 import { getConnectorDisplayName } from "./components";
 import type { ConnectorItem } from "./types";
 
@@ -36,6 +37,12 @@ export function ConnectorDisconnectDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const t = useTranslations("dashboardSourcesHub");
+  // A login-flow connector (Nextcloud) revokes its app password best-effort, so
+  // warn that it may need removing by hand in the provider's security settings.
+  const isLoginFlow = connector
+    ? connectorCatalog.find((item) => item.id === connector.raw.connectorType)
+        ?.addMode === "login_flow"
+    : false;
   return (
     <AlertDialog onOpenChange={onOpenChange} open={Boolean(connector)}>
       <AlertDialogContent>
@@ -118,6 +125,11 @@ export function ConnectorDisconnectDialog({
               ? t("connectors.disconnectNoteComposio")
               : t("connectors.disconnectNote")}
           </p>
+          {isLoginFlow ? (
+            <p className="text-xs text-muted-foreground">
+              {t("connectors.nextcloud.disconnectNote")}
+            </p>
+          ) : null}
         </div>
         <AlertDialogFooter>
           <AlertDialogCancel disabled={isBusy}>

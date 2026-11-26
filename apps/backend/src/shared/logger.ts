@@ -30,6 +30,20 @@ const base = pino({
       "req.body.secret",
       "body.credential",
       "body.secret",
+      // Credential login-flow server-side secrets: the opaque `pending` blob the
+      // backend stores encrypted (poll endpoint + token) and the one-time app
+      // password a provider hands back. Same last-line-of-defence rule — no code
+      // path logs these either.
+      "pending",
+      "pollToken",
+      "pending.pollToken",
+      "appPassword",
+      "req.body.pending",
+      "req.body.pollToken",
+      "req.body.appPassword",
+      "body.pending",
+      "body.pollToken",
+      "body.appPassword",
     ],
     censor: "[REDACTED]",
   },

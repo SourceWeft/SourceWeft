@@ -2,6 +2,33 @@ import { ConnectorError } from "./errors";
 import type { ConnectorAdapter, ConnectorManifest } from "./types";
 
 /**
+ * `credentialFlow` and manifest auth `{ kind: "credential", flow: "login_flow" }`
+ * go together: either both are present or both are absent.
+ */
+function assertCredentialFlowMatches(
+  adapter: ConnectorAdapter,
+  manifest: ConnectorManifest,
+) {
+  const declaresFlow =
+    manifest.auth.kind === "credential" && manifest.auth.flow === "login_flow";
+  const hasFlow = adapter.credentialFlow !== undefined;
+  if (declaresFlow && !hasFlow) {
+    throw new ConnectorError(
+      500,
+      "CONNECTOR_MANIFEST_INVALID",
+      `Connector '${manifest.type}' declares flow 'login_flow' but does not implement credentialFlow`,
+    );
+  }
+  if (hasFlow && !declaresFlow) {
+    throw new ConnectorError(
+      500,
+      "CONNECTOR_MANIFEST_INVALID",
+      `Connector '${manifest.type}' implements credentialFlow but its auth is not a credential with flow 'login_flow'`,
+    );
+  }
+}
+
+/**
  * The standard OAuth2 token calls belong to `oauth2` connectors only: both
  * are required there, and a `none` or `credential` connector has no OAuth
  * account to exchange or refresh, so neither may be present. `brokered`
@@ -11,6 +38,7 @@ function assertAdapterMatchesAuthKind(
   adapter: ConnectorAdapter,
   manifest: ConnectorManifest,
 ) {
+  assertCredentialFlowMatches(adapter, manifest);
   const kind = manifest.auth.kind;
   if (kind !== "oauth2" && kind !== "none" && kind !== "credential") return;
   const methods = ["exchangeOAuthCode", "refreshOAuthToken"] as const;

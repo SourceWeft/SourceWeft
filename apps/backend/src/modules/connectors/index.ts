@@ -1,5 +1,6 @@
 import { billingRuntime as billingService } from "../../billing-host/bindings";
 import { ConnectorActionRunner } from "./action-runner";
+import { ConnectorCredentialFlowService } from "./credential-flow";
 import { ConnectorOAuthService } from "./oauth-service";
 import { ConnectorPersonalDataService } from "./personal-data-service";
 import {
@@ -12,6 +13,8 @@ import { ConnectorTeamDataRemoval } from "./team-data-removal";
 import { ConnectorWebhookService } from "./webhook-service";
 
 export { ConnectorActionRunner } from "./action-runner";
+export { ConnectorCredentialFlowService } from "./credential-flow";
+export type { CredentialFlowPollResult } from "./credential-flow";
 export { ConnectorError, isConnectorError } from "./errors";
 export { ConnectorOAuthService } from "./oauth-service";
 export {
@@ -49,6 +52,9 @@ export { connectorAdaptersReady };
 
 export const connectorService = new ConnectorService();
 export const connectorOAuthService = new ConnectorOAuthService();
+// Credential login flow (backend owns the poll token and the issued secret).
+export const connectorCredentialFlowService =
+  new ConnectorCredentialFlowService(connectorService);
 // Account and organization deletion: revoke at the providers, then delete.
 export const connectorTeamDataRemoval = new ConnectorTeamDataRemoval(
   connectorOAuthService,

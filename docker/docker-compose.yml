@@ -88,6 +88,7 @@ x-sourceweft-env: &sourceweft-env
   RSS_CONNECTOR_ENABLED: ${RSS_CONNECTOR_ENABLED:-false}
   # WebDAV (auth kind "credential"): a stored username/app password, no OAuth app.
   # Restart api, worker and scheduler together after changing it; off hides it.
+  # Also gates the Nextcloud connector (Login Flow v2), which ships in the same package.
   WEBDAV_CONNECTOR_ENABLED: ${WEBDAV_CONNECTOR_ENABLED:-false}
   BLOG_ASSET_MAX_BYTES: ${BLOG_ASSET_MAX_BYTES:-15728640}
   SOURCEWEFT_SANDBOX_ENABLED: ${SOURCEWEFT_SANDBOX_ENABLED:-false}

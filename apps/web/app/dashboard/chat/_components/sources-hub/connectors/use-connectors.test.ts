@@ -24,6 +24,9 @@ const {
   create,
   checkConfig,
   rotateCredential,
+  startCredentialFlow,
+  pollCredentialFlow,
+  cancelCredentialFlow,
 } = vi.hoisted(() => ({
   list: vi.fn(),
   listAccounts: vi.fn(),
@@ -38,6 +41,9 @@ const {
   create: vi.fn(),
   checkConfig: vi.fn(),
   rotateCredential: vi.fn(),
+  startCredentialFlow: vi.fn(),
+  pollCredentialFlow: vi.fn(),
+  cancelCredentialFlow: vi.fn(),
 }));
 
 const sessionState = vi.hoisted(() => ({ userId: "user-1" }));
@@ -63,6 +69,9 @@ vi.mock("../../../../../../lib/sdk", () => ({
     create,
     checkConfig,
     rotateCredential,
+    startCredentialFlow,
+    pollCredentialFlow,
+    cancelCredentialFlow,
   },
 }));
 
@@ -262,6 +271,9 @@ beforeEach(() => {
     create,
     checkConfig,
     rotateCredential,
+    startCredentialFlow,
+    pollCredentialFlow,
+    cancelCredentialFlow,
     toastError,
     toastSuccess,
     toastInfo,
@@ -1554,6 +1566,173 @@ test("handleRotateCredential rotates the credential and closes the rotate dialog
     secret: "new-pass",
   });
   expect(api().rotateCredentialConnector).toBeNull();
+});
+
+function nextcloudConnector(overrides: Partial<SourceConnector> = {}) {
+  return fakeConnector({
+    id: "nc-1",
+    connectorType: "nextcloud",
+    name: "My Nextcloud",
+    oauthAccountId: "acc-nc",
+    configJson: {
+      server: "https://cloud.example.com",
+      endpoint: "https://cloud.example.com/remote.php/dav/files/alice/",
+      userId: "alice",
+      roots: ["/"],
+    },
+    credentialConfigured: true,
+    credentialDisplayName: "alice",
+    ...overrides,
+  });
+}
+
+const nextcloudItem = {
+  id: "nextcloud",
+  name: "Nextcloud",
+} as unknown as Parameters<HookApi["handleAddLoginFlow"]>[0];
+
+test("handleAddLoginFlow opens the login-flow dialog in add mode", async () => {
+  await mountHook(baseInput("ws-nc-add"));
+  expect(api().loginFlowState).toBeNull();
+  act(() => {
+    api().handleAddLoginFlow(nextcloudItem);
+  });
+  expect(api().loginFlowState).toEqual({
+    mode: "add",
+    connectorType: "nextcloud",
+  });
+});
+
+test("handleReconnectConnector starts the login flow with connectorId and shows no password dialog", async () => {
+  list.mockResolvedValue({ items: [nextcloudConnector()] });
+  const assign = vi.fn();
+  const original = window.location;
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    value: { ...original, href: original.href, origin: original.origin, assign },
+  });
+  try {
+    await mountHook(baseInput("ws-nc-reconnect"));
+    act(() => {
+      api().handleReconnectConnector(api().connectors[0]!);
+    });
+    expect(assign).not.toHaveBeenCalled();
+    // No password/rotate dialog for a login-flow connector.
+    expect(api().rotateCredentialConnector).toBeNull();
+    expect(api().loginFlowState).toEqual({
+      mode: "reconnect",
+      connectorType: "nextcloud",
+      connectorId: "nc-1",
+      serverUrl: "https://cloud.example.com",
+      connectorName: "My Nextcloud",
+    });
+  } finally {
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: original,
+    });
+  }
+});
+
+test("handleStartLoginFlow sends the add request without a connectorId", async () => {
+  startCredentialFlow.mockResolvedValue({ flowId: "f1", loginUrl: "https://x/login" });
+  await mountHook(baseInput("ws-nc-start"));
+  act(() => {
+    api().handleAddLoginFlow(nextcloudItem);
+  });
+  await act(async () => {
+    await api().handleStartLoginFlow({
+      serverUrl: "https://cloud.example.com",
+      name: "My Nextcloud",
+      roots: ["/Documents/"],
+      periodicIndexingEnabled: true,
+    });
+  });
+  expect(startCredentialFlow).toHaveBeenCalledWith("ws-nc-start", "nextcloud", {
+    serverUrl: "https://cloud.example.com",
+    name: "My Nextcloud",
+    roots: ["/Documents/"],
+    periodicIndexingEnabled: true,
+  });
+});
+
+test("handleStartLoginFlow adds the connectorId when reconnecting", async () => {
+  list.mockResolvedValue({ items: [nextcloudConnector()] });
+  startCredentialFlow.mockResolvedValue({ flowId: "f2", loginUrl: "https://x/login" });
+  await mountHook(baseInput("ws-nc-start2"));
+  act(() => {
+    api().handleReconnectConnector(api().connectors[0]!);
+  });
+  await act(async () => {
+    await api().handleStartLoginFlow({
+      serverUrl: "https://cloud.example.com",
+      name: "My Nextcloud",
+    });
+  });
+  expect(startCredentialFlow).toHaveBeenCalledWith("ws-nc-start2", "nextcloud", {
+    serverUrl: "https://cloud.example.com",
+    name: "My Nextcloud",
+    connectorId: "nc-1",
+  });
+});
+
+test("handlePollLoginFlow polls the connector type from the open dialog", async () => {
+  pollCredentialFlow.mockResolvedValue({ status: "pending" });
+  await mountHook(baseInput("ws-nc-poll"));
+  act(() => {
+    api().handleAddLoginFlow(nextcloudItem);
+  });
+  await act(async () => {
+    await api().handlePollLoginFlow("flow-xyz");
+  });
+  expect(pollCredentialFlow).toHaveBeenCalledWith("ws-nc-poll", "nextcloud", {
+    flowId: "flow-xyz",
+  });
+});
+
+test("handleCancelLoginFlow deletes the flow and swallows failures", async () => {
+  cancelCredentialFlow.mockRejectedValue(new Error("gone"));
+  await mountHook(baseInput("ws-nc-cancel"));
+  act(() => {
+    api().handleAddLoginFlow(nextcloudItem);
+  });
+  await act(async () => {
+    await api().handleCancelLoginFlow("flow-xyz");
+  });
+  expect(cancelCredentialFlow).toHaveBeenCalledWith(
+    "ws-nc-cancel",
+    "nextcloud",
+    "flow-xyz",
+  );
+});
+
+test("an add-mode connected flow triggers the first sync", async () => {
+  sync.mockResolvedValue({});
+  await mountHook(baseInput("ws-nc-connected"));
+  act(() => {
+    api().handleAddLoginFlow(nextcloudItem);
+  });
+  await act(async () => {
+    await api().handleLoginFlowConnected(nextcloudConnector());
+  });
+  expect(sync).toHaveBeenCalledWith("ws-nc-connected", "nc-1");
+  expect(toastSuccess).toHaveBeenCalled();
+});
+
+test("a reconnect connected flow refreshes without a first sync", async () => {
+  await mountHook(baseInput("ws-nc-reconnected"));
+  act(() => {
+    api().setLoginFlowState({
+      mode: "reconnect",
+      connectorType: "nextcloud",
+      connectorId: "nc-1",
+    });
+  });
+  await act(async () => {
+    await api().handleLoginFlowConnected(nextcloudConnector());
+  });
+  expect(sync).not.toHaveBeenCalled();
+  expect(toastSuccess).toHaveBeenCalledWith("My Nextcloud reconnected.");
 });
 
 test("handleCheckFeed checks the rss config and maps title and item count", async () => {

@@ -421,9 +421,12 @@ function getOAuthConnectorStatus(
   return {
     kind: "available",
     label: t("connectors.status.available"),
-    detail: input.item.addMode
-      ? t("connectors.detail.availableAddFeed")
-      : t("connectors.detail.available", { name: input.item.name }),
+    detail:
+      input.item.addMode === "login_flow"
+        ? t("connectors.detail.availableLoginFlow", { name: input.item.name })
+        : input.item.addMode
+          ? t("connectors.detail.availableAddFeed")
+          : t("connectors.detail.available", { name: input.item.name }),
   };
 }
 
@@ -539,6 +542,7 @@ export const ConnectorCatalogCard = memoComponent(
     status,
     connector,
     onAddCredential,
+    onAddLoginFlow,
     onAddFeed,
     onCancelConnector,
     onConfigure,
@@ -554,6 +558,9 @@ export const ConnectorCatalogCard = memoComponent(
     /** Add-only credential cards (`item.addMode === "credential"`) call this
      * instead of starting OAuth, so WebDAV opens its endpoint/credential dialog. */
     onAddCredential: (item: ConnectorCatalogItem) => void;
+    /** Add-only login-flow cards (`item.addMode === "login_flow"`) call this
+     * instead of starting OAuth, so Nextcloud opens its browser-login dialog. */
+    onAddLoginFlow: (item: ConnectorCatalogItem) => void;
     /** Add-only feed cards (`item.addMode === "feed_url"`) call this instead of
      * starting OAuth. Required so an add-only card can never render a button
      * that does nothing. */
@@ -586,7 +593,7 @@ export const ConnectorCatalogCard = memoComponent(
     const canReconnect = Boolean(connector) && status.kind === "error";
     const cta = isBusy
       ? t("connectors.cta.connecting")
-      : item.addMode === "credential"
+      : item.addMode === "credential" || item.addMode === "login_flow"
         ? t("connectors.cta.connect")
         : item.addMode
           ? t("connectors.cta.addFeed")
@@ -602,6 +609,10 @@ export const ConnectorCatalogCard = memoComponent(
     function handleAction() {
       if (item.addMode === "credential") {
         onAddCredential(item);
+        return;
+      }
+      if (item.addMode === "login_flow") {
+        onAddLoginFlow(item);
         return;
       }
       if (item.addMode) {

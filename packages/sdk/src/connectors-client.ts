@@ -29,7 +29,11 @@ import type {
   ListWorkspaceConnectorSyncRunsRequest,
   ListWorkspaceConnectorSyncRunsResponse,
   ConnectorCredentialStatus,
+  PollCredentialFlowRequest,
+  PollCredentialFlowResponse,
   RotateConnectorCredentialRequest,
+  StartCredentialFlowRequest,
+  StartCredentialFlowResponse,
   StartConnectorOAuthRequest,
   StartConnectorOAuthResponse,
   TriggerConnectorSyncResponse,
@@ -209,6 +213,46 @@ export class ConnectorsClient {
     return this.http.put<ConnectorCredentialStatus>(
       `/v1/workspaces/${encode(workspaceId)}/connectors/${encode(connectorId)}/credential`,
       input,
+    );
+  }
+
+  /**
+   * Credential login flow (`auth.flow: "login_flow"`, e.g. Nextcloud). Start a
+   * server-driven browser login; the backend returns an opaque `flowId` and the
+   * `loginUrl` the member opens. The poll token and the issued secret never
+   * reach the browser.
+   */
+  startCredentialFlow(
+    workspaceId: string,
+    connectorType: string,
+    input: StartCredentialFlowRequest,
+  ) {
+    return this.http.post<StartCredentialFlowResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/connectors/${encode(connectorType)}/credential-flow/start`,
+      input,
+    );
+  }
+
+  /** Poll an in-progress credential login flow for approval. */
+  pollCredentialFlow(
+    workspaceId: string,
+    connectorType: string,
+    input: PollCredentialFlowRequest,
+  ) {
+    return this.http.post<PollCredentialFlowResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/connectors/${encode(connectorType)}/credential-flow/poll`,
+      input,
+    );
+  }
+
+  /** Cancel an in-progress credential login flow (best-effort). */
+  cancelCredentialFlow(
+    workspaceId: string,
+    connectorType: string,
+    flowId: string,
+  ) {
+    return this.http.delete<{ canceled: boolean }>(
+      `/v1/workspaces/${encode(workspaceId)}/connectors/${encode(connectorType)}/credential-flow/${encode(flowId)}`,
     );
   }
 

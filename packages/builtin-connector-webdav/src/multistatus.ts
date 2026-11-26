@@ -11,7 +11,41 @@ export type DavEntry = {
   lastModified: Date | null;
   contentLength: number | null;
   contentType: string | null;
+  /**
+   * owncloud/Nextcloud `oc:` properties, read only from an element whose prefix
+   * is bound to the owncloud namespace URI `http://owncloud.org/ns` (a
+   * prefix-agnostic `fileid` under a foreign namespace is ignored, so a
+   * non-Nextcloud server cannot masquerade). A key is present on the entry only
+   * when the server returned the corresponding element — so a plain WebDAV entry
+   * carries none of them and keeps its historical shape. The value is `null`
+   * when the element was returned but empty, or returned a value that failed the
+   * flavor-independent sanity check below; consumers that need a uniform "null
+   * when absent" read it through a `?? null` (see the flavor's item identity).
+   * Filled only when a flavor asks for them via `propfind`'s `extraProps`:
+   *  - `fileId` must match {@link OC_FILE_ID_PATTERN} (so it is safe to embed in
+   *    an external id and a canonical URL); otherwise it reads as `null`.
+   *  - `permissions` is at most {@link MAX_OC_PERMISSIONS_LENGTH} characters and
+   *    `ownerId` at most {@link MAX_OC_OWNER_ID_LENGTH}; a longer value reads as
+   *    `null`.
+   */
+  fileId?: string | null;
+  permissions?: string | null;
+  ownerId?: string | null;
 };
+
+/** The owncloud/Nextcloud property namespace. An `oc:` prop counts only when its
+ * prefix resolves to this URI. */
+const OWNCLOUD_NS = "http://owncloud.org/ns";
+
+/** A Nextcloud file id is a short token of ASCII word characters and hyphens.
+ * Anything else (spaces, slashes, markup, an over-long value) is rejected so the
+ * id is always safe to use as an external id and inside a canonical URL. */
+export const OC_FILE_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** Length caps on the free-text `oc:permissions` / `oc:owner-id` values: a
+ * server returning anything longer is not trusted for that property. */
+export const MAX_OC_PERMISSIONS_LENGTH = 32;
+export const MAX_OC_OWNER_ID_LENGTH = 256;
 
 /**
  * Parser limits. Any `<!ENTITY` is rejected before parsing, so only the five
@@ -125,6 +159,123 @@ function propertiesOf(response: Node): Node {
   return merged;
 }
 
+/** The local name of a (possibly namespace-prefixed) element or attribute key. */
+function localName(key: string): string {
+  const colon = key.indexOf(":");
+  return colon === -1 ? key : key.slice(colon + 1);
+}
+
+/** The first child value of `node` whose key has the given local name, skipping
+ * attribute keys. */
+function pickLocal(node: Node, local: string): unknown {
+  for (const [key, value] of Object.entries(node)) {
+    if (key.startsWith("@_")) continue;
+    if (localName(key) === local) return value;
+  }
+  return undefined;
+}
+
+const asArray = (value: unknown): unknown[] =>
+  Array.isArray(value) ? value : value === undefined ? [] : [value];
+
+/** Collects the `xmlns` / `xmlns:<prefix>` declarations an element carries into
+ * a prefix -> URI map (the default namespace is the empty-string key). */
+function xmlnsOf(node: Node): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const [key, value] of Object.entries(node)) {
+    if (typeof value !== "string") continue;
+    if (key === "@_xmlns") map[""] = value;
+    else if (key.startsWith("@_xmlns:"))
+      map[key.slice("@_xmlns:".length)] = value;
+  }
+  return map;
+}
+
+/**
+ * A second parse that keeps namespace prefixes and attributes, used only to read
+ * the owncloud `oc:` properties with their namespace verified — the primary
+ * parse strips prefixes (which is exactly what the standard DAV properties want,
+ * since servers use many different prefixes for them). The caller runs this only
+ * when the document actually declares the owncloud namespace, so a plain WebDAV
+ * response is parsed once and unchanged.
+ */
+const OC_PARSER = new XMLParser({
+  ignoreAttributes: false,
+  attributeNamePrefix: "@_",
+  removeNSPrefix: false,
+  parseTagValue: false,
+  maxNestedTags: MAX_NESTED_TAGS,
+  processEntities: PROCESS_ENTITIES,
+  isArray: (name) => ARRAY_TAGS.has(localName(name)),
+});
+
+type OcProps = {
+  fileId?: string | null;
+  permissions?: string | null;
+  ownerId?: string | null;
+};
+
+const sanitizeFileId = (value: string | null): string | null =>
+  value !== null && OC_FILE_ID_PATTERN.test(value) ? value : null;
+
+const capped = (value: string | null, max: number): string | null =>
+  value !== null && value.length <= max ? value : null;
+
+/**
+ * Reads the owncloud `oc:fileid` / `oc:permissions` / `oc:owner-id` properties
+ * per response href, accepting a property only when its element's prefix is
+ * bound to {@link OWNCLOUD_NS}. First value wins (per href and per property),
+ * mirroring the primary parse's duplicate-href and first-propstat semantics.
+ * Values are sanity-checked ({@link sanitizeFileId}, length caps); a present but
+ * unusable value reads as `null`, and a key is set only when the (owncloud)
+ * element was present. Any parse failure yields no owncloud data rather than
+ * throwing: the primary parse has already validated the document.
+ */
+function extractOwncloudProps(xml: string): Map<string, OcProps> {
+  const out = new Map<string, OcProps>();
+  let parsed: unknown;
+  try {
+    parsed = OC_PARSER.parse(xml);
+  } catch {
+    return out;
+  }
+  if (!isNode(parsed)) return out;
+  const multistatus = pickLocal(parsed, "multistatus");
+  if (!isNode(multistatus)) return out;
+  const rootNs = { ...xmlnsOf(parsed), ...xmlnsOf(multistatus) };
+  for (const response of asArray(pickLocal(multistatus, "response"))) {
+    if (!isNode(response)) continue;
+    const href = text(pickLocal(response, "href"));
+    if (href === null || out.has(href)) continue;
+    const responseNs = { ...rootNs, ...xmlnsOf(response) };
+    const oc: OcProps = {};
+    for (const propstat of asArray(pickLocal(response, "propstat"))) {
+      if (!isNode(propstat)) continue;
+      if (!isSuccessStatus(pickLocal(propstat, "status"))) continue;
+      const prop = pickLocal(propstat, "prop");
+      if (!isNode(prop)) continue;
+      const propNs = { ...responseNs, ...xmlnsOf(prop) };
+      for (const [key, value] of Object.entries(prop)) {
+        if (key.startsWith("@_")) continue;
+        const colon = key.indexOf(":");
+        const prefix = colon === -1 ? "" : key.slice(0, colon);
+        if (propNs[prefix] !== OWNCLOUD_NS) continue;
+        const name = localName(key);
+        if (name === "fileid" && !("fileId" in oc)) oc.fileId = text(value);
+        else if (name === "permissions" && !("permissions" in oc)) {
+          oc.permissions = text(value);
+        } else if (name === "owner-id" && !("ownerId" in oc)) {
+          oc.ownerId = text(value);
+        }
+      }
+    }
+    if ("fileId" in oc || "permissions" in oc || "ownerId" in oc) {
+      out.set(href, oc);
+    }
+  }
+  return out;
+}
+
 /**
  * Parses a WebDAV 207 multistatus into entries. Properties a server could not
  * supply (404 propstat, missing, malformed) read as null. A response without
@@ -149,6 +300,12 @@ export function parseMultistatus(
     ? multistatus["response"]
     : [];
 
+  // The owncloud properties are read from a second, namespace-aware parse, but
+  // only when the document declares the owncloud namespace at all — so a plain
+  // WebDAV response is parsed exactly once and its entries keep their historical
+  // shape.
+  const ocProps = xml.includes(OWNCLOUD_NS) ? extractOwncloudProps(xml) : null;
+
   const seen = new Set<string>();
   const entries: DavEntry[] = [];
   for (const response of responses) {
@@ -164,14 +321,32 @@ export function parseMultistatus(
     seen.add(href);
     const props = propertiesOf(response);
     const resourcetype = props["resourcetype"];
-    entries.push({
+    const entry: DavEntry = {
       href,
       isCollection: isNode(resourcetype) && "collection" in resourcetype,
       etag: text(props["getetag"]),
       lastModified: dateOf(props["getlastmodified"]),
       contentLength: contentLengthOf(props["getcontentlength"]),
       contentType: text(props["getcontenttype"]),
-    });
+    };
+    // Owncloud properties come from the namespace-verified extraction above. A
+    // key is added only when the server returned the (owncloud-namespaced)
+    // element, so a plain WebDAV entry is untouched; a present-but-empty or
+    // present-but-unusable element reads as null.
+    const oc = ocProps?.get(href);
+    if (oc) {
+      if ("fileId" in oc) entry.fileId = sanitizeFileId(oc.fileId ?? null);
+      if ("permissions" in oc) {
+        entry.permissions = capped(
+          oc.permissions ?? null,
+          MAX_OC_PERMISSIONS_LENGTH,
+        );
+      }
+      if ("ownerId" in oc) {
+        entry.ownerId = capped(oc.ownerId ?? null, MAX_OC_OWNER_ID_LENGTH);
+      }
+    }
+    entries.push(entry);
   }
   return entries;
 }

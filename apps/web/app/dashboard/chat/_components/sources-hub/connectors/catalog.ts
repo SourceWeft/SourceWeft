@@ -1,6 +1,7 @@
 import {
   BookOpenText,
   Box,
+  Cloud,
   FileText,
   FolderGit2,
   HardDrive,
@@ -171,6 +172,23 @@ export const connectorCatalog: ConnectorCatalogItem[] = [
     supportsPeriodicSync: true,
     supportsWebhook: false,
     addMode: "credential",
+  },
+  {
+    id: "nextcloud",
+    name: "Nextcloud",
+    category: "Knowledge & Docs",
+    description:
+      "Sign in to Nextcloud in your browser, then index the folders you choose and keep them in sync.",
+    capabilities: ["Folders", "Scheduled sync"],
+    requiresBackendRegistration: true,
+    // A generic Lucide cloud mark (no Nextcloud artwork is shipped), per the
+    // icon rules; WebDAV uses the lucide `Server` glyph the same way.
+    icon: Cloud,
+    isIndexable: true,
+    supportsActions: false,
+    supportsPeriodicSync: true,
+    supportsWebhook: false,
+    addMode: "login_flow",
   },
 ];
 

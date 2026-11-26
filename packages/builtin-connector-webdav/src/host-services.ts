@@ -3,6 +3,7 @@ import type {
   CreateConnectorAdapters,
 } from "@sourceweft/contracts/capability-host-services";
 import { createWebdavAdapter } from "./adapter";
+import { nextcloudFlavor } from "./nextcloud/flavor";
 
 /**
  * WebDAV is gated behind a strict boolean deployment switch, exactly like the
@@ -14,6 +15,12 @@ import { createWebdavAdapter } from "./adapter";
  * WebDAV needs the host's credentialed fetch (public HTTPS plus the
  * deployment's allowed private origins, cross-origin redirects refused) and
  * fails fast rather than falling back to an unrestricted one.
+ *
+ * The one switch registers both connectors this package ships — plain WebDAV and
+ * Nextcloud, two flavors of the same adapter — so both appear in the catalog
+ * when it is on and neither when it is off. They share the same credentialed
+ * fetch and the same allowed-origins allowlist; there is no Nextcloud-specific
+ * environment variable.
  */
 export const createConnectorAdapters: CreateConnectorAdapters = ({
   env,
@@ -33,7 +40,14 @@ export const createConnectorAdapters: CreateConnectorAdapters = ({
     );
   }
   return {
-    adapters: [createWebdavAdapter({ credentialedFetch, logger })],
+    adapters: [
+      createWebdavAdapter({ credentialedFetch, logger }),
+      createWebdavAdapter({
+        credentialedFetch,
+        logger,
+        flavor: nextcloudFlavor,
+      }),
+    ],
     agentToolDefs: [],
   };
 };

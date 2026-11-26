@@ -3464,7 +3464,8 @@
         "connectedAutoCreate": "Authorization exists without an active connector. Reconnect to create a connector.",
         "connectedConfigure": "OAuth is connected. Configure this connector to enable syncing.",
         "available": "Ready to connect with {name} OAuth.",
-        "availableAddFeed": "Add the URL of a public RSS or Atom feed."
+        "availableAddFeed": "Add the URL of a public RSS or Atom feed.",
+        "availableLoginFlow": "Sign in to {name} in your browser to connect."
       },
       "syncBlock": {
         "pagesLimit": "Ingestion pages are used up. The last run indexed {count} items before pausing; syncing resumes automatically when pages are available.",
@@ -3549,6 +3550,51 @@
           "save": "Reconnect",
           "failed": "Could not update the credentials. Try again."
         }
+      },
+      "nextcloud": {
+        "serverLabel": "Server URL",
+        "serverHint": "The address of your Nextcloud, for example https://cloud.example.com.",
+        "nameLabel": "Name (optional)",
+        "foldersLabel": "Folders to index",
+        "foldersHint": "One folder path per line. Leave the default to index your whole account.",
+        "dialog": {
+          "title": "Connect with Nextcloud",
+          "description": "Sign in to your Nextcloud in a new tab and approve access. SourceWeft never sees your password.",
+          "connect": "Connect with Nextcloud",
+          "connecting": "Opening Nextcloud...",
+          "autoSync": "Sync automatically",
+          "autoSyncHint": "Check for new and changed files on a schedule. Off by default; you can sync manually anytime.",
+          "waitingTitle": "Waiting for approval",
+          "waitingDescription": "Approve the login in the Nextcloud tab that opened. This dialog updates on its own.",
+          "openAgain": "Open Nextcloud again",
+          "tryAgain": "Try again",
+          "invalidServer": "Enter an http:// or https:// server URL without a username, password or query string.",
+          "invalidRoots": "Enter valid folder paths, one per line. Paths cannot contain \"..\".",
+          "rootsLimit": "Choose at most 20 folders."
+        },
+        "reconnect": {
+          "title": "Reconnect Nextcloud",
+          "description": "Sign in again to {name} to restore access. The same server and account are required."
+        },
+        "errors": {
+          "unreachable": "The Nextcloud server could not be reached. Check the address and try again.",
+          "notNextcloud": "This server does not look like a Nextcloud that supports browser login.",
+          "invalidResponse": "The Nextcloud login response was not valid. Try again.",
+          "blockedAddress": "This server address is not allowed by this deployment.",
+          "notSupported": "This connector does not support signing in through the browser.",
+          "tooManyFlows": "Too many logins are already in progress. Finish or cancel one, then try again.",
+          "reconnectMismatch": "This login does not match the connector you are reconnecting. Use the same server and account.",
+          "alreadyConnected": "A connector for this Nextcloud account already exists in this workspace.",
+          "notAllowed": "This server address is not allowed by this deployment.",
+          "notReady": "SourceWeft could not confirm access to this Nextcloud. Check your permissions and try again.",
+          "permissionLost": "The account no longer has access. Reconnect and try again.",
+          "pathNotFound": "One of the chosen folders was not found on the server.",
+          "pathForbidden": "The account is not allowed to read one of the chosen folders.",
+          "expired": "The login approval expired. Start again.",
+          "timedOut": "The login was not approved in time. Start again.",
+          "failed": "The connection could not be completed. Try again."
+        },
+        "disconnectNote": "SourceWeft tries to remove the app password it created, but if that does not succeed you can delete it in Nextcloud under Settings > Security."
       },
       "gmail": {
         "modeTitle": "Choose how to use Gmail",
