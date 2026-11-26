@@ -145,7 +145,37 @@ test("If-Modified-Since-Version yields not_modified only when unchanged", async 
   assert.equal(changed.libraryVersion, 8);
 });
 
-test("a 304 without a conditional request or version is a bad response", async () => {
+test("a 304 without a version header reports the requested version", async () => {
+  const { fake, client } = setup({ items: objects(1) });
+  const page = await client.getPage("items", {
+    start: 0,
+    ifModifiedSinceVersion: 9,
+  });
+  assert.deepEqual(page, { status: "not_modified", libraryVersion: 9 });
+  assert.equal(fake.requests.length, 1);
+});
+
+test("a 304 that carries a version header reports that version", async () => {
+  const { fake, client } = setup({ items: objects(1) });
+  fake.mutateNext({ "Last-Modified-Version": "8" });
+  const page = await client.getPage("items", {
+    start: 0,
+    ifModifiedSinceVersion: 9,
+  });
+  assert.deepEqual(page, { status: "not_modified", libraryVersion: 8 });
+});
+
+test("a 304 with a malformed version header falls back to the requested one", async () => {
+  const { fake, client } = setup({ items: objects(1) });
+  fake.mutateNext({ "Last-Modified-Version": "seven" });
+  const page = await client.getPage("items", {
+    start: 0,
+    ifModifiedSinceVersion: 9,
+  });
+  assert.deepEqual(page, { status: "not_modified", libraryVersion: 9 });
+});
+
+test("a 304 to a non-conditional request is a bad response", async () => {
   const { fake, client } = setup({ items: objects(1) });
   fake.failNext({ status: 304, headers: { "Last-Modified-Version": "7" } });
   assert.equal(
@@ -154,9 +184,7 @@ test("a 304 without a conditional request or version is a bad response", async (
   );
   fake.failNext({ status: 304 });
   assert.equal(
-    await codeOf(
-      client.getPage("items", { start: 0, ifModifiedSinceVersion: 7 }),
-    ),
+    await codeOf(client.getPage("items", { start: 0 })),
     "ZOTERO_BAD_RESPONSE",
   );
 });

@@ -123,7 +123,8 @@ export function startFakeZotero(initial: FakeLibrary): FakeZotero {
 
     const since = request.headers["if-modified-since-version"];
     if (since !== undefined && Number(since) >= version()) {
-      return new Response(null, { status: 304, headers: base });
+      // Like the real service, a 304 carries no Last-Modified-Version.
+      return new Response(null, { status: 304 });
     }
 
     const page = (all: FakeObject[]): Response => {

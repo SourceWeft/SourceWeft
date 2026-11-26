@@ -444,10 +444,14 @@ export function createZoteroClient(
         ),
       );
       if (reply.kind === "not_modified") {
-        if (reply.libraryVersion === null) {
-          throw new ZoteroError("ZOTERO_BAD_RESPONSE");
-        }
-        return { status: "not_modified", libraryVersion: reply.libraryVersion };
+        // The real service sends no Last-Modified-Version on a 304: "not
+        // modified" means the library is not newer than the version we sent.
+        // A version header, when present and valid, wins.
+        return {
+          status: "not_modified",
+          libraryVersion:
+            reply.libraryVersion ?? (ifModifiedSinceVersion as number),
+        };
       }
       const libraryVersion = requireVersion(reply);
       if (!Array.isArray(reply.json) || reply.totalResults === null) {
