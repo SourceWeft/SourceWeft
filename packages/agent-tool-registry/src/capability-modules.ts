@@ -43,6 +43,8 @@ export const BUILTIN_CAPABILITY_MODULES: Record<
     import("@sourceweft/builtin-connector-dropbox"),
   "@sourceweft/builtin-connector-rss": () =>
     import("@sourceweft/builtin-connector-rss"),
+  "@sourceweft/builtin-connector-discourse": () =>
+    import("@sourceweft/builtin-connector-discourse"),
   "@sourceweft/builtin-connector-github": () =>
     import("@sourceweft/builtin-connector-github"),
   "@sourceweft/builtin-connector-linear": () =>

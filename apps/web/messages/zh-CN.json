@@ -3489,7 +3489,8 @@
         "available": "可通过 {name} OAuth 进行连接。",
         "availableAddFeed": "添加公开 RSS 或 Atom 订阅源的网址。",
         "availableLoginFlow": "在浏览器中登录 {name} 以进行连接。",
-        "availableAddApiKey": "使用只读 API 密钥添加 Zotero 文库。"
+        "availableAddApiKey": "使用只读 API 密钥添加 Zotero 文库。",
+        "availableAddForum": "使用网址添加公开的 Discourse 论坛。"
       },
       "syncBlock": {
         "pagesLimit": "页数额度已用完。上次同步索引了 {count} 条内容后暂停，额度恢复后会自动继续同步。",
@@ -3664,6 +3665,41 @@
           "save": "重新连接",
           "failed": "无法更新 API 密钥，请重试。",
           "libraryUnknown": "此连接器缺少文库信息，无法在这里替换密钥。"
+        }
+      },
+      "discourse": {
+        "forumUrlLabel": "论坛网址",
+        "forumUrlHint": "论坛首页的网址，例如 https://forum.example.com。仅支持公开论坛。",
+        "nameLabel": "名称（可选）",
+        "refreshLabel": "主题更新方式",
+        "refreshLight": "轻量",
+        "refreshLightHint": "获取新回复、删除，以及标题、分类和标签的变更。速度快。",
+        "refreshDeep": "深度",
+        "refreshDeepHint": "还会获取旧帖子的编辑。速度较慢，因为每个主题都会被重新读取。",
+        "dialog": {
+          "title": "连接 Discourse 论坛",
+          "description": "输入公开 Discourse 论坛的网址。SourceWeft 会先检查能否读取该论坛，随后由你选择要索引的分类或主题。",
+          "privateNote": "不支持需要登录才能访问的私有论坛。",
+          "check": "检查论坛",
+          "checking": "检查中…",
+          "reachable": "论坛可访问",
+          "reachableHint": "接下来，请选择要索引的分类或主题。",
+          "add": "添加论坛",
+          "autoSync": "自动同步",
+          "autoSyncHint": "定期检查新增和变更的帖子。默认关闭；你随时可以手动同步。",
+          "invalidUrl": "请输入以 https:// 开头的论坛网址：不能带用户名、端口号、? 后的查询内容或 # 片段，也不能是 IP 地址或 localhost；主机名含非英文字符时，请使用 ASCII（punycode）形式。",
+          "checkFailed": "无法检查该论坛，请重试。",
+          "nameConflict": "此工作区中已存在同名连接器。请更改名称，或使用已有的连接器。",
+          "addFailed": "添加论坛失败。"
+        },
+        "readiness": {
+          "selection_required": "论坛可访问 · 请选择要索引的分类或主题",
+          "login_required": "此论坛需要登录。不支持私有论坛。",
+          "not_a_discourse_site": "此网址不是 Discourse 论坛。请使用论坛首页的网址。",
+          "forum_unreachable": "无法连接到该论坛，请稍后重试。",
+          "blocked_endpoint": "无法使用此网址：此部署可能不允许连接该网址，或者该论坛会重定向到另一个网址。请输入论坛自己的首页网址（即它重定向到的网址）。",
+          "rate_limited": "论坛当前正在限制请求。请稍等片刻后重试。",
+          "config_invalid": "论坛网址或更新方式无效。"
         }
       },
       "gmail": {
@@ -3900,6 +3936,24 @@
               "description": "打开分类查看其子分类，然后勾选要索引的分类。",
               "root": "文库",
               "emptyContainer": "此分类没有子分类。"
+            }
+          },
+          "discourse": {
+            "itemsTitle": "分类和主题",
+            "itemsDescription": "选择要索引的分类和主题。所选分类包含其子分类及其中的主题。开启自动同步后，所选内容会按连接器的同步计划保持同步。",
+            "choose": "选择分类和主题",
+            "empty": "尚未选择任何内容。请选择分类或主题以开始索引。",
+            "kinds": {
+              "category": "分类",
+              "topic": "主题"
+            },
+            "disabledReason": {
+              "restricted": "此分类为受限分类，无法索引"
+            },
+            "browser": {
+              "description": "打开分类查看其子分类和主题，然后勾选要索引的内容。",
+              "root": "论坛",
+              "emptyContainer": "这里还没有内容。"
             }
           }
         }

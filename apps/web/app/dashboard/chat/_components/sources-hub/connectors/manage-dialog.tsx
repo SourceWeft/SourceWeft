@@ -41,6 +41,7 @@ import {
 import { AddApiKeyDialog } from "./add-api-key-dialog";
 import { AddCredentialDialog } from "./add-credential-dialog";
 import { AddFeedDialog } from "./add-feed-dialog";
+import { AddForumDialog } from "./add-forum-dialog";
 import { GmailBrokerNoticeDialog } from "./gmail-broker-notice-dialog";
 import { needsGmailBrokerNotice, type GmailUsageMode } from "./gmail-mode";
 import {
@@ -64,6 +65,9 @@ import type {
   CredentialCheckInput,
   CredentialCheckResult,
   FeedCheckResult,
+  ForumAddInput,
+  ForumCheckInput,
+  ForumCheckResult,
 } from "./types";
 
 export type ManageConnectorsTab = "all" | "active";
@@ -113,12 +117,14 @@ export function ManageConnectorsDialog({
   onCopyWebhook,
   onCheckCredential,
   onCheckFeed,
+  onCheckForum,
   onCreateConnector,
   onDisconnectConnector,
   onOpenChange,
   onOpenSettings,
   onSubmitCredential,
   onSubmitFeed,
+  onSubmitForum,
   onSyncConnector,
   onToggleConnectorStatus,
   open,
@@ -145,6 +151,7 @@ export function ManageConnectorsDialog({
     input: CredentialCheckInput,
   ) => Promise<CredentialCheckResult>;
   onCheckFeed: (feedUrl: string) => Promise<FeedCheckResult>;
+  onCheckForum: (input: ForumCheckInput) => Promise<ForumCheckResult>;
   onCopyWebhook: (value: string) => void;
   onCreateConnector: (item: ConnectorCatalogItem) => void;
   onDisconnectConnector: (connector: ConnectorItem) => void;
@@ -152,6 +159,7 @@ export function ManageConnectorsDialog({
   onOpenSettings: (connector: ConnectorItem) => void;
   onSubmitCredential: (input: CredentialAddInput) => Promise<void>;
   onSubmitFeed: (input: { name: string; feedUrl: string }) => Promise<void>;
+  onSubmitForum: (input: ForumAddInput) => Promise<void>;
   onSyncConnector: (connector: ConnectorItem) => void;
   onToggleConnectorStatus: (connector: ConnectorItem) => void;
   open: boolean;
@@ -179,6 +187,10 @@ export function ManageConnectorsDialog({
   // Add-only API-key catalog item (`addMode === "api_key"`) whose library ID
   // and key dialog is open.
   const [pendingApiKey, setPendingApiKey] =
+    useState<ConnectorCatalogItem | null>(null);
+  // Add-only forum catalog item (`addMode === "forum_url"`) whose forum
+  // address dialog is open.
+  const [pendingForum, setPendingForum] =
     useState<ConnectorCatalogItem | null>(null);
   const activeConnectors = connectors.filter(
     (connector) => connector.status !== "disabled",
@@ -374,6 +386,7 @@ export function ManageConnectorsDialog({
                                 onAddCredential={setPendingCredential}
                                 onAddLoginFlow={onAddLoginFlow}
                                 onAddFeed={setPendingFeed}
+                                onAddForum={setPendingForum}
                                 onCancelConnector={onCancelConnector}
                                 onConfigure={() => {
                                   if (connector) {
@@ -548,6 +561,14 @@ export function ManageConnectorsDialog({
           if (!nextOpen) setPendingApiKey(null);
         }}
         open={pendingApiKey !== null}
+      />
+      <AddForumDialog
+        onAdd={onSubmitForum}
+        onCheck={onCheckForum}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setPendingForum(null);
+        }}
+        open={pendingForum !== null}
       />
       <GmailBrokerNoticeDialog
         item={pendingGmailBrokerNotice}

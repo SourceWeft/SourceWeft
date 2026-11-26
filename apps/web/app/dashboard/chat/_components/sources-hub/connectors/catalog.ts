@@ -8,6 +8,7 @@ import {
   HardDrive,
   ListChecks,
   Mail,
+  MessagesSquare,
   Rss,
   Server,
   SquareKanban,
@@ -205,6 +206,25 @@ export const connectorCatalog: ConnectorCatalogItem[] = [
     supportsPeriodicSync: true,
     supportsWebhook: false,
     addMode: "api_key",
+  },
+  {
+    id: "discourse",
+    name: "Discourse",
+    category: "Knowledge & Docs",
+    description:
+      "Index the categories and topics of a public Discourse forum, with links to the exact posts, and keep them in sync.",
+    capabilities: [
+      "Categories and topics",
+      "Post-level links",
+      "Scheduled sync",
+    ],
+    requiresBackendRegistration: true,
+    icon: MessagesSquare,
+    isIndexable: true,
+    supportsActions: false,
+    supportsPeriodicSync: true,
+    supportsWebhook: false,
+    addMode: "forum_url",
   },
 ];
 

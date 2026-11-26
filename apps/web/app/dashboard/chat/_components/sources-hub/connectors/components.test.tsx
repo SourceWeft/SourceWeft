@@ -1,12 +1,18 @@
 // @vitest-environment jsdom
 
 import { act, createElement } from "react";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
+
+import { createTranslator } from "next-intl";
 
 import type { SourceConnector } from "@sourceweft/sdk";
 import { mountWithIntl, unmountAll } from "@/test/react";
 import { connectorCatalog } from "./catalog";
-import { ConnectorCatalogCard } from "./components";
+import {
+  ConnectorCatalogCard,
+  formatConnectorReadinessSummary,
+} from "./components";
+import en from "../../../../../../messages/en.json";
 import type { ConnectorCatalogStatus, ConnectorItem } from "./types";
 
 vi.mock("@/lib/billing-edition/capabilities", () => ({
@@ -38,6 +44,7 @@ async function card(input: {
 }) {
   const handlers = {
     onAddApiKey: vi.fn(),
+    onAddForum: vi.fn(),
     onAddCredential: vi.fn(),
     onAddLoginFlow: vi.fn(),
     onAddFeed: vi.fn(),
@@ -166,6 +173,7 @@ test("an add-only RSS card offers Add feed and never starts OAuth", async () => 
   const onAddFeed = vi.fn();
   const handlers = {
     onAddApiKey: vi.fn(),
+    onAddForum: vi.fn(),
     onAddCredential: vi.fn(),
     onAddLoginFlow: vi.fn(),
     onCancelConnector: vi.fn(),
@@ -202,6 +210,7 @@ test("an add-only WebDAV card offers Connect and calls onAddCredential, never OA
   const onAddCredential = vi.fn();
   const handlers = {
     onAddApiKey: vi.fn(),
+    onAddForum: vi.fn(),
     onAddFeed: vi.fn(),
     onAddLoginFlow: vi.fn(),
     onCancelConnector: vi.fn(),
@@ -238,6 +247,7 @@ test("an add-only Nextcloud card offers Connect and calls onAddLoginFlow, never 
   const onAddLoginFlow = vi.fn();
   const handlers = {
     onAddApiKey: vi.fn(),
+    onAddForum: vi.fn(),
     onAddCredential: vi.fn(),
     onAddFeed: vi.fn(),
     onCancelConnector: vi.fn(),
@@ -276,6 +286,7 @@ test("an add-only Zotero card offers Connect and calls onAddApiKey, never OAuth"
   const handlers = {
     onAddCredential: vi.fn(),
     onAddFeed: vi.fn(),
+    onAddForum: vi.fn(),
     onAddLoginFlow: vi.fn(),
     onCancelConnector: vi.fn(),
     onConfigure: vi.fn(),
@@ -306,4 +317,117 @@ test("an add-only Zotero card offers Connect and calls onAddApiKey, never OAuth"
   expect(handlers.onConnectConnector).not.toHaveBeenCalled();
   expect(handlers.onCreateConnector).not.toHaveBeenCalled();
   expect(handlers.onReconnectConnector).not.toHaveBeenCalled();
+});
+
+test("an add-only Discourse card offers Connect and calls onAddForum, never OAuth", async () => {
+  const discourse = connectorCatalog.find((entry) => entry.id === "discourse")!;
+  const onAddForum = vi.fn();
+  const handlers = {
+    onAddApiKey: vi.fn(),
+    onAddCredential: vi.fn(),
+    onAddFeed: vi.fn(),
+    onAddLoginFlow: vi.fn(),
+    onCancelConnector: vi.fn(),
+    onConfigure: vi.fn(),
+    onConnectConnector: vi.fn(),
+    onCreateConnector: vi.fn(),
+    onDisconnect: vi.fn(),
+    onReconnectConnector: vi.fn(),
+  };
+  const mounted = await mountWithIntl(
+    createElement(ConnectorCatalogCard, {
+      item: discourse,
+      connector: null,
+      status: { kind: "available", label: "Available", detail: "Ready" },
+      onAddForum,
+      ...handlers,
+    }),
+  );
+  const buttons = Array.from(mounted.container.querySelectorAll("button"));
+  const action = buttons[buttons.length - 1]!;
+
+  expect(action.textContent).toBe("Connect");
+  await act(async () => action.click());
+
+  expect(onAddForum).toHaveBeenCalledWith(discourse);
+  expect(handlers.onAddApiKey).not.toHaveBeenCalled();
+  expect(handlers.onAddCredential).not.toHaveBeenCalled();
+  expect(handlers.onAddFeed).not.toHaveBeenCalled();
+  expect(handlers.onAddLoginFlow).not.toHaveBeenCalled();
+  expect(handlers.onConnectConnector).not.toHaveBeenCalled();
+  expect(handlers.onCreateConnector).not.toHaveBeenCalled();
+  expect(handlers.onReconnectConnector).not.toHaveBeenCalled();
+});
+
+describe("connector-scoped readiness summary", () => {
+  // A real translator, so `t.has` answers for keys that exist or do not.
+  const t = createTranslator({
+    locale: "en",
+    messages: en,
+    namespace: "dashboardSourcesHub",
+  }) as unknown as Parameters<typeof formatConnectorReadinessSummary>[1];
+  const copy = en.dashboardSourcesHub.connectors.discourse.readiness;
+
+  test.each(Object.entries(copy))(
+    "a Discourse %s reason uses the Discourse copy, not the server message",
+    (reason, text) => {
+      expect(
+        formatConnectorReadinessSummary(
+          { reason, message: "server message" },
+          t,
+          "discourse",
+        ),
+      ).toBe(text);
+    },
+  );
+
+  test("a Discourse reason with no connector copy falls back to the server message", () => {
+    expect(
+      formatConnectorReadinessSummary(
+        { reason: "something_new", message: "server message" },
+        t,
+        "discourse",
+      ),
+    ).toBe("server message");
+  });
+
+  test("a shared-table reason still resolves for a Discourse connector", () => {
+    expect(
+      formatConnectorReadinessSummary(
+        { reason: "notion_no_pages", message: "x" },
+        t,
+        "discourse",
+      ),
+    ).toBe(en.dashboardSourcesHub.connectors.readinessNoPages);
+  });
+
+  test.each([
+    // WebDAV and Zotero emit reasons that Discourse also uses; their rendered
+    // summary stays the server message, whatever copy another type defines.
+    ["webdav", "config_invalid"],
+    ["webdav", "rate_limited"],
+    ["zotero", "rate_limited"],
+    ["zotero", "blocked_endpoint"],
+    ["rss", "config_invalid"],
+  ])("%s %s is unchanged", (connectorType, reason) => {
+    expect(
+      formatConnectorReadinessSummary(
+        { reason, message: "server message" },
+        t,
+        connectorType,
+      ),
+    ).toBe("server message");
+    expect(
+      formatConnectorReadinessSummary({ reason, message: "server message" }, t),
+    ).toBe("server message");
+  });
+
+  test("with no connector type the same reason keeps the server message", () => {
+    expect(
+      formatConnectorReadinessSummary(
+        { reason: "login_required", message: "server message" },
+        t,
+      ),
+    ).toBe("server message");
+  });
 });

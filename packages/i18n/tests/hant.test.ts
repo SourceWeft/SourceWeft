@@ -79,3 +79,15 @@ test("table columns are 欄 in Taiwan usage while 列表 and 列出 stay", () =>
   assert.equal(toTaiwanTraditional("对话列表"), "對話列表");
   assert.equal(toTaiwanTraditional("列出工具"), "列出工具");
 });
+
+test("a forum post is 貼文 in Taiwan, not 帖子", () => {
+  assert.equal(toTaiwanTraditional("定期检查新增的帖子"), "定期檢查新增的貼文");
+  assert.equal(toTaiwanTraditional("已删除的帖子"), "已刪除的貼文");
+});
+
+test("a port number is 連接埠號 in the phrase 用户名、端口号、", () => {
+  assert.equal(
+    toTaiwanTraditional("不能带用户名、端口号、查询内容"),
+    "不能帶使用者名稱、連接埠號、查詢內容",
+  );
+});

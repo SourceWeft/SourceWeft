@@ -244,12 +244,43 @@ function compactConnectorExecutionMeta(
   return [providerName, lastSync].filter(Boolean).join(" · ");
 }
 
+/**
+ * Connector types whose `connectors.<type>.readiness.<reason>` copy is also
+ * their card and settings summary. The shared table below is keyed by reason
+ * alone, so a reason like `config_invalid` or `rate_limited` that several
+ * connectors emit cannot carry connector-specific wording there. Other types
+ * may define `readiness.*` copy for their add dialog only (Zotero does), and
+ * keep showing the server message here.
+ */
+const CONNECTOR_SCOPED_READINESS_TYPES: ReadonlySet<string> = new Set([
+  "discourse",
+]);
+
+function connectorScopedSummaryKey(
+  readiness: ConnectorReadinessState,
+  t: ConnectorT,
+  connectorType: string | undefined,
+): string | null {
+  if (!connectorType || !CONNECTOR_SCOPED_READINESS_TYPES.has(connectorType)) {
+    return null;
+  }
+  const key = `connectors.${connectorType}.readiness.${readiness.reason}`;
+  // `has` answers false for a reason the connector has no copy for, so the
+  // shared table and the server message still apply.
+  return t.has(key) ? key : null;
+}
+
 export function formatConnectorReadinessSummary(
   readiness: ConnectorReadinessState | null,
   t: ConnectorT,
+  connectorType?: string,
 ) {
   if (!readiness) {
     return null;
+  }
+  const scopedKey = connectorScopedSummaryKey(readiness, t, connectorType);
+  if (scopedKey) {
+    return t(scopedKey);
   }
   const summaryKey = syncReadinessUiByReason[readiness.reason]?.summaryKey;
   if (summaryKey) {
@@ -396,7 +427,11 @@ function getOAuthConnectorStatus(
       kind: "active",
       label: t("connectors.status.active"),
       detail:
-        formatConnectorReadinessSummary(input.readiness ?? null, t) ??
+        formatConnectorReadinessSummary(
+          input.readiness ?? null,
+          t,
+          input.item.id,
+        ) ??
         t("connectors.detail.lastSync", {
           date: formatConnectorDate(
             connector.raw.lastIndexedAt,
@@ -426,9 +461,11 @@ function getOAuthConnectorStatus(
         ? t("connectors.detail.availableLoginFlow", { name: input.item.name })
         : input.item.addMode === "api_key"
           ? t("connectors.detail.availableAddApiKey")
-          : input.item.addMode
-            ? t("connectors.detail.availableAddFeed")
-            : t("connectors.detail.available", { name: input.item.name }),
+          : input.item.addMode === "forum_url"
+            ? t("connectors.detail.availableAddForum")
+            : input.item.addMode
+              ? t("connectors.detail.availableAddFeed")
+              : t("connectors.detail.available", { name: input.item.name }),
   };
 }
 
@@ -547,6 +584,7 @@ export const ConnectorCatalogCard = memoComponent(
     onAddCredential,
     onAddLoginFlow,
     onAddFeed,
+    onAddForum,
     onCancelConnector,
     onConfigure,
     onConnectConnector,
@@ -561,6 +599,9 @@ export const ConnectorCatalogCard = memoComponent(
     /** Add-only API-key cards (`item.addMode === "api_key"`) call this instead
      * of starting OAuth, so Zotero opens its library ID and key dialog. */
     onAddApiKey: (item: ConnectorCatalogItem) => void;
+    /** Add-only forum cards (`item.addMode === "forum_url"`) call this instead
+     * of starting OAuth, so Discourse opens its forum address dialog. */
+    onAddForum: (item: ConnectorCatalogItem) => void;
     /** Add-only credential cards (`item.addMode === "credential"`) call this
      * instead of starting OAuth, so WebDAV opens its endpoint/credential dialog. */
     onAddCredential: (item: ConnectorCatalogItem) => void;
@@ -601,7 +642,8 @@ export const ConnectorCatalogCard = memoComponent(
       ? t("connectors.cta.connecting")
       : item.addMode === "credential" ||
           item.addMode === "login_flow" ||
-          item.addMode === "api_key"
+          item.addMode === "api_key" ||
+          item.addMode === "forum_url"
         ? t("connectors.cta.connect")
         : item.addMode
           ? t("connectors.cta.addFeed")
@@ -621,6 +663,10 @@ export const ConnectorCatalogCard = memoComponent(
       }
       if (item.addMode === "api_key") {
         onAddApiKey(item);
+        return;
+      }
+      if (item.addMode === "forum_url") {
+        onAddForum(item);
         return;
       }
       if (item.addMode === "login_flow") {

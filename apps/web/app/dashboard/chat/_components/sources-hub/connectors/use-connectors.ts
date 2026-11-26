@@ -50,6 +50,9 @@ import type {
   CredentialCheckInput,
   CredentialCheckResult,
   FeedCheckResult,
+  ForumAddInput,
+  ForumCheckInput,
+  ForumCheckResult,
   GenericCredentialAddInput,
   GenericCredentialCheckInput,
 } from "./types";
@@ -1546,6 +1549,73 @@ export function useConnectors(input: {
     [displayLocale, handleSyncConnector, refreshConnectors, workspaceId, t],
   );
 
+  // Pre-create readiness check for a connector that needs no credential and
+  // brings its own type and config (Discourse). A reachable forum with nothing
+  // chosen yet answers `selection_required`, which is passed through as it is.
+  const handleCheckForum = useCallback(
+    async (input: ForumCheckInput): Promise<ForumCheckResult> => {
+      if (!workspaceId) {
+        toast.error(t("toasts.connectors.noWorkspace"));
+        return { ready: false, reason: "no_workspace", message: "" };
+      }
+      const result = await connectorsClient.checkConfig(workspaceId, {
+        connectorType: input.connectorType,
+        configJson: input.configJson,
+      });
+      return {
+        ready: result.ready,
+        reason: result.reason ?? "",
+        message: result.message ?? "",
+      };
+    },
+    [workspaceId, t],
+  );
+
+  // Rejects on any create failure (including the 409 duplicate) so the add
+  // dialog stays open and shows the reason. The new connector has no
+  // categories or topics selected yet, so there is nothing to sync: its
+  // settings open on the selection picker instead, and the card reads
+  // "choose categories or topics" until a selection is saved.
+  const handleAddForum = useCallback(
+    async (input: ForumAddInput) => {
+      if (!workspaceId) {
+        const message = t("toasts.connectors.noWorkspace");
+        toast.error(message);
+        throw new Error(message);
+      }
+      const created = await connectorsClient.create(workspaceId, {
+        connectorType: input.connectorType,
+        name: input.name,
+        configJson: input.configJson,
+        periodicIndexingEnabled: input.periodicIndexingEnabled,
+        indexingFrequencyMinutes: 360,
+      });
+      trackConnectorConnected({ connectorType: input.connectorType });
+      await refreshConnectors();
+      markConnectorNotReady(
+        created.connector.id,
+        "selection_required",
+        t("connectors.discourse.readiness.selection_required"),
+      );
+      openConnectorSettings(
+        mapConnectorToUi(created.connector, t, displayLocale),
+      );
+      toast.success(
+        t("toasts.connectors.connectedFallback", {
+          name: created.connector.name,
+        }),
+      );
+    },
+    [
+      displayLocale,
+      markConnectorNotReady,
+      openConnectorSettings,
+      refreshConnectors,
+      workspaceId,
+      t,
+    ],
+  );
+
   // Pre-create readiness check for a credential connector. A WebDAV input runs
   // the adapter's check against the whole-endpoint root; a generic input (the
   // Zotero dialog) brings its own connector type, config and credential. It
@@ -1920,6 +1990,8 @@ export function useConnectors(input: {
     handleSyncConnector,
     handleCheckFeed,
     handleAddFeed,
+    handleCheckForum,
+    handleAddForum,
     handleCheckCredential,
     handleAddCredential,
     rotateCredentialConnector,

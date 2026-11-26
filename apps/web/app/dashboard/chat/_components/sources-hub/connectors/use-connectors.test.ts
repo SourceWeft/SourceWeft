@@ -1986,3 +1986,128 @@ test("handleAddFeed with no workspace toasts and does not create", async () => {
   expect(create).not.toHaveBeenCalled();
   expect(toastError).toHaveBeenCalledWith("No workspace selected yet.");
 });
+
+const forumConfig = {
+  forumUrl: "https://forum.example.com",
+  items: [],
+  refresh: "deep",
+};
+
+test("handleCheckForum checks the given config with no credential and keeps the reason", async () => {
+  checkConfig.mockResolvedValue({
+    ready: false,
+    reason: "selection_required",
+    message: "Choose categories or topics.",
+  });
+  await mountHook(baseInput("ws-forum"));
+
+  const result = await api().handleCheckForum({
+    connectorType: "discourse",
+    configJson: forumConfig,
+  });
+
+  expect(checkConfig).toHaveBeenCalledWith("ws-forum", {
+    connectorType: "discourse",
+    configJson: forumConfig,
+  });
+  expect("credential" in checkConfig.mock.calls[0]![1]).toBe(false);
+  expect(result).toEqual({
+    ready: false,
+    reason: "selection_required",
+    message: "Choose categories or topics.",
+  });
+});
+
+test("handleCheckForum with no workspace toasts and does not call the API", async () => {
+  await mountHook(baseInput("", { workspaceId: null }));
+
+  const result = await api().handleCheckForum({
+    connectorType: "discourse",
+    configJson: forumConfig,
+  });
+
+  expect(checkConfig).not.toHaveBeenCalled();
+  expect(toastError).toHaveBeenCalledWith("No workspace selected yet.");
+  expect(result.ready).toBe(false);
+});
+
+test("handleAddForum creates the connector without a credential, opens its settings and does not sync", async () => {
+  const created = fakeConnector({
+    id: "forum-1",
+    connectorType: "discourse",
+    name: "Community",
+    configJson: forumConfig,
+  });
+  create.mockResolvedValue({ connector: created });
+  list.mockResolvedValue({ items: [created] });
+  await mountHook(baseInput("ws-forum"));
+
+  await act(async () => {
+    await api().handleAddForum({
+      connectorType: "discourse",
+      name: "Community",
+      configJson: forumConfig,
+      periodicIndexingEnabled: false,
+    });
+  });
+  await flush(25);
+
+  expect(create).toHaveBeenCalledTimes(1);
+  expect(create).toHaveBeenCalledWith("ws-forum", {
+    connectorType: "discourse",
+    name: "Community",
+    configJson: forumConfig,
+    periodicIndexingEnabled: false,
+    indexingFrequencyMinutes: 360,
+  });
+  expect("credential" in create.mock.calls[0]![1]).toBe(false);
+  expect("oauthAccountId" in create.mock.calls[0]![1]).toBe(false);
+  // Nothing is selected yet, so there is nothing to sync: the person is sent
+  // to the selection picker instead.
+  expect(sync).not.toHaveBeenCalled();
+  expect(api().connectorSettingsConnector?.id).toBe("forum-1");
+  expect(api().connectorReadinessById["forum-1"]).toMatchObject({
+    reason: "selection_required",
+  });
+  expect(toastSuccess).toHaveBeenCalledWith("Community connected.");
+});
+
+test("handleAddForum rethrows a 409 without toasting or opening settings", async () => {
+  create.mockRejectedValue(
+    new HttpClientError({
+      message: "exists",
+      status: 409,
+      statusText: "Conflict",
+      code: "CONNECTOR_ALREADY_EXISTS",
+    }),
+  );
+  await mountHook(baseInput("ws-forum"));
+
+  await expect(
+    api().handleAddForum({
+      connectorType: "discourse",
+      name: "Community",
+      configJson: forumConfig,
+      periodicIndexingEnabled: false,
+    }),
+  ).rejects.toMatchObject({ code: "CONNECTOR_ALREADY_EXISTS" });
+
+  expect(api().connectorSettingsConnector).toBeNull();
+  expect(toastError).not.toHaveBeenCalled();
+  expect(toastSuccess).not.toHaveBeenCalled();
+});
+
+test("handleAddForum with no workspace toasts and does not create", async () => {
+  await mountHook(baseInput("", { workspaceId: null }));
+
+  await expect(
+    api().handleAddForum({
+      connectorType: "discourse",
+      name: "Community",
+      configJson: forumConfig,
+      periodicIndexingEnabled: false,
+    }),
+  ).rejects.toThrow("No workspace selected yet.");
+
+  expect(create).not.toHaveBeenCalled();
+});

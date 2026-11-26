@@ -491,6 +491,8 @@ export function SourcesHub({
     handleSyncConnector,
     handleCheckFeed,
     handleAddFeed,
+    handleCheckForum,
+    handleAddForum,
     handleCheckCredential,
     handleAddCredential,
     rotateCredentialConnector,
@@ -1486,6 +1488,7 @@ export function SourcesHub({
         onCancelConnector={handleCancelConnector}
         onCheckCredential={handleCheckCredential}
         onCheckFeed={handleCheckFeed}
+        onCheckForum={handleCheckForum}
         onConnectConnector={handleConnectConnector}
         onCopyWebhook={handleCopyWebhook}
         onCreateConnector={(item) => void handleCreateConnector(item)}
@@ -1494,6 +1497,7 @@ export function SourcesHub({
         onOpenSettings={openConnectorSettings}
         onSubmitCredential={handleAddCredential}
         onSubmitFeed={handleAddFeed}
+        onSubmitForum={handleAddForum}
         onSyncConnector={(connector) => void handleSyncConnector(connector)}
         onToggleConnectorStatus={(connector) =>
           void handleToggleConnectorStatus(connector)

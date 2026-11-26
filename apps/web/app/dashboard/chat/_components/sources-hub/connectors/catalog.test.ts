@@ -708,6 +708,117 @@ describe("zotero catalog entry", () => {
   }
 });
 
+describe("discourse catalog entry", () => {
+  const discourse = connectorCatalog.find((item) => item.id === "discourse")!;
+
+  test("is hidden until the backend registers the type", () => {
+    expect(
+      connectorCatalogForAvailableTypes(["notion", "rss"]).map((i) => i.id),
+    ).not.toContain("discourse");
+    expect(
+      connectorCatalogForAvailableTypes(["notion", "discourse"]).map(
+        (i) => i.id,
+      ),
+    ).toContain("discourse");
+  });
+
+  test("is the add-only forum address entry", () => {
+    expect(discourse).toMatchObject({
+      id: "discourse",
+      name: "Discourse",
+      category: "Knowledge & Docs",
+      requiresBackendRegistration: true,
+      isIndexable: true,
+      supportsActions: false,
+      supportsPeriodicSync: true,
+      supportsWebhook: false,
+      addMode: "forum_url",
+      capabilities: [
+        "Categories and topics",
+        "Post-level links",
+        "Scheduled sync",
+      ],
+    });
+    expect(discourse.icon).toBeDefined();
+    expect(discourse.postOAuthMode).toBeUndefined();
+  });
+
+  test("never shows as connected, however many forums exist", () => {
+    const connectors = ["d1", "d2"].map((id) => ({
+      id,
+      name: `Forum ${id}`,
+      status: "active" as const,
+      meta: "",
+      raw: {
+        id,
+        connectorType: "discourse",
+        status: "active",
+        configJson: { forumUrl: "https://forum.example.com", items: [] },
+        lastError: null,
+        lastIndexedAt: null,
+      } as unknown as SourceConnector,
+    }));
+    expect(getCatalogConnector(discourse, connectors)).toBeNull();
+  });
+
+  const DISCOURSE_READINESS_REASONS = [
+    "config_invalid",
+    "selection_required",
+    "login_required",
+    "not_a_discourse_site",
+    "forum_unreachable",
+    "blocked_endpoint",
+    "rate_limited",
+  ];
+
+  for (const catalogName of ["en", "zh-CN"] as const) {
+    const messages = (catalogName === "en" ? en : zhCN) as unknown as {
+      dashboardSourcesHub: {
+        connectors: {
+          discourse: {
+            dialog: Record<string, string>;
+            readiness: Record<string, string>;
+            forumUrlHint: string;
+            refreshLightHint: string;
+            refreshDeepHint: string;
+          };
+          detail: Record<string, string>;
+          selection: {
+            byType: Record<
+              string,
+              {
+                kinds: Record<string, string>;
+                disabledReason: Record<string, string>;
+                empty: string;
+              }
+            >;
+          };
+        };
+      };
+    };
+
+    test(`${catalogName} has the Discourse copy keys`, () => {
+      const { discourse: copy, detail, selection } =
+        messages.dashboardSourcesHub.connectors;
+      expect(copy.forumUrlHint?.trim()).toBeTruthy();
+      expect(copy.refreshLightHint?.trim()).toBeTruthy();
+      expect(copy.refreshDeepHint?.trim()).toBeTruthy();
+      for (const key of ["title", "privateNote", "check", "add", "invalidUrl"]) {
+        expect(copy.dialog[key]?.trim(), key).toBeTruthy();
+      }
+      for (const reason of DISCOURSE_READINESS_REASONS) {
+        expect(copy.readiness[reason]?.trim(), reason).toBeTruthy();
+      }
+      expect(detail.availableAddForum?.trim()).toBeTruthy();
+      const byType = selection.byType.discourse!;
+      expect(byType.kinds.category?.trim()).toBeTruthy();
+      expect(byType.kinds.topic?.trim()).toBeTruthy();
+      expect(byType.disabledReason.restricted?.trim()).toBeTruthy();
+      expect(byType.empty?.trim()).toBeTruthy();
+    });
+  }
+});
+
 describe("nextcloud catalog entry", () => {
   const nextcloud = connectorCatalog.find((item) => item.id === "nextcloud")!;
 

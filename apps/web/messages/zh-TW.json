@@ -3489,7 +3489,8 @@
         "available": "可透過 {name} OAuth 進行連接。",
         "availableAddFeed": "新增公開 RSS 或 Atom 訂閱源的網址。",
         "availableLoginFlow": "在瀏覽器中登入 {name} 以進行連接。",
-        "availableAddApiKey": "使用唯讀 API 金鑰新增 Zotero 文庫。"
+        "availableAddApiKey": "使用唯讀 API 金鑰新增 Zotero 文庫。",
+        "availableAddForum": "使用網址新增公開的 Discourse 論壇。"
       },
       "syncBlock": {
         "pagesLimit": "頁數額度已用完。上次同步索引了 {count} 條內容後暫停，額度恢復後會自動繼續同步。",
@@ -3664,6 +3665,41 @@
           "save": "重新連接",
           "failed": "無法更新 API 金鑰，請重試。",
           "libraryUnknown": "此連接器缺少文庫資訊，無法在這裡替換金鑰。"
+        }
+      },
+      "discourse": {
+        "forumUrlLabel": "論壇網址",
+        "forumUrlHint": "論壇首頁的網址，例如 https://forum.example.com。僅支援公開論壇。",
+        "nameLabel": "名稱（選填）",
+        "refreshLabel": "主題更新方式",
+        "refreshLight": "輕量",
+        "refreshLightHint": "取得新回覆、刪除，以及標題、分類和標籤的變更。速度快。",
+        "refreshDeep": "深度",
+        "refreshDeepHint": "還會取得舊貼文的編輯。速度較慢，因為每個主題都會被重新讀取。",
+        "dialog": {
+          "title": "連接 Discourse 論壇",
+          "description": "輸入公開 Discourse 論壇的網址。SourceWeft 會先檢查能否讀取該論壇，隨後由你選擇要索引的分類或主題。",
+          "privateNote": "不支援需要登入才能存取的私有論壇。",
+          "check": "檢查論壇",
+          "checking": "檢查中…",
+          "reachable": "論壇可存取",
+          "reachableHint": "接下來，請選擇要索引的分類或主題。",
+          "add": "新增論壇",
+          "autoSync": "自動同步",
+          "autoSyncHint": "定期檢查新增和變更的貼文。預設關閉；你隨時可以手動同步。",
+          "invalidUrl": "請輸入以 https:// 開頭的論壇網址：不能帶使用者名稱、連接埠號、? 後的查詢內容或 # 片段，也不能是 IP 地址或 localhost；主機名含非英文字元時，請使用 ASCII（punycode）形式。",
+          "checkFailed": "無法檢查該論壇，請重試。",
+          "nameConflict": "此工作區中已存在同名連接器。請更改名稱，或使用已有的連接器。",
+          "addFailed": "新增論壇失敗。"
+        },
+        "readiness": {
+          "selection_required": "論壇可存取 · 請選擇要索引的分類或主題",
+          "login_required": "此論壇需要登入。不支援私有論壇。",
+          "not_a_discourse_site": "此網址不是 Discourse 論壇。請使用論壇首頁的網址。",
+          "forum_unreachable": "無法連接到該論壇，請稍後重試。",
+          "blocked_endpoint": "無法使用此網址：此部署可能不允許連接該網址，或者該論壇會重新導向到另一個網址。請輸入論壇自己的首頁網址（即它重新導向到的網址）。",
+          "rate_limited": "論壇目前正在限制請求。請稍等片刻後重試。",
+          "config_invalid": "論壇網址或更新方式無效。"
         }
       },
       "gmail": {
@@ -3900,6 +3936,24 @@
               "description": "開啟分類檢視其子分類，然後勾選要索引的分類。",
               "root": "文庫",
               "emptyContainer": "此分類沒有子分類。"
+            }
+          },
+          "discourse": {
+            "itemsTitle": "分類和主題",
+            "itemsDescription": "選擇要索引的分類和主題。所選分類包含其子分類及其中的主題。開啟自動同步後，所選內容會按連接器的同步排程保持同步。",
+            "choose": "選擇分類和主題",
+            "empty": "尚未選擇任何內容。請選擇分類或主題以開始索引。",
+            "kinds": {
+              "category": "分類",
+              "topic": "主題"
+            },
+            "disabledReason": {
+              "restricted": "此分類為受限分類，無法索引"
+            },
+            "browser": {
+              "description": "開啟分類檢視其子分類和主題，然後勾選要索引的內容。",
+              "root": "論壇",
+              "emptyContainer": "這裡還沒有內容。"
             }
           }
         }
