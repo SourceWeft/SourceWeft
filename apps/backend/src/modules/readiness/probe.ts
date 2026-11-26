@@ -58,7 +58,9 @@ export function createReadinessProbe(
   // probe query at a time however often the endpoint is called.
   const overdue = new Map<string, number>();
 
-  async function runCheck(check: ReadinessCheck): Promise<ReadinessCheckResult> {
+  async function runCheck(
+    check: ReadinessCheck,
+  ): Promise<ReadinessCheckResult> {
     const fail = (
       reason: ReadinessFailureReason,
       durationMs: number,

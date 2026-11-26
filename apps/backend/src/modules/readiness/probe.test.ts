@@ -121,7 +121,9 @@ test("fails a check that finished, but later than its budget", async () => {
 test("calls that arrive during a run share it instead of starting another", async () => {
   const gate = deferred();
   const run = vi.fn(() => gate.promise);
-  const probe = createReadinessProbe([{ name: "database", budgetMs: 1_000, run }]);
+  const probe = createReadinessProbe([
+    { name: "database", budgetMs: 1_000, run },
+  ]);
 
   const first = probe.run();
   const second = probe.run();
@@ -142,7 +144,9 @@ test("does not start a check again while its earlier, overdue work is still out"
   try {
     const stalled = deferred();
     const run = vi.fn(() => stalled.promise);
-    const probe = createReadinessProbe([{ name: "database", budgetMs: 1_000, run }]);
+    const probe = createReadinessProbe([
+      { name: "database", budgetMs: 1_000, run },
+    ]);
 
     const first = probe.run();
     await vi.advanceTimersByTimeAsync(1_000);

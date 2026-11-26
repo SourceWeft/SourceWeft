@@ -44,8 +44,16 @@ async function readCatalogDetail() {
 
 const defaultProbe = createReadinessProbe(
   [
-    { name: "database", budgetMs: READINESS_DATABASE_BUDGET_MS, run: pingDatabase },
-    { name: "catalog", budgetMs: READINESS_CATALOG_BUDGET_MS, run: readCatalogDetail },
+    {
+      name: "database",
+      budgetMs: READINESS_DATABASE_BUDGET_MS,
+      run: pingDatabase,
+    },
+    {
+      name: "catalog",
+      budgetMs: READINESS_CATALOG_BUDGET_MS,
+      run: readCatalogDetail,
+    },
   ],
   {
     // The cause goes to the server's log only; the response names the check
