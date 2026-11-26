@@ -91,7 +91,26 @@ test("requests are GET with Accept and User-Agent only", async () => {
   ]);
   assert.equal(request.headers.accept, "application/json");
   assert.match(request.headers["user-agent"] ?? "", /^SourceWeft/);
-  assert.deepEqual(request.initKeys.sort(), ["headers", "method", "signal"]);
+  assert.deepEqual(request.initKeys.sort(), [
+    "headers",
+    "method",
+    "redirect",
+    "signal",
+  ]);
+});
+
+test("every request asks the host fetch not to follow redirects", async () => {
+  // The host's public scope follows cross-origin redirects unless asked not
+  // to; with `manual` it refuses a cross-origin hop and hands back a
+  // same-origin one for the client to reject.
+  const { fake, client } = harness();
+  await client.site();
+  await client.categoryPage(10, 0);
+  await client.topic(1);
+  await client.topicPosts(1, [1001]);
+  await client.search("hello", 1);
+  assert.equal(fake.requests.length, 5);
+  assert.ok(fake.requests.every((request) => request.redirect === "manual"));
 });
 
 test("an invalid base is refused at construction", () => {

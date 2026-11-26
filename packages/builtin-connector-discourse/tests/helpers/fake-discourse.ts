@@ -90,6 +90,8 @@ export type RecordedRequest = {
   url: string;
   /** The RequestInit keys the caller passed. */
   initKeys: string[];
+  /** The `redirect` mode the caller asked for, if any. */
+  redirect: string | undefined;
 };
 
 export type FakeFault =
@@ -379,6 +381,7 @@ export function startFakeDiscourse(initial: FakeForum): FakeDiscourse {
       headers,
       url: url.toString(),
       initKeys: init ? Object.keys(init) : [],
+      redirect: init?.redirect,
     };
     requests.push(request);
 

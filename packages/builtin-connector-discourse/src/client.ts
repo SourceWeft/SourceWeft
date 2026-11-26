@@ -403,6 +403,11 @@ export function createDiscourseTransport(
               Accept: "application/json",
               "User-Agent": DISCOURSE_USER_AGENT,
             },
+            // The host's public scope follows cross-origin redirects by
+            // default. `manual` makes it refuse a cross-origin hop and hand a
+            // same-origin one back, which is rejected below: a forum is
+            // reached only at the address it was configured with.
+            redirect: "manual",
             signal,
           }),
           signal,
