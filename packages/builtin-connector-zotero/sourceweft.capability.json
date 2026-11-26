@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "id": "sourceweft/zotero",
+  "kind": "connector",
+  "name": "Zotero Connector",
+  "version": "0.1.0",
+  "entry": "./src/index.ts",
+  "connectors": [
+    {
+      "id": "zotero",
+      "title": "Zotero",
+      "auth": {
+        "kind": "credential",
+        "scheme": "api_key"
+      },
+      "sync": {
+        "supportsIncremental": false,
+        "defaultFrequencyMinutes": 360,
+        "minFrequencyMinutes": 60,
+        "resources": [
+          {
+            "type": "zotero_item",
+            "title": "Zotero item",
+            "supportsDeleteDetection": true
+          }
+        ]
+      },
+      "actions": [
+        {
+          "id": "zotero.browse",
+          "title": "Browse Zotero",
+          "description": "List the collections of a Zotero library so the user can choose which to index.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "internal",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "containerId": {
+                "type": ["string", "null"],
+                "pattern": "^[A-Z0-9]{8}$"
+              },
+              "cursor": {
+                "type": "string",
+                "maxLength": 4096
+              }
+            }
+          }
+        },
+        {
+          "id": "zotero.describe",
+          "title": "Describe Zotero collections",
+          "description": "Return the display name and existence of the selected Zotero collections.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "internal",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["ids"],
+            "properties": {
+              "ids": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 50,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Z0-9]{8}$"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["libraryType", "libraryId"],
+        "properties": {
+          "libraryType": {
+            "type": "string",
+            "enum": ["user", "group"]
+          },
+          "libraryId": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,11}$"
+          },
+          "items": {
+            "type": "array",
+            "default": [],
+            "maxItems": 50,
+            "uniqueItems": true,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "kind"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[A-Z0-9]{8}$"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": ["collection"]
+                }
+              }
+            }
+          }
+        }
+      },
+      "selection": {
+        "actions": {
+          "browse": "zotero.browse",
+          "describe": "zotero.describe"
+        },
+        "kinds": ["collection"],
+        "maxItems": 50
+      }
+    }
+  ]
+}

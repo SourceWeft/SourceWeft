@@ -24,6 +24,7 @@
     "@sourceweft/builtin-connector-jira": "workspace:*",
     "@sourceweft/builtin-connector-confluence": "workspace:*",
     "@sourceweft/builtin-connector-webdav": "workspace:*",
+    "@sourceweft/builtin-connector-zotero": "workspace:*",
     "@sourceweft/builtin-retrieval": "workspace:*",
     "@sourceweft/builtin-skill-ppt-deck": "workspace:*",
     "@sourceweft/builtin-tool-generate-image": "workspace:*",

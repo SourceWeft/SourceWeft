@@ -214,6 +214,9 @@ importers:
       '@sourceweft/builtin-connector-webdav':
         specifier: workspace:*
         version: link:../../packages/builtin-connector-webdav
+      '@sourceweft/builtin-connector-zotero':
+        specifier: workspace:*
+        version: link:../../packages/builtin-connector-zotero
       '@sourceweft/builtin-document-parsers':
         specifier: workspace:*
         version: link:../../packages/builtin-document-parsers
@@ -1006,6 +1009,9 @@ importers:
       '@sourceweft/builtin-connector-webdav':
         specifier: workspace:*
         version: link:../builtin-connector-webdav
+      '@sourceweft/builtin-connector-zotero':
+        specifier: workspace:*
+        version: link:../builtin-connector-zotero
       '@sourceweft/builtin-retrieval':
         specifier: workspace:*
         version: link:../builtin-retrieval
@@ -1307,6 +1313,28 @@ importers:
       fast-xml-parser:
         specifier: 5.7.3
         version: 5.7.3
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
+
+  packages/builtin-connector-zotero:
+    dependencies:
+      '@sourceweft/builtin-document-parsers':
+        specifier: workspace:*
+        version: link:../builtin-document-parsers
+      '@sourceweft/capability-contracts':
+        specifier: workspace:*
+        version: link:../capability-contracts
+      '@sourceweft/contracts':
+        specifier: workspace:*
+        version: link:../contracts
     devDependencies:
       '@types/node':
         specifier: ^22.20.1
