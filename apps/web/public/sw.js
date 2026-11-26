@@ -9,6 +9,8 @@
  *   through the API afterwards, which this worker never touches;
  * - the build's static files under /_next/static, which never change at a URL
  *   (cache first), so a cached page still finds its scripts after a deploy;
+ *   a file the server no longer has shows that the page on screen is from
+ *   before a deploy, so the cached pages are dropped and the page reloads;
  * - the few brand images those pages show from /public, kept like the pages
  *   (served from the cache, refreshed in the background).
  *
@@ -27,6 +29,11 @@ const SHELL_IMAGES = new Set([
 const STATIC_LIMIT = 600;
 // Must match SHELL_CACHE_TIMING in lib/mobile-app-shell.ts.
 const SHELL_CACHE_TIMING = "sw-shell-cache";
+// Must match SHELL_STALE_MESSAGE in lib/mobile-app-shell.ts.
+const SHELL_STALE_MESSAGE = "sourceweft-shell-stale";
+// Where the time of the last such reload is kept, so it survives the worker stopping.
+const STALE_RELOAD_MARK = "/__shell-stale-reload";
+const STALE_RELOAD_GAP_MS = 60_000;
 
 // Fills the cache as soon as the worker installs, so the next launch is served
 // from the device even if the person has not opened those pages yet. A page or
@@ -104,7 +111,7 @@ self.addEventListener("fetch", (event) => {
   } else if (SHELL_IMAGES.has(url.pathname) && !url.search) {
     event.respondWith(shellPage(event));
   } else if (url.pathname.startsWith("/_next/static/")) {
-    event.respondWith(staticFile(request));
+    event.respondWith(staticFile(event));
   }
 });
 
@@ -144,7 +151,8 @@ function markedFromCache(response) {
   });
 }
 
-async function staticFile(request) {
+async function staticFile(event) {
+  const request = event.request;
   const cache = await caches.open(STATIC_CACHE);
   const cached = await cache.match(request);
   if (cached) return cached;
@@ -152,8 +160,49 @@ async function staticFile(request) {
   if (cacheable(response)) {
     await cache.put(request, response.clone());
     void trim(cache);
+  } else if (response.status === 404) {
+    event.waitUntil(dropStaleShell(event.clientId).catch(() => undefined));
   }
   return response;
+}
+
+// A deploy removes the previous build's files from the server. A cached page
+// names only the files it loads at once, so those are on the device, but the
+// ones it loads later (the chat itself) are not. When the server answers 404
+// for one of them, the page that asked is from before the deploy and cannot
+// work: drop the cached pages and load the page again, now from the network.
+// At most once a minute, in case the new page's files are missing as well.
+async function dropStaleShell(clientId) {
+  const cache = await caches.open(SHELL_CACHE);
+  let dropped = false;
+  for (const path of SHELL_PATHS) {
+    if (await cache.delete(path)) dropped = true;
+  }
+  if (!dropped) return;
+
+  const last = Number(await (await cache.match(STALE_RELOAD_MARK))?.text());
+  if (Date.now() - last < STALE_RELOAD_GAP_MS) return;
+  await cache.put(STALE_RELOAD_MARK, new Response(String(Date.now())));
+
+  const asking = clientId ? await self.clients.get(clientId) : undefined;
+  const pages = asking
+    ? [asking]
+    : await self.clients.matchAll({ type: "window" });
+  await Promise.all(pages.map(reloadPage));
+}
+
+// Navigating from here also reloads a page whose own scripts are too old to
+// know the message; the message is for a page this worker may not navigate.
+async function reloadPage(client) {
+  try {
+    if (typeof client.navigate === "function") {
+      await client.navigate(client.url);
+      return;
+    }
+  } catch {
+    // Not a page this worker may navigate: ask the page instead.
+  }
+  client.postMessage({ type: SHELL_STALE_MESSAGE });
 }
 
 /** Drops the oldest static files once the cache holds more than STATIC_LIMIT. */
