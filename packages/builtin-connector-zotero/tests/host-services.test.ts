@@ -103,3 +103,17 @@ test("an enabled Zotero capability fails fast without a host-provided credential
   const { env } = environment({ ZOTERO_CONNECTOR_ENABLED: "true" });
   assert.throws(() => createConnectorAdapters({ env }), /credentialedFetch/);
 });
+
+test("the registered Zotero adapter is the real adapter", async () => {
+  const { env } = environment({ ZOTERO_CONNECTOR_ENABLED: "true" });
+  const result = await createConnectorAdapters({
+    env,
+    credentialedFetch: inertCredentialedFetch,
+  });
+  const [adapter] = result.adapters;
+  assert.equal(adapter!.capabilityId, "sourceweft/zotero");
+  assert.equal(typeof adapter!.discoverPages, "function");
+  assert.equal(typeof adapter!.checkSyncReadiness, "function");
+  assert.equal(adapter!.credentialIdentity?.name, "zoteroCredentialIdentity");
+  assert.equal("exchangeOAuthCode" in adapter!, false);
+});

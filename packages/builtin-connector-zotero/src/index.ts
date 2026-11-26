@@ -59,3 +59,9 @@ export {
 export { noteHtmlToText } from "./note-text";
 export { renderItemMarkdown, type RenderItemInput } from "./render";
 export { extractZoteroItem, type ExtractZoteroItemInput } from "./extract";
+export {
+  createZoteroAdapter,
+  ZoteroAdapterError,
+  type ZoteroAdapterInput,
+} from "./adapter";
+export { browseCollections, describeCollections } from "./selection";

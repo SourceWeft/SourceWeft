@@ -1,25 +1,8 @@
-import type { ConnectorAdapter } from "@sourceweft/contracts";
 import type {
   CapabilityConnectorContribution,
   CreateConnectorAdapters,
 } from "@sourceweft/contracts/capability-host-services";
-import { toBackendZoteroManifest } from "./backend-manifest";
-
-// replaced in Task 7: a minimal stand-in so the enabled branch type-checks and
-// registers the connector before the real adapter exists. It performs no I/O.
-function placeholderAdapter(): ConnectorAdapter {
-  const notImplemented = () => {
-    throw new Error("Zotero connector adapter is not implemented yet");
-  };
-  return {
-    capabilityId: "sourceweft/zotero",
-    getManifest: toBackendZoteroManifest,
-    credentialIdentity: notImplemented,
-    discover: notImplemented,
-    extract: notImplemented,
-    executeAction: notImplemented,
-  };
-}
+import { createZoteroAdapter } from "./adapter";
 
 /**
  * Zotero is gated behind a strict boolean deployment switch, exactly like the
@@ -34,6 +17,7 @@ function placeholderAdapter(): ConnectorAdapter {
 export const createConnectorAdapters: CreateConnectorAdapters = ({
   env,
   credentialedFetch,
+  logger,
 }): CapabilityConnectorContribution => {
   const activation = env.get("ZOTERO_CONNECTOR_ENABLED")?.trim().toLowerCase();
   if (!activation || activation === "false" || activation === "0") {
@@ -47,6 +31,8 @@ export const createConnectorAdapters: CreateConnectorAdapters = ({
       "Zotero connector requires a host-provided credentialedFetch; the host did not supply one",
     );
   }
-  // replaced in Task 7: createZoteroAdapter({ credentialedFetch, logger })
-  return { adapters: [placeholderAdapter()], agentToolDefs: [] };
+  return {
+    adapters: [createZoteroAdapter({ credentialedFetch, logger })],
+    agentToolDefs: [],
+  };
 };
