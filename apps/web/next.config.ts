@@ -64,14 +64,6 @@ const publicStaticAssets = [
   "/logo-white-bg.svg",
 ];
 
-// Which build rendered a page. The iOS app's service worker (public/sw.js)
-// compares it on the page it has cached with the one the server sends, to see
-// that a deploy happened. Read when the build runs, like lib/app-version.ts.
-const BUILD_HEADER = "x-sourceweft-build";
-const buildSha = process.env.NEXT_PUBLIC_BUILD_SHA || "dev";
-// The pages that worker keeps (SHELL_PATHS in public/sw.js).
-const appShellPages = ["/dashboard/chat", "/auth/sign-in"];
-
 const nextConfig: NextConfig = {
   // Separate build output lets an isolated E2E server share this checkout.
   distDir: process.env.SOURCEWEFT_NEXT_DIST_DIR ?? ".next",
@@ -135,10 +127,6 @@ const nextConfig: NextConfig = {
         source: "/sw.js",
         headers: [{ key: "Cache-Control", value: "no-cache" }],
       },
-      ...appShellPages.map((source) => ({
-        source,
-        headers: [{ key: BUILD_HEADER, value: buildSha }],
-      })),
       {
         source: "/((?!api/).*)",
         headers: [
