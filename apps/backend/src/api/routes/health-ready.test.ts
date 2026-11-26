@@ -9,7 +9,10 @@ const mocks = vi.hoisted(() => ({
   warn: vi.fn(),
 }));
 
-vi.mock("@sourceweft/db", () => ({ db: { execute: mocks.execute } }));
+vi.mock("@sourceweft/db", () => ({
+  database: { query: mocks.execute },
+  db: {},
+}));
 vi.mock("../../modules/market/read-repository", () => ({
   findMcp: mocks.findMcp,
   listMcp: mocks.listMcp,
@@ -19,6 +22,7 @@ vi.mock("../../shared/logger", () => ({ logger: { warn: mocks.warn } }));
 import {
   READINESS_CATALOG_BUDGET_MS,
   READINESS_DATABASE_BUDGET_MS,
+  READINESS_DATABASE_QUERY_TIMEOUT_MS,
   registerHealthReadyRoute,
 } from "./health-ready";
 
@@ -48,7 +52,10 @@ test("200 with each check's duration when the database and the catalog read answ
   assert.equal(checks.database!.budgetMs, READINESS_DATABASE_BUDGET_MS);
   assert.equal(typeof checks.database!.durationMs, "number");
   assert.equal(checks.catalog!.budgetMs, READINESS_CATALOG_BUDGET_MS);
-  assert.equal(mocks.execute.mock.calls.length, 1);
+  // One ping, with its own hard limit on that query alone.
+  assert.deepEqual(mocks.execute.mock.calls, [
+    [{ text: "select 1", query_timeout: READINESS_DATABASE_QUERY_TIMEOUT_MS }],
+  ]);
 });
 
 test("reads one server the way the public detail route does", async () => {

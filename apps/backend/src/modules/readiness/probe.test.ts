@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test, vi } from "vitest";
-import { createReadinessProbe } from "./probe";
+import { createReadinessProbe, READINESS_ABANDON_AFTER_BUDGETS } from "./probe";
 
 function deferred<T = void>() {
   let resolve!: (value: T) => void;
@@ -152,12 +152,12 @@ test("does not start a check again while its earlier, overdue work is still out"
     await vi.advanceTimersByTimeAsync(1_000);
     assert.equal((await first).checks.database!.reason, "timeout");
 
-    // A minute later the query is still out: reported, not piled on.
-    await vi.advanceTimersByTimeAsync(60_000);
+    // A moment later the query is still out: reported, not piled on.
+    await vi.advanceTimersByTimeAsync(1_000);
     const second = await probe.run();
     assert.equal(run.mock.calls.length, 1);
     assert.equal(second.checks.database!.reason, "timeout");
-    assert.ok(second.checks.database!.durationMs >= 61_000);
+    assert.ok(second.checks.database!.durationMs >= 2_000);
 
     // Once it settles, the check runs again.
     stalled.resolve();
@@ -166,6 +166,78 @@ test("does not start a check again while its earlier, overdue work is still out"
     const third = await probe.run();
     assert.equal(run.mock.calls.length, 2);
     assert.equal(third.status, "ok");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+// A half-open connection: the query never settles. The check must not stay
+// failed until the process restarts once the database answers again.
+test("abandons work that never settles after a fixed multiple of the budget and probes afresh", async () => {
+  vi.useFakeTimers();
+  try {
+    const never = new Promise<void>(() => undefined);
+    const run = vi.fn<() => Promise<void>>(() => never);
+    const probe = createReadinessProbe([
+      { name: "database", budgetMs: 1_000, run },
+    ]);
+
+    const first = probe.run();
+    await vi.advanceTimersByTimeAsync(1_000);
+    assert.equal((await first).checks.database!.reason, "timeout");
+
+    // Before the limit: still reported, nothing new started.
+    await vi.advanceTimersByTimeAsync(1_000);
+    assert.equal((await probe.run()).checks.database!.reason, "timeout");
+    assert.equal(run.mock.calls.length, 1);
+
+    // Past the limit, with the database back: a fresh probe, and ok.
+    await vi.advanceTimersByTimeAsync(1_000 * READINESS_ABANDON_AFTER_BUDGETS);
+    run.mockImplementation(async () => undefined);
+    const recovered = await probe.run();
+    assert.equal(run.mock.calls.length, 2);
+    assert.equal(recovered.status, "ok");
+    assert.equal(recovered.checks.database!.status, "ok");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("never has more than one abandoned and one live piece of work per check", async () => {
+  vi.useFakeTimers();
+  try {
+    const first = deferred();
+    const run = vi.fn<() => Promise<void>>(() => first.promise);
+    const probe = createReadinessProbe([
+      { name: "database", budgetMs: 1_000, run },
+    ]);
+    const limit = 1_000 * READINESS_ABANDON_AFTER_BUDGETS;
+
+    // First query goes out and never settles.
+    let pending = probe.run();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await pending;
+
+    // Past the limit it is abandoned; the fresh one never settles either.
+    await vi.advanceTimersByTimeAsync(limit);
+    run.mockImplementation(() => new Promise<void>(() => undefined));
+    pending = probe.run();
+    await vi.advanceTimersByTimeAsync(1_000);
+    assert.equal((await pending).checks.database!.reason, "timeout");
+    assert.equal(run.mock.calls.length, 2);
+
+    // However long that lasts, no third is started while both are out.
+    await vi.advanceTimersByTimeAsync(limit * 10);
+    assert.equal((await probe.run()).checks.database!.reason, "timeout");
+    assert.equal(run.mock.calls.length, 2);
+
+    // Once the abandoned one settles, its slot frees and a probe can run.
+    first.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    run.mockImplementation(async () => undefined);
+    const recovered = await probe.run();
+    assert.equal(run.mock.calls.length, 3);
+    assert.equal(recovered.status, "ok");
   } finally {
     vi.useRealTimers();
   }

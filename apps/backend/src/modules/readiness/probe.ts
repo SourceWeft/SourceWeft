@@ -33,6 +33,12 @@ export type ReadinessReport = {
   timestamp: string;
 };
 
+/**
+ * Work that has not settled after this many of its check's budgets is
+ * abandoned, and the check is probed afresh on the next call.
+ */
+export const READINESS_ABANDON_AFTER_BUDGETS = 3;
+
 export type ReadinessProbe = { run: () => Promise<ReadinessReport> };
 
 type ProbeOptions = {
@@ -52,11 +58,18 @@ export function createReadinessProbe(
 ): ReadinessProbe {
   const now = options.now ?? (() => performance.now());
   let inFlight: Promise<ReadinessReport> | null = null;
-  // Work that outlived its budget and has not settled yet, by check name, with
-  // when it started. A query cannot be taken back once sent, so while it is
-  // still out no second one is started behind it: a slow database gets one
-  // probe query at a time however often the endpoint is called.
-  const overdue = new Map<string, number>();
+  // Work that outlived its budget and has not settled yet, by check name. A
+  // query cannot be taken back once sent, so while it is still out no second
+  // one is started behind it: a slow database gets one probe query at a time
+  // however often the endpoint is called.
+  //
+  // Work that is still out after `READINESS_ABANDON_AFTER_BUDGETS` budgets is
+  // given up on (a half-open connection never settles), and the next call
+  // probes afresh, so the check recovers with the database instead of failing
+  // until the process restarts. Only one such abandoned piece of work is
+  // allowed per check: at most one abandoned and one live query at any time.
+  const overdue = new Map<string, { startedAt: number }>();
+  const abandoned = new Map<string, { startedAt: number }>();
 
   async function runCheck(
     check: ReadinessCheck,
@@ -70,9 +83,19 @@ export function createReadinessProbe(
       return { status: "failed", reason, durationMs, budgetMs: check.budgetMs };
     };
 
-    const overdueSince = overdue.get(check.name);
-    if (overdueSince !== undefined) {
-      return fail("timeout", Math.round(now() - overdueSince));
+    const out = overdue.get(check.name);
+    if (out !== undefined) {
+      const outFor = now() - out.startedAt;
+      const giveUp =
+        outFor >= check.budgetMs * READINESS_ABANDON_AFTER_BUDGETS &&
+        !abandoned.has(check.name);
+      if (!giveUp) {
+        return fail("timeout", Math.round(outFor));
+      }
+      // Its own `finally` below still clears it from `abandoned` if it ever
+      // settles; until then it holds the one abandoned slot.
+      overdue.delete(check.name);
+      abandoned.set(check.name, out);
     }
 
     const startedAt = now();
@@ -93,10 +116,14 @@ export function createReadinessProbe(
     const durationMs = Math.round(now() - startedAt);
 
     if (outcome.kind === "timeout") {
-      overdue.set(check.name, startedAt);
+      const entry = { startedAt };
+      overdue.set(check.name, entry);
       void work
         .catch(() => undefined)
-        .finally(() => overdue.delete(check.name));
+        .finally(() => {
+          if (overdue.get(check.name) === entry) overdue.delete(check.name);
+          if (abandoned.get(check.name) === entry) abandoned.delete(check.name);
+        });
       return fail("timeout", durationMs);
     }
     if (outcome.kind === "error") {

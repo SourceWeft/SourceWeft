@@ -1,6 +1,5 @@
 import type { Hono } from "hono";
-import { sql } from "drizzle-orm";
-import { db } from "@sourceweft/db";
+import { database } from "@sourceweft/db";
 import { findMcp, listMcp } from "../../modules/market/read-repository";
 import {
   createReadinessProbe,
@@ -16,8 +15,19 @@ export const READINESS_DATABASE_BUDGET_MS = 2_000;
 // the read path degrade before public pages start to fail.
 export const READINESS_CATALOG_BUDGET_MS = 5_000;
 
+// The ping's own hard limit, on this one query only (the shared pool has
+// none): past it the driver rejects the query and the pool discards that
+// connection, so a half-open connection is not held by the probe for good.
+export const READINESS_DATABASE_QUERY_TIMEOUT_MS =
+  READINESS_DATABASE_BUDGET_MS * 2;
+
 async function pingDatabase() {
-  await db.execute(sql`select 1`);
+  // `query_timeout` is the driver's per-query option; its typings leave it out.
+  const ping: { text: string; query_timeout: number } = {
+    text: "select 1",
+    query_timeout: READINESS_DATABASE_QUERY_TIMEOUT_MS,
+  };
+  await database.query(ping);
 }
 
 /**
