@@ -51,3 +51,7 @@ export const HOME_HTML_BYTES = 262_144;
 
 /** Times a scan restarts after the site changes under it. */
 export const MAX_SCAN_RESTARTS = 2;
+
+/** Sent on every WordPress request. */
+export const WORDPRESS_USER_AGENT =
+  "SourceWeft-WordPressConnector/1.0 (+https://sourceweft.com)";
