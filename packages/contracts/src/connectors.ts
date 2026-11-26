@@ -911,6 +911,10 @@ export type ConnectorDiscoveryPage = {
   complete: boolean;
   /** True only for a complete authoritative scan of the selected scope. */
   reconcileMissing?: boolean;
+  /** Fixed, member-facing notices an adapter attaches when it could not finish
+   * (for example a selection too large to index in one sync). They carry no
+   * site address, id or response text, and never affect reconciliation. */
+  warnings?: string[];
 };
 
 export type ConnectorExtractInput = ConnectorDiscoverInput & {
