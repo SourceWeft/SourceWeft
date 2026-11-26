@@ -5,6 +5,7 @@ import {
   type ConnectorItem,
 } from "@sourceweft/contracts";
 import { createDiscourseClient } from "../src/client";
+import { DiscourseError } from "../src/errors";
 import { extractDiscourseTopic } from "../src/extract";
 import { MAX_POSTS_PER_TOPIC, POST_BATCH } from "../src/limits";
 import { scanForum } from "../src/scan";
@@ -153,8 +154,10 @@ test("invalid metadata skips before any request", async () => {
     { ...item.metadata, topicId: "1" },
     { ...item.metadata, topicId: Number.MAX_SAFE_INTEGER + 2 },
     { ...item.metadata, topicId: undefined },
+    { ...item.metadata, topicId: Number.NaN },
+    { ...item.metadata, topicId: Number.POSITIVE_INFINITY },
     { ...item.metadata, categoryPath: 5 },
-    { ...item.metadata, categoryPath: undefined },
+    { ...item.metadata, categoryPath: null },
   ];
   for (const metadata of bad) {
     await skipped(
@@ -167,6 +170,19 @@ test("invalid metadata skips before any request", async () => {
     );
   }
   assert.deepEqual(fake.requests, []);
+});
+
+test("an absent category path extracts like an empty one", async () => {
+  const { client } = setup(forum([topic(1)]));
+  const item = await scanItem(client, 1, "light");
+  const { categoryPath: _omitted, ...metadata } = item.metadata;
+  const result = await extractDiscourseTopic({
+    client,
+    base: BASE,
+    item: { ...item, metadata },
+    refresh: "light",
+  });
+  assert.doesNotMatch(result.markdown ?? "", /Category:/);
 });
 
 test("a topic without a category path still extracts when the path is empty", async () => {
@@ -233,7 +249,11 @@ test("other client errors propagate", async () => {
   fake.failNext({ status: 500, body: "x" }, 10);
   await assert.rejects(
     extractDiscourseTopic({ client, base: BASE, item, refresh: "light" }),
-    (error: unknown) => !(error instanceof ConnectorItemSkipError),
+    (error: unknown) => {
+      assert.ok(error instanceof DiscourseError);
+      assert.equal(error.code, "DISCOURSE_FORUM_UNREACHABLE");
+      return true;
+    },
   );
 });
 
@@ -368,9 +388,7 @@ test("hidden, whisper and deleted posts are absent from the text and the hash", 
       deleted_at: "2026-02-01T00:00:00.000Z",
     },
   ];
-  const plain = setup(forum([topic(1, { posts: base })]));
   const noisy = setup(forum([topic(1, { posts: withHidden })]));
-  const plainItem = await scanItem(plain.client, 1, "deep");
   const noisyItem = await scanItem(noisy.client, 1, "deep");
   const result = await extractDiscourseTopic({
     client: noisy.client,
@@ -380,7 +398,8 @@ test("hidden, whisper and deleted posts are absent from the text and the hash", 
   });
   assert.doesNotMatch(result.markdown ?? "", /SECRET|mallory|staff/);
   assert.equal(result.item.contentHash, noisyItem.contentHash);
-  assert.equal(plainItem.metadata.postIds?.toString(), "1001,1002");
+  assert.deepEqual(noisyItem.metadata.postIds, [1001, 1002]);
+  assert.deepEqual(result.item.metadata.postIds, [1001, 1002]);
 });
 
 test("a hostile post body cannot forge a title or a post section", async () => {
@@ -450,4 +469,57 @@ test("the title comes from the fetched topic", async () => {
   });
   assert.equal(result.item.title, "Renamed topic");
   assert.match(result.markdown ?? "", /^# Renamed topic\n/);
+});
+
+test("a topic that became invisible since the scan is skipped", async () => {
+  const { fake, client } = setup(forum([topic(1)]));
+  const item = await scanItem(client, 1, "light");
+  fake.setForum(forum([topic(1, { visible: false })]));
+  await skipped(
+    extractDiscourseTopic({ client, base: BASE, item, refresh: "light" }),
+  );
+});
+
+test("the limits seam can lower the post cap but never raise it", async () => {
+  const count = MAX_POSTS_PER_TOPIC + 5;
+  const { client } = setup(forum([topic(1, { postCount: count })]));
+  const item = await scanItem(client, 1, "light");
+  const result = await extractDiscourseTopic({
+    client,
+    base: BASE,
+    item,
+    refresh: "deep",
+    limits: { MAX_POSTS_PER_TOPIC: count * 10 },
+  });
+  assert.ok(result.markdown?.includes(`## Post #${MAX_POSTS_PER_TOPIC} by`));
+  assert.ok(
+    !result.markdown?.includes(`## Post #${MAX_POSTS_PER_TOPIC + 1} by`),
+  );
+  assert.ok(result.markdown?.trimEnd().endsWith("[5 more posts not indexed]"));
+});
+
+test("a topic that shrank since the scan: deep rehashes, light keeps the discovery hash", async () => {
+  const { fake, client } = setup(forum([topic(1, { postCount: 4 })]));
+  const light = await scanItem(client, 1, "light");
+  const deep = await scanItem(client, 1, "deep");
+  fake.setForum(forum([topic(1, { postCount: 2 })]));
+
+  const lightResult = await extractDiscourseTopic({
+    client,
+    base: BASE,
+    item: light,
+    refresh: "light",
+  });
+  assert.equal(lightResult.item.contentHash, light.contentHash);
+  assert.doesNotMatch(lightResult.markdown ?? "", /Post 3 of topic 1/);
+
+  const deepResult = await extractDiscourseTopic({
+    client,
+    base: BASE,
+    item: deep,
+    refresh: "deep",
+  });
+  assert.notEqual(deepResult.item.contentHash, deep.contentHash);
+  const next = await scanItem(client, 1, "deep");
+  assert.equal(deepResult.item.contentHash, next.contentHash);
 });

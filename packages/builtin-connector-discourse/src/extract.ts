@@ -40,7 +40,11 @@ export async function extractDiscourseTopic(
   input: ExtractDiscourseTopicInput,
 ): Promise<ConnectorExtractedText> {
   const { client, base, item, refresh } = input;
-  const { topicId, categoryPath } = item.metadata;
+  const { topicId } = item.metadata;
+  // An absent path is an empty one (the scan omits it for a topic without a
+  // category); only a present non-string value is corrupt.
+  const categoryPath =
+    item.metadata.categoryPath === undefined ? "" : item.metadata.categoryPath;
   // Checked before any request. Corrupt metadata on one item skips that item;
   // it must not abort the whole run.
   if (
@@ -51,11 +55,17 @@ export async function extractDiscourseTopic(
   ) {
     throw skip();
   }
-  const maxPosts = input.limits?.MAX_POSTS_PER_TOPIC ?? MAX_POSTS_PER_TOPIC;
+  // The seam can only lower the package cap, never raise it.
+  const maxPosts = Math.min(
+    input.limits?.MAX_POSTS_PER_TOPIC ?? MAX_POSTS_PER_TOPIC,
+    MAX_POSTS_PER_TOPIC,
+  );
 
   try {
     const doc = await client.topic(topicId);
     if (isNotFound(doc)) throw skip();
+    // The scan indexes only visible topics; one hidden since is gone for us.
+    if (!doc.visible) throw skip();
     const read = await readTopicPosts({
       client,
       topic: doc,
