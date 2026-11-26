@@ -3466,7 +3466,7 @@
         "available": "可通过 {name} OAuth 进行连接。",
         "availableAddFeed": "添加公开 RSS 或 Atom 订阅源的网址。",
         "availableLoginFlow": "在浏览器中登录 {name} 以进行连接。",
-        "availableAddApiKey": "使用只读 API 密钥添加 Zotero 文献库。"
+        "availableAddApiKey": "使用只读 API 密钥添加 Zotero 文库。"
       },
       "syncBlock": {
         "pagesLimit": "页数额度已用完。上次同步索引了 {count} 条内容后暂停，额度恢复后会自动继续同步。",
@@ -3598,41 +3598,41 @@
         "disconnectNote": "SourceWeft 会尝试移除它创建的应用专用密码，但如果没有成功，你可以在 Nextcloud 的“设置 > 安全”中将其删除。"
       },
       "zotero": {
-        "libraryTypeLabel": "文献库类型",
-        "libraryTypePersonal": "个人文献库",
-        "libraryTypeGroup": "群组文献库",
-        "libraryIdLabel": "文献库 ID",
+        "libraryTypeLabel": "文库类型",
+        "libraryTypePersonal": "个人文库",
+        "libraryTypeGroup": "群组文库",
+        "libraryIdLabel": "文库 ID",
         "libraryIdHintPersonal": "你的个人 userID，显示在 zotero.org/settings/keys 页面上，是一串数字，不是用户名。",
         "libraryIdHintGroup": "群组网址中的数字，例如 zotero.org/groups/2205533/team_name 中的 2205533。",
         "apiKeyLabel": "API 密钥",
-        "apiKeyHint": "请在 zotero.org/settings/keys 创建只读密钥：允许访问文献库和笔记，不要授予写入权限。",
+        "apiKeyHint": "请在 zotero.org/settings/keys 创建只读密钥：允许访问文库和笔记，不要授予写入权限。若是群组文库，密钥需要拥有该群组的读取权限。",
         "nameLabel": "名称（可选）",
         "dialog": {
-          "title": "连接 Zotero 文献库",
-          "description": "输入 Zotero 文献库 ID 和只读 API 密钥。SourceWeft 会先检查密钥，再为你的文献库建立索引并保持同步。连接后可以只选择部分文献集。",
+          "title": "连接 Zotero 文库",
+          "description": "输入 Zotero 文库 ID 和只读 API 密钥。SourceWeft 会先检查密钥，再为你的文库建立索引并保持同步。连接后可以只选择部分分类。",
           "check": "检查密钥",
           "checking": "检查中…",
-          "connected": "文献库已验证",
-          "add": "添加文献库",
+          "connected": "文库已验证",
+          "add": "添加文库",
           "autoSync": "自动同步",
           "autoSyncHint": "定期检查新增和变更的条目。默认关闭；你随时可以手动同步。",
-          "invalidLibraryId": "请输入纯数字的文献库 ID（最多 12 位，且不能以 0 开头）。",
+          "invalidLibraryId": "请输入纯数字的文库 ID（最多 12 位，且不能以 0 开头）。",
           "invalidApiKey": "请输入不含空格的 API 密钥。",
           "checkFailed": "无法连接到 Zotero，请重试。",
           "notesAccessWarning": "此密钥无法读取笔记，因此笔记和批注不会被索引。创建带有笔记访问权限的密钥即可包含它们。",
           "nameConflict": "此工作区中已存在同名连接器。请更改名称，或使用已有的连接器。",
-          "accountConflict": "此文献库已在此工作区中连接。",
-          "credentialNotAllowed": "此部署不允许连接该文献库。",
-          "addFailed": "添加文献库失败。"
+          "accountConflict": "此文库已在此工作区中连接。",
+          "credentialNotAllowed": "此部署不允许连接该文库。",
+          "addFailed": "添加文库失败。"
         },
         "readiness": {
           "reauth_required": "Zotero 拒绝了此 API 密钥。请检查密钥后重试。",
-          "library_not_accessible": "此密钥无法读取该文献库。请在 zotero.org/settings/keys 为它开启文献库访问权限。",
-          "library_not_found": "Zotero 找不到该文献库。请检查文献库类型和 ID。",
+          "library_not_accessible": "此密钥无法读取该文库。请在 zotero.org/settings/keys 为密钥授予该文库（群组文库则为该群组）的读取权限。",
+          "library_not_found": "Zotero 找不到该文库。请检查文库类型和 ID。",
           "rate_limited": "Zotero 当前正在限制请求。请稍等片刻后重试。",
           "unreachable": "无法连接到 Zotero，请稍后重试。",
           "blocked_endpoint": "此部署不允许连接 Zotero。",
-          "config_invalid": "文献库类型或 ID 无效。"
+          "config_invalid": "文库类型或 ID 无效。"
         },
         "rotate": {
           "title": "重新连接 Zotero",
@@ -3640,7 +3640,7 @@
           "keyLabel": "API 密钥",
           "save": "重新连接",
           "failed": "无法更新 API 密钥，请重试。",
-          "libraryUnknown": "此连接器缺少文献库信息，无法在这里替换密钥。"
+          "libraryUnknown": "此连接器缺少文库信息，无法在这里替换密钥。"
         }
       },
       "gmail": {
@@ -3866,17 +3866,17 @@
             }
           },
           "zotero": {
-            "itemsTitle": "文献集",
-            "itemsDescription": "选择要索引的 Zotero 文献集。所选文献集（包括其子文献集）中的条目会按连接器的同步计划保持同步。",
-            "choose": "选择文献集",
-            "empty": "尚未选择任何文献集，因此会索引整个文献库。选择文献集即可只索引这些内容。",
+            "itemsTitle": "分类",
+            "itemsDescription": "选择要索引的 Zotero 分类。所选分类（包括其子分类）中的条目会按连接器的同步计划保持同步。",
+            "choose": "选择分类",
+            "empty": "尚未选择任何分类，因此会索引整个文库。选择分类即可只索引这些内容。",
             "kinds": {
-              "collection": "文献集"
+              "collection": "分类"
             },
             "browser": {
-              "description": "打开文献集查看其子文献集，然后勾选要索引的文献集。",
-              "root": "文献库",
-              "emptyContainer": "此文献集没有子文献集。"
+              "description": "打开分类查看其子分类，然后勾选要索引的分类。",
+              "root": "文库",
+              "emptyContainer": "此分类没有子分类。"
             }
           }
         }

@@ -79,6 +79,9 @@ function AddApiKeyForm({
   const [autoSync, setAutoSync] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
+  // Set synchronously on the first Add so a second click or submit in the same
+  // tick cannot send another create before the disabled state renders.
+  const addingRef = useRef(false);
   const [checked, setChecked] = useState<Checked | null>(null);
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [checkError, setCheckError] = useState(false);
@@ -96,6 +99,9 @@ function AddApiKeyForm({
       ? checked.result
       : null;
   const hasCredential = trimmedId !== "" && secret !== "";
+  const libraryIdInvalid =
+    trimmedId !== "" && !isAcceptableZoteroLibraryId(trimmedId);
+  const apiKeyInvalid = secret !== "" && !isAcceptableZoteroApiKey(secret);
   const canAdd = result?.ready === true && !isChecking && !isAdding;
   const notesMissing =
     result?.ready === true && result.metadata?.notesAccess === false;
@@ -155,7 +161,8 @@ function AddApiKeyForm({
   }
 
   async function handleAdd() {
-    if (!result?.ready) return;
+    if (!result?.ready || addingRef.current) return;
+    addingRef.current = true;
     setAddError(null);
     setIsAdding(true);
     try {
@@ -180,6 +187,7 @@ function AddApiKeyForm({
       setChecked(null);
       setAddError(addFailureText(error));
     } finally {
+      addingRef.current = false;
       setIsAdding(false);
     }
   }
@@ -266,6 +274,8 @@ function AddApiKeyForm({
             {t("connectors.zotero.libraryIdLabel")}
           </Label>
           <Input
+            aria-describedby="add-zotero-library-id-hint"
+            aria-invalid={libraryIdInvalid}
             autoComplete="off"
             id="add-zotero-library-id"
             inputMode="numeric"
@@ -277,7 +287,10 @@ function AddApiKeyForm({
             }}
             value={libraryId}
           />
-          <p className="text-xs text-muted-foreground">
+          <p
+            className="text-xs text-muted-foreground"
+            id="add-zotero-library-id-hint"
+          >
             {libraryType === "user"
               ? t("connectors.zotero.libraryIdHintPersonal")
               : t("connectors.zotero.libraryIdHintGroup")}
@@ -289,6 +302,8 @@ function AddApiKeyForm({
             {t("connectors.zotero.apiKeyLabel")}
           </Label>
           <Input
+            aria-describedby="add-zotero-api-key-hint"
+            aria-invalid={apiKeyInvalid}
             autoComplete="new-password"
             id="add-zotero-api-key"
             maxLength={ZOTERO_API_KEY_MAX_LENGTH}
@@ -300,7 +315,10 @@ function AddApiKeyForm({
             type="password"
             value={secret}
           />
-          <p className="text-xs text-muted-foreground">
+          <p
+            className="text-xs text-muted-foreground"
+            id="add-zotero-api-key-hint"
+          >
             {t("connectors.zotero.apiKeyHint")}
           </p>
         </div>

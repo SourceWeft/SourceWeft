@@ -3605,7 +3605,7 @@
         "libraryIdHintPersonal": "Your personal userID. It is shown on zotero.org/settings/keys and is a number, not your username.",
         "libraryIdHintGroup": "The number in the group's web address, for example 2205533 in zotero.org/groups/2205533/team_name.",
         "apiKeyLabel": "API key",
-        "apiKeyHint": "Create a read-only key at zotero.org/settings/keys: allow library access and notes access, and do not allow write access.",
+        "apiKeyHint": "Create a read-only key at zotero.org/settings/keys: allow library access and notes access, and do not allow write access. For a group library, the key needs read access to that group.",
         "nameLabel": "Name (optional)",
         "dialog": {
           "title": "Connect a Zotero library",
@@ -3627,7 +3627,7 @@
         },
         "readiness": {
           "reauth_required": "Zotero rejected this API key. Check the key and try again.",
-          "library_not_accessible": "This key cannot read this library. Allow library access for it at zotero.org/settings/keys.",
+          "library_not_accessible": "This key cannot read this library. Give the key read access to this library (for a group library, to that group) at zotero.org/settings/keys.",
           "library_not_found": "Zotero could not find this library. Check the library type and ID.",
           "rate_limited": "Zotero is limiting requests right now. Wait a moment and try again.",
           "unreachable": "Zotero could not be reached. Try again in a moment.",

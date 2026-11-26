@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { createElement } from "react";
+import { act, createElement } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 
 import { HttpClientError } from "@sourceweft/sdk";
@@ -348,4 +348,61 @@ test("a check that finishes after an input changed is ignored", async () => {
 
   expect(button("Add library").disabled).toBe(true);
   expect(bodyText()).not.toContain("Library verified");
+});
+
+test("two rapid Add clicks send one create request", async () => {
+  let resolveAdd: () => void = () => {};
+  const onAdd = vi.fn().mockReturnValue(
+    new Promise<void>((resolve) => {
+      resolveAdd = resolve;
+    }),
+  );
+  await mountDialog({ onAdd });
+  await fill();
+  await check();
+
+  const add = button("Add library");
+  await act(async () => {
+    add.click();
+    add.click();
+  });
+  expect(onAdd).toHaveBeenCalledTimes(1);
+
+  resolveAdd();
+  await flush(5);
+  expect(onAdd).toHaveBeenCalledTimes(1);
+});
+
+test("the library ID and key inputs point at their hints and flag invalid values", async () => {
+  await mountDialog();
+
+  for (const input of [libraryIdField(), apiKeyField()]) {
+    const hintId = input.getAttribute("aria-describedby");
+    expect(hintId).toBeTruthy();
+    expect(document.getElementById(hintId!)?.textContent?.trim()).toBeTruthy();
+    // Empty is not yet invalid.
+    expect(input.getAttribute("aria-invalid")).not.toBe("true");
+  }
+
+  typeInto(libraryIdField(), "0123");
+  typeInto(apiKeyField(), "has space");
+  await flush(3);
+  expect(libraryIdField().getAttribute("aria-invalid")).toBe("true");
+  expect(apiKeyField().getAttribute("aria-invalid")).toBe("true");
+
+  typeInto(libraryIdField(), "123");
+  typeInto(apiKeyField(), "AbC");
+  await flush(3);
+  expect(libraryIdField().getAttribute("aria-invalid")).not.toBe("true");
+  expect(apiKeyField().getAttribute("aria-invalid")).not.toBe("true");
+});
+
+test("the key instruction covers per-group read access and the not-accessible copy names it", async () => {
+  await mountDialog({
+    onCheck: vi.fn().mockResolvedValue(notReady("library_not_accessible")),
+  });
+  expect(bodyText()).toContain("read access to that group");
+  await fill();
+  await check();
+  expect(bodyText()).toContain("read access to this library");
 });
