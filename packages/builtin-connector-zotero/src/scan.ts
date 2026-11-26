@@ -202,7 +202,6 @@ export async function* scanLibrary(
     first: typeof prefetched,
   ): Promise<ConnectorDiscoveryPage> {
     let objectCount = 0;
-    let libraryVersion: number | null = null;
     const versions = new Set<number>();
 
     /** Reads every page of one endpoint; the first page may be supplied. */
@@ -222,10 +221,14 @@ export async function* scanLibrary(
           page = reply;
         }
         versions.add(page.libraryVersion);
-        if (path === "items") libraryVersion ??= page.libraryVersion;
         // Collections are read first, so the first items page is where the
         // two endpoints are compared; every later page must match too.
         if (versions.size > 1) throw new ScanRestart();
+        // A server serving more than it counted is as untrustworthy as one
+        // serving less.
+        if (page.objects.length > page.totalResults - start) {
+          throw new ZoteroError("ZOTERO_BAD_RESPONSE");
+        }
         objectCount += page.objects.length;
         if (
           page.totalResults > limits.MAX_OBJECTS ||
@@ -247,17 +250,22 @@ export async function* scanLibrary(
     // Collections first, then items; every page must share one library version.
     const rawCollections = await readAll("collections", null);
     const rawItems = await readAll("items", first);
-    if (libraryVersion === null) throw new ZoteroError("ZOTERO_BAD_RESPONSE");
+    // `versions` holds exactly one value here: readAll restarts on a second.
+    const [libraryVersion] = [...versions] as [number];
 
     const collections: ZoteroCollection[] = [];
     for (const raw of rawCollections) {
       const parsed = parseCollection(raw);
-      if (parsed) collections.push(parsed);
+      // Fail fast: a skipped collection would corrupt its children's paths and
+      // could make a selection look empty, so the scan would archive it.
+      if (!parsed) throw new ZoteroError("ZOTERO_BAD_RESPONSE");
+      collections.push(parsed);
     }
     const objects: ZoteroObject[] = [];
     for (const raw of rawItems) {
       const parsed = parseItem(raw);
-      if (parsed) objects.push(parsed);
+      if (!parsed) throw new ZoteroError("ZOTERO_BAD_RESPONSE");
+      objects.push(parsed);
     }
 
     const tree = buildCollectionTree(collections);

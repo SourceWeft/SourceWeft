@@ -391,17 +391,76 @@ test("a duplicate key in a response is emitted once", async () => {
   assert.deepEqual(ids(pages[0]!), ["zotero:BOOKAAAA", "zotero:BOOKBBBB"]);
 });
 
-test("an object that fails to parse is skipped, not fatal", async () => {
+const isBadResponse = (error: unknown) =>
+  error instanceof ZoteroError && error.code === "ZOTERO_BAD_RESPONSE";
+
+test("an item that fails to parse fails the scan and yields nothing", async () => {
   const { client } = setup({
     items: [
       book("BOOKAAAA"),
       { key: "BROKENXX", version: 1, data: { itemType: 5 } },
     ],
-    collections: [{ key: "BADCOLLX", version: 1, data: { name: 3 } }],
+  });
+  const seen: unknown[] = [];
+  await assert.rejects(async () => {
+    for await (const page of scanLibrary({
+      client,
+      libraryType: "user",
+      libraryId: "1",
+      selectedCollectionKeys: [],
+      cursor: null,
+      now: () => NOW,
+    })) {
+      seen.push(page);
+    }
+  }, isBadResponse);
+  assert.deepEqual(seen, []);
+});
+
+test("a collection that fails to parse fails the scan and yields nothing", async () => {
+  const { client } = setup({
+    collections: [
+      rawCollection("COLLAAAA", "Top"),
+      { key: "BADCOLLX", version: 1, data: { name: 3 } },
+    ],
+    items: [book("BOOKAAAA", ["COLLAAAA"])],
+  });
+  const seen: unknown[] = [];
+  await assert.rejects(async () => {
+    for await (const page of scanLibrary({
+      client,
+      libraryType: "user",
+      libraryId: "1",
+      selectedCollectionKeys: ["BADCOLLX"],
+      cursor: null,
+      now: () => NOW,
+    })) {
+      seen.push(page);
+    }
+  }, isBadResponse);
+  assert.deepEqual(seen, []);
+});
+
+test("an item of an unknown itemType that parses is still scanned", async () => {
+  const { client } = setup({
+    items: [rawItem("FUTUREAA", "hologram", { title: "Future" })],
   });
   const { pages } = await run(client);
-  assert.deepEqual(ids(pages[0]!), ["zotero:BOOKAAAA"]);
+  assert.deepEqual(ids(pages[0]!), ["zotero:FUTUREAA"]);
   assert.equal(pages[0]!.reconcileMissing, true);
+});
+
+test("a server that serves more than its Total-Results is a bad response", async () => {
+  const { client, fake } = setup({
+    collections: Array.from({ length: 6 }, (_, i) =>
+      rawCollection(`COLL000${i}`, `C${i}`),
+    ),
+    items: manyBooks(3),
+  });
+  // The first served response is the collections page.
+  fake.mutateNext({ "Total-Results": "3" }, 1);
+  await assert.rejects(run(client), isBadResponse);
+  assert.equal(fake.requests.length, 1);
 });
 
 test("an empty library is a complete, reconciling scan", async () => {
@@ -423,7 +482,7 @@ test("a key without access to the collections list propagates the error", async 
   );
 });
 
-test("limits are overridable per field and default to the package limits", async () => {
+test("limits passed to the scan override the package defaults", async () => {
   const limits: Partial<ScanLimits> = { MAX_RESTARTS: 0 };
   const { client, fake, hooks } = setup({ items: manyBooks(250) });
   hooks.afterRequest = (count) => {
@@ -431,4 +490,18 @@ test("limits are overridable per field and default to the package limits", async
   };
   const { pages } = await run(client, { limits });
   assert.deepEqual(pages, [INCOMPLETE]);
+});
+
+test("without overrides the package defaults apply", async () => {
+  const { client, hooks, fake } = setup({ items: manyBooks(250) });
+  hooks.afterRequest = (count) => {
+    if (count === 2) {
+      fake.setVersion(9);
+      hooks.afterRequest = undefined;
+    }
+  };
+  // The default MAX_RESTARTS (2) lets the same version change recover.
+  const { pages } = await run(client);
+  assert.equal(pages[0]!.items.length, 250);
+  assert.equal(pages[0]!.reconcileMissing, true);
 });
