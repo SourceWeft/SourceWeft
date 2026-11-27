@@ -69,7 +69,13 @@ export function capText(text: string, max: number): string {
 /** Collapses every run of whitespace and control characters, so a value can
  * never start a new line or block. */
 export function oneLine(value: string): string {
-  return value.replace(/[\s\p{Cc}]+/gu, " ").trim();
+  // Whitespace and control characters collapse to one space. Bidi overrides
+  // and isolates are dropped so a title cannot visually reorder its own
+  // metadata; zero-width joiners stay (emoji sequences need them).
+  return value
+    .replace(/[؜‎‏‪-‮⁦-⁩]/gu, "")
+    .replace(/[\s\p{Cc}]+/gu, " ")
+    .trim();
 }
 
 function lineOf(value: string, max: number): string {

@@ -247,6 +247,9 @@ test("parseTag and parsePagination", () => {
 test("oneLine collapses whitespace and control characters", () => {
   assert.equal(oneLine("  a\n\nb\tc\u0000d\u007fe  "), "a b c d e");
   assert.equal(oneLine("\n"), "");
+  // Bidi overrides and isolates are removed; a zero-width joiner is kept.
+  assert.equal(oneLine("a‮b⁦c‏d"), "abcd");
+  assert.equal(oneLine("x‍y"), "x‍y");
 });
 
 test("the hash changes with updated time, title, url, visibility, a tag slug and a tag name", () => {
