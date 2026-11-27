@@ -319,3 +319,33 @@ test("searchContent filters by title with quotes escaped", async () => {
     "CONFIG_INVALID",
   );
 });
+
+test("listTagsByIds reads the named tags with one id filter", async () => {
+  const { fake, client } = harness();
+  const out = await client.listTagsByIds([hexId(0x102), hexId(0x999)]);
+  const request = fake.requests[0]!;
+  assert.equal(request.path, "/ghost/api/content/tags/");
+  assert.equal(request.query.filter, `id:[${hexId(0x102)},${hexId(0x999)}]`);
+  assert.equal(request.query.fields, "id,slug,name");
+  assert.equal(request.query.limit, "100");
+  assert.deepEqual(
+    out.map((t) => [t.id, t.slug, t.name]),
+    [[hexId(0x102), "guides", "Guides"]],
+  );
+});
+
+test("listTagsByIds validates the ids and the batch size", async () => {
+  const { fake, client } = harness();
+  await assert.rejects(client.listTagsByIds([]), RangeError);
+  await assert.rejects(
+    client.listTagsByIds(
+      Array.from({ length: ID_BATCH + 1 }, (_, i) => hexId(i)),
+    ),
+    RangeError,
+  );
+  assert.equal(
+    await codeOf(client.listTagsByIds(["x' or id:~'"])),
+    "CONFIG_INVALID",
+  );
+  assert.equal(fake.requests.length, 0);
+});

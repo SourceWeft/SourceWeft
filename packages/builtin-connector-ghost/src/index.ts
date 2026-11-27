@@ -7,6 +7,18 @@ export { builtinGhostConnectorCapabilityManifest } from "./manifest";
 export { toBackendGhostManifest } from "./backend-manifest";
 export { createConnectorAdapters } from "./host-services";
 export {
+  createGhostAdapter,
+  GhostAdapterError,
+  type GhostAdapterInput,
+  type GhostAdapterLimits,
+} from "./adapter";
+export { ghostCredentialIdentity, parseStoredCredential } from "./identity";
+export {
+  browseSelection,
+  describeSelection,
+  searchSelection,
+} from "./selection";
+export {
   PAGE_SIZE,
   MAX_ITEMS,
   MAX_REQUESTS,

@@ -633,3 +633,49 @@ test("requestCount counts every request, retries included", async () => {
   await client.getJson("pages");
   assert.equal(client.requestCount(), 3);
 });
+
+test("the host's endpoint-policy refusal is BLOCKED_ENDPOINT, final, and carries nothing of it", async () => {
+  for (const make of [
+    () =>
+      Object.assign(new Error(`blocked https://evil.example/?key=${KEY}`), {
+        name: "EndpointPolicyError",
+        code: "ENDPOINT_NOT_ALLOWED",
+      }),
+    () =>
+      new TypeError("fetch failed", {
+        cause: { code: "ENDPOINT_NOT_ALLOWED" },
+      }),
+  ]) {
+    let calls = 0;
+    const { client } = harness({
+      fetch: (async () => {
+        calls += 1;
+        throw make();
+      }) as typeof fetch,
+    });
+    try {
+      await client.getJson("posts");
+      assert.fail("expected a GhostError");
+    } catch (error) {
+      assert.ok(error instanceof GhostError);
+      assert.equal(error.code, "BLOCKED_ENDPOINT");
+      assert.equal(error.cause, undefined);
+      assert.ok(!error.message.includes("evil"));
+      assert.ok(!error.message.includes(KEY));
+    }
+    // A refusal is a decision, not a hiccup: it is never retried.
+    assert.equal(calls, 1);
+  }
+});
+
+test("another network failure is still retried and then SITE_UNREACHABLE", async () => {
+  let calls = 0;
+  const { client } = harness({
+    fetch: (async () => {
+      calls += 1;
+      throw Object.assign(new Error("boom"), { code: "ECONNRESET" });
+    }) as typeof fetch,
+  });
+  assert.equal(await codeOf(client.getJson("posts")), "SITE_UNREACHABLE");
+  assert.equal(calls, 3);
+});

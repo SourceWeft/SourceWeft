@@ -87,6 +87,8 @@ export type GhostClient = {
   getItem(route: GhostItemRoute, id: string): Promise<GhostItem | null>;
   /** One page (100) of the site's tags. */
   listTags(page: number): Promise<{ tags: GhostTag[]; pages: number }>;
+  /** The tags with these ids (1 to {@link ID_BATCH}); unknown ids are absent. */
+  listTagsByIds(ids: string[]): Promise<GhostTag[]>;
   /** The readiness read: `settings` must be a Ghost settings object. */
   getSettings(): Promise<{ title: string | null }>;
   /** One page of posts or pages whose title contains `query`. */
@@ -131,6 +133,27 @@ const MAX_KEY_LENGTH = 256;
 const ERROR_BODY_BYTES = 65_536;
 
 class Timeout {}
+
+/**
+ * The host's endpoint policy refused a request or a redirect target (a
+ * cross-origin `Location`, a non-https or non-public one). The host throws its
+ * own `EndpointPolicyError` instead of returning the 3xx response, so the
+ * 3xx check below never sees it. A connector package cannot import backend
+ * code: the error is recognised by its stable `code`, directly or on `cause`,
+ * as the other connectors do.
+ */
+function isEndpointNotAllowed(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  if ((error as { code?: unknown }).code === "ENDPOINT_NOT_ALLOWED") {
+    return true;
+  }
+  const cause = (error as { cause?: unknown }).cause;
+  return (
+    typeof cause === "object" &&
+    cause !== null &&
+    (cause as { code?: unknown }).code === "ENDPOINT_NOT_ALLOWED"
+  );
+}
 
 /** Rejects when the signal aborts, so a fetch or read that ignores it cannot hang. */
 function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -429,6 +452,11 @@ export function createGhostClient(input: CreateGhostClientInput): GhostClient {
         }
       } catch (error) {
         if (error instanceof GhostError) throw error;
+        // A refusal is a decision, never retried. Nothing of the host's error
+        // (its message, its target) is kept.
+        if (isEndpointNotAllowed(error)) {
+          throw new GhostError("BLOCKED_ENDPOINT");
+        }
         if (external?.aborted) throw new GhostError("SITE_UNREACHABLE");
         if (attempt >= limits.maxRetries) {
           throw new GhostError("SITE_UNREACHABLE");
@@ -596,6 +624,22 @@ export function createGhostClient(input: CreateGhostClientInput): GhostClient {
     return { tags: rows.map(parseTag), pages: parsePagination(body).pages };
   }
 
+  async function listTagsByIds(ids: string[]): Promise<GhostTag[]> {
+    const filter = `id:${idList(ids)}`;
+    const body = await getList("tags", {
+      fields: "id,slug,name",
+      filter,
+      order: "id asc",
+      limit: PAGE_SIZE,
+      page: 1,
+    });
+    const rows = body.tags;
+    if (!Array.isArray(rows) || rows.length > PAGE_SIZE) {
+      throw new GhostError("BAD_RESPONSE");
+    }
+    return rows.map(parseTag);
+  }
+
   async function getSettings(): Promise<{ title: string | null }> {
     const res = await getJson("settings");
     if (isNotFound(res)) throw new GhostError("NOT_A_GHOST_SITE");
@@ -626,6 +670,7 @@ export function createGhostClient(input: CreateGhostClientInput): GhostClient {
     listItems,
     getItem,
     listTags,
+    listTagsByIds,
     getSettings,
     searchContent,
     requestCount: () => requestCount,

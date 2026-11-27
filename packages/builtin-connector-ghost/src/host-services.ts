@@ -1,12 +1,8 @@
 import type {
-  ConnectorAdapter,
-  ConnectorManifest,
-} from "@sourceweft/contracts/connectors";
-import type {
   CapabilityConnectorContribution,
   CreateConnectorAdapters,
 } from "@sourceweft/contracts/capability-host-services";
-import { toBackendGhostManifest } from "./backend-manifest";
+import { createGhostAdapter } from "./adapter";
 
 /**
  * Ghost is gated behind a strict boolean deployment switch, exactly like the
@@ -21,6 +17,7 @@ import { toBackendGhostManifest } from "./backend-manifest";
 export const createConnectorAdapters: CreateConnectorAdapters = ({
   env,
   credentialedFetch,
+  logger,
 }): CapabilityConnectorContribution => {
   const activation = env.get("GHOST_CONNECTOR_ENABLED")?.trim().toLowerCase();
   if (!activation || activation === "false" || activation === "0") {
@@ -35,25 +32,7 @@ export const createConnectorAdapters: CreateConnectorAdapters = ({
     );
   }
   return {
-    adapters: [createPlaceholderAdapter(toBackendGhostManifest)],
+    adapters: [createGhostAdapter({ credentialedFetch, logger })],
     agentToolDefs: [],
   };
 };
-
-// replaced in Task 6: a marker adapter so the registration path is exercised
-// before the real adapter exists. It declares the manifest and refuses every
-// operation; it never reaches the network.
-function createPlaceholderAdapter(
-  getManifest: () => ConnectorManifest,
-): ConnectorAdapter {
-  const notImplemented = (): never => {
-    throw new Error("Ghost connector adapter is not implemented yet");
-  };
-  return {
-    capabilityId: "sourceweft/ghost",
-    getManifest,
-    discover: notImplemented,
-    extract: notImplemented,
-    executeAction: notImplemented,
-  };
-}

@@ -74,6 +74,8 @@ test("the switch registers the Ghost credential adapter when enabled", async () 
     assert.equal(manifest.type, "ghost");
     assert.deepEqual(manifest.auth, { kind: "credential", scheme: "api_key" });
     assert.equal(result.adapters[0]!.capabilityId, "sourceweft/ghost");
+    // A credential connector must derive an account identity.
+    assert.equal(typeof result.adapters[0]!.credentialIdentity, "function");
     // Only the one switch is read.
     assert.deepEqual(reads, ["GHOST_CONNECTOR_ENABLED"]);
   }
@@ -103,4 +105,29 @@ test("Ghost capability rejects a malformed activation value", () => {
 test("an enabled Ghost capability fails fast without a host-provided credentialed fetch", () => {
   const { env } = environment({ GHOST_CONNECTOR_ENABLED: "true" });
   assert.throws(() => createConnectorAdapters({ env }), /credentialedFetch/);
+});
+
+test("the registered adapter opens the host's scope per operation and never at registration", async () => {
+  const { env } = environment({ GHOST_CONNECTOR_ENABLED: "true" });
+  let opened = 0;
+  const result = await createConnectorAdapters({
+    env,
+    credentialedFetch: () => {
+      opened += 1;
+      return inertCredentialedFetch();
+    },
+  });
+  assert.equal(opened, 0);
+  // An invalid configuration fails before a scope is opened.
+  const readiness = await result.adapters[0]!.checkSyncReadiness!({
+    teamId: "t",
+    workspaceId: "w",
+    connectorId: "c",
+    connectorType: "ghost",
+    config: { siteUrl: "http://nope.example", items: [] },
+    accessToken: JSON.stringify({ username: "ghost", secret: "abc" }),
+  });
+  assert.equal(readiness.ready, false);
+  assert.equal(readiness.reason, "config_invalid");
+  assert.equal(opened, 0);
 });
