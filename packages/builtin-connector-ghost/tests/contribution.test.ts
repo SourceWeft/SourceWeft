@@ -28,7 +28,22 @@ import {
 // backend validator ignores minItems/maxLength, so the rules that matter at
 // runtime are also expressed through enum, pattern, maxItems, uniqueItems and
 // additionalProperties.
-function valid(schema: any, value: unknown): boolean {
+type JsonSchema = {
+  readonly enum?: readonly unknown[];
+  readonly type?: string | readonly string[];
+  pattern?: string;
+  minLength?: number;
+  maxLength?: number;
+  minItems?: number;
+  maxItems?: number;
+  uniqueItems?: boolean;
+  items?: JsonSchema;
+  readonly required?: readonly string[];
+  readonly properties?: Readonly<Record<string, JsonSchema>>;
+  additionalProperties?: boolean;
+};
+
+function valid(schema: JsonSchema, value: unknown): boolean {
   if (schema.enum && !schema.enum.includes(value)) return false;
   if (schema.type !== undefined) {
     const types: string[] = Array.isArray(schema.type)
@@ -55,8 +70,8 @@ function valid(schema: any, value: unknown): boolean {
       new Set(value.map((v) => JSON.stringify(v))).size !== value.length
     )
       return false;
-    if (schema.items && !value.every((v) => valid(schema.items, v)))
-      return false;
+    const itemSchema = schema.items;
+    if (itemSchema && !value.every((v) => valid(itemSchema, v))) return false;
   }
   if (value !== null && typeof value === "object" && !Array.isArray(value)) {
     const record = value as Record<string, unknown>;
