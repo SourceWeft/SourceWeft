@@ -1,0 +1,24 @@
+[
+  {
+    "id": 12194,
+    "modified_gmt": "2026-03-23T17:53:10",
+    "status": "publish",
+    "type": "page",
+    "link": "https://wordpress.org/news/all-posts/",
+    "title": {
+      "rendered": "All Posts"
+    },
+    "author": 1819835
+  },
+  {
+    "id": 15740,
+    "modified_gmt": "2026-03-18T20:38:38",
+    "status": "publish",
+    "type": "page",
+    "link": "https://wordpress.org/news/",
+    "title": {
+      "rendered": "News"
+    },
+    "author": 1819835
+  }
+]

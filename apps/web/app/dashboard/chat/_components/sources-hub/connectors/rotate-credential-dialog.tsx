@@ -18,6 +18,7 @@ import { Input } from "@sourceweft/ui-web/components/ui/input";
 import { Label } from "@sourceweft/ui-web/components/ui/label";
 
 import { getErrorMessage } from "../lib/errors";
+import { WORDPRESS_LOGIN_CONNECTOR_TYPE } from "./wordpress-site-url";
 import {
   isAcceptableZoteroApiKey,
   ZOTERO_API_KEY_MAX_LENGTH,
@@ -146,6 +147,148 @@ function RotateZoteroKeyForm({
               </>
             ) : (
               t("connectors.zotero.rotate.save")
+            )}
+          </Button>
+        </div>
+      </form>
+    </>
+  );
+}
+
+/**
+ * The WordPress login rotate form: a username and a new Application Password.
+ * The password lives only here and is cleared on submit and on failure; it is
+ * never rendered, logged or placed in a URL. The hint says where to create a new
+ * Application Password and that it can be revoked at any time.
+ */
+function RotateWordpressLoginForm({
+  connectorName,
+  initialUsername,
+  onRotate,
+  onOpenChange,
+}: Pick<
+  Parameters<typeof RotateCredentialDialog>[0],
+  "connectorName" | "initialUsername" | "onRotate"
+> & {
+  onOpenChange: (open: boolean) => void;
+}) {
+  const t = useTranslations("dashboardSourcesHub");
+  const [username, setUsername] = useState(initialUsername ?? "");
+  const [secret, setSecret] = useState("");
+  const [fieldError, setFieldError] = useState<string | null>(null);
+  const [rotateError, setRotateError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+
+  const trimmedUsername = username.trim();
+  const canSave =
+    isAcceptableUsername(trimmedUsername) && secret.length > 0 && !isSaving;
+
+  async function handleRotate() {
+    if (!isAcceptableUsername(trimmedUsername)) {
+      setFieldError(t("connectors.wordpress.dialog.invalidUsername"));
+      return;
+    }
+    if (secret.length === 0 || secret.length > SECRET_MAX_LENGTH) {
+      setFieldError(t("connectors.wordpress.dialog.passwordRequired"));
+      return;
+    }
+    setFieldError(null);
+    setRotateError(null);
+    setIsSaving(true);
+    try {
+      await onRotate({ username: trimmedUsername, secret });
+      setSecret("");
+      onOpenChange(false);
+    } catch (error) {
+      setSecret("");
+      setRotateError(
+        getErrorMessage(error, t("connectors.wordpress.rotate.failed")),
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  const errorText = fieldError ?? rotateError;
+
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle>{t("connectors.wordpress.rotate.title")}</DialogTitle>
+        <DialogDescription>
+          {t("connectors.wordpress.rotate.description", {
+            name: connectorName,
+          })}
+        </DialogDescription>
+      </DialogHeader>
+      <form
+        className="space-y-4"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (canSave) void handleRotate();
+        }}
+      >
+        <div className="space-y-1.5">
+          <Label htmlFor="rotate-wordpress-username">
+            {t("connectors.wordpress.usernameLabel")}
+          </Label>
+          <Input
+            autoComplete="off"
+            id="rotate-wordpress-username"
+            maxLength={USERNAME_MAX_LENGTH}
+            name="wordpressUsername"
+            onChange={(event) => {
+              setUsername(event.target.value);
+              setFieldError(null);
+              setRotateError(null);
+            }}
+            value={username}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="rotate-wordpress-password">
+            {t("connectors.wordpress.passwordLabel")}
+          </Label>
+          <Input
+            autoComplete="new-password"
+            id="rotate-wordpress-password"
+            maxLength={SECRET_MAX_LENGTH}
+            name="wordpressPassword"
+            onChange={(event) => {
+              setSecret(event.target.value);
+              setFieldError(null);
+              setRotateError(null);
+            }}
+            type="password"
+            value={secret}
+          />
+          <p className="text-xs text-muted-foreground">
+            {t("connectors.wordpress.appPasswordHint")}
+          </p>
+        </div>
+
+        {errorText ? (
+          <Alert variant="destructive">
+            <AlertDescription>{errorText}</AlertDescription>
+          </Alert>
+        ) : null}
+
+        <div className="flex justify-end gap-2">
+          <Button
+            onClick={() => onOpenChange(false)}
+            type="button"
+            variant="outline"
+          >
+            {t("common.cancel")}
+          </Button>
+          <Button disabled={!canSave} type="submit">
+            {isSaving ? (
+              <>
+                <Loader2 className="size-3.5 animate-spin" />
+                {t("connectors.wordpress.rotate.save")}
+              </>
+            ) : (
+              t("connectors.wordpress.rotate.save")
             )}
           </Button>
         </div>
@@ -292,7 +435,8 @@ function RotateCredentialForm({
  * Presentational rotate dialog for a stored-credential connector: it replaces
  * the stored credential in place, which is the "reconnect" path for a
  * connector whose account went `reauth_required`. WebDAV asks for a username
- * and app password; Zotero asks for the API key only and sends the library
+ * and app password; WordPress (login) asks for a username and a new Application
+ * Password; Zotero asks for the API key only and sends the library
  * reference derived from its config as the username. The secret lives only in
  * local state and is cleared on submit, on failure and when the dialog
  * reopens; it is never rendered, logged or placed in a cache, the URL or
@@ -326,6 +470,13 @@ export function RotateCredentialDialog({
           <RotateZoteroKeyForm
             configJson={configJson}
             connectorName={connectorName}
+            onOpenChange={onOpenChange}
+            onRotate={onRotate}
+          />
+        ) : connectorType === WORDPRESS_LOGIN_CONNECTOR_TYPE ? (
+          <RotateWordpressLoginForm
+            connectorName={connectorName}
+            initialUsername={initialUsername}
             onOpenChange={onOpenChange}
             onRotate={onRotate}
           />

@@ -1706,7 +1706,12 @@ test("handleReconnectConnector starts the login flow with connectorId and shows 
   const original = window.location;
   Object.defineProperty(window, "location", {
     configurable: true,
-    value: { ...original, href: original.href, origin: original.origin, assign },
+    value: {
+      ...original,
+      href: original.href,
+      origin: original.origin,
+      assign,
+    },
   });
   try {
     await mountHook(baseInput("ws-nc-reconnect"));
@@ -1732,7 +1737,10 @@ test("handleReconnectConnector starts the login flow with connectorId and shows 
 });
 
 test("handleStartLoginFlow sends the add request without a connectorId", async () => {
-  startCredentialFlow.mockResolvedValue({ flowId: "f1", loginUrl: "https://x/login" });
+  startCredentialFlow.mockResolvedValue({
+    flowId: "f1",
+    loginUrl: "https://x/login",
+  });
   await mountHook(baseInput("ws-nc-start"));
   act(() => {
     api().handleAddLoginFlow(nextcloudItem);
@@ -1755,7 +1763,10 @@ test("handleStartLoginFlow sends the add request without a connectorId", async (
 
 test("handleStartLoginFlow adds the connectorId when reconnecting", async () => {
   list.mockResolvedValue({ items: [nextcloudConnector()] });
-  startCredentialFlow.mockResolvedValue({ flowId: "f2", loginUrl: "https://x/login" });
+  startCredentialFlow.mockResolvedValue({
+    flowId: "f2",
+    loginUrl: "https://x/login",
+  });
   await mountHook(baseInput("ws-nc-start2"));
   act(() => {
     api().handleReconnectConnector(api().connectors[0]!);
@@ -1766,11 +1777,15 @@ test("handleStartLoginFlow adds the connectorId when reconnecting", async () => 
       name: "My Nextcloud",
     });
   });
-  expect(startCredentialFlow).toHaveBeenCalledWith("ws-nc-start2", "nextcloud", {
-    serverUrl: "https://cloud.example.com",
-    name: "My Nextcloud",
-    connectorId: "nc-1",
-  });
+  expect(startCredentialFlow).toHaveBeenCalledWith(
+    "ws-nc-start2",
+    "nextcloud",
+    {
+      serverUrl: "https://cloud.example.com",
+      name: "My Nextcloud",
+      connectorId: "nc-1",
+    },
+  );
 });
 
 test("handlePollLoginFlow polls the connector type from the open dialog", async () => {
@@ -2105,6 +2120,181 @@ test("handleAddForum with no workspace toasts and does not create", async () => 
       connectorType: "discourse",
       name: "Community",
       configJson: forumConfig,
+      periodicIndexingEnabled: false,
+    }),
+  ).rejects.toThrow("No workspace selected yet.");
+
+  expect(create).not.toHaveBeenCalled();
+});
+
+function wordpressConnector(overrides: Partial<SourceConnector> = {}) {
+  return fakeConnector({
+    id: "wp-1",
+    connectorType: "wordpress",
+    name: "My blog",
+    configJson: { siteUrl: "https://blog.example.com", items: [] },
+    ...overrides,
+  });
+}
+
+test("handleCheckSite checks a public site with no credential and an empty selection", async () => {
+  checkConfig.mockResolvedValue({ ready: true, reason: "", message: "" });
+  await mountHook(baseInput("ws-site"));
+
+  const result = await api().handleCheckSite({
+    access: "public",
+    siteUrl: "https://blog.example.com",
+    includeUnpublished: false,
+  });
+
+  expect(checkConfig).toHaveBeenCalledWith("ws-site", {
+    connectorType: "wordpress",
+    configJson: { siteUrl: "https://blog.example.com", items: [] },
+  });
+  expect("credential" in checkConfig.mock.calls[0]![1]).toBe(false);
+  expect(result).toEqual({ ready: true, reason: "", message: "" });
+});
+
+test("handleCheckSite checks the login type with the credential and drafts flag", async () => {
+  checkConfig.mockResolvedValue({ ready: true, reason: "", message: "" });
+  await mountHook(baseInput("ws-site-login"));
+
+  await api().handleCheckSite({
+    access: "login",
+    siteUrl: "https://blog.example.com",
+    includeUnpublished: true,
+    credential: { username: "alice", secret: "app pass" },
+  });
+
+  expect(checkConfig).toHaveBeenCalledWith("ws-site-login", {
+    connectorType: "wordpress_login",
+    configJson: {
+      siteUrl: "https://blog.example.com",
+      items: [],
+      includeUnpublished: true,
+    },
+    credential: { username: "alice", secret: "app pass" },
+  });
+});
+
+test("handleCheckSite with no workspace toasts and does not call the API", async () => {
+  await mountHook(baseInput("", { workspaceId: null }));
+
+  const result = await api().handleCheckSite({
+    access: "public",
+    siteUrl: "https://blog.example.com",
+    includeUnpublished: false,
+  });
+
+  expect(checkConfig).not.toHaveBeenCalled();
+  expect(toastError).toHaveBeenCalledWith("No workspace selected yet.");
+  expect(result.ready).toBe(false);
+});
+
+test("handleAddSite creates a public wordpress connector, opens its settings and does not sync", async () => {
+  const created = wordpressConnector();
+  create.mockResolvedValue({ connector: created });
+  list.mockResolvedValue({ items: [created] });
+  await mountHook(baseInput("ws-site-add"));
+
+  await act(async () => {
+    await api().handleAddSite({
+      access: "public",
+      siteUrl: "https://blog.example.com",
+      includeUnpublished: false,
+      name: "My blog",
+      periodicIndexingEnabled: false,
+    });
+  });
+  await flush(25);
+
+  expect(create).toHaveBeenCalledWith("ws-site-add", {
+    connectorType: "wordpress",
+    name: "My blog",
+    configJson: { siteUrl: "https://blog.example.com", items: [] },
+    periodicIndexingEnabled: false,
+    indexingFrequencyMinutes: 360,
+  });
+  expect("credential" in create.mock.calls[0]![1]).toBe(false);
+  // Creating a connector never indexes anything: the member chooses and starts
+  // the first sync from its settings, so a large site is never indexed blindly.
+  expect(sync).not.toHaveBeenCalled();
+  expect(api().connectorSettingsConnector?.id).toBe("wp-1");
+  expect(toastSuccess).toHaveBeenCalledWith("My blog connected.");
+});
+
+test("handleAddSite creates wordpress_login with the credential and drafts flag, and does not sync", async () => {
+  const created = wordpressConnector({
+    id: "wp-login-1",
+    connectorType: "wordpress_login",
+  });
+  create.mockResolvedValue({ connector: created });
+  list.mockResolvedValue({ items: [created] });
+  await mountHook(baseInput("ws-site-login-add"));
+
+  await act(async () => {
+    await api().handleAddSite({
+      access: "login",
+      siteUrl: "https://blog.example.com",
+      includeUnpublished: true,
+      credential: { username: "alice", secret: "app pass" },
+      name: "My blog",
+      periodicIndexingEnabled: true,
+    });
+  });
+  await flush(25);
+
+  expect(create).toHaveBeenCalledWith("ws-site-login-add", {
+    connectorType: "wordpress_login",
+    name: "My blog",
+    configJson: {
+      siteUrl: "https://blog.example.com",
+      items: [],
+      includeUnpublished: true,
+    },
+    credential: { username: "alice", secret: "app pass" },
+    periodicIndexingEnabled: true,
+    indexingFrequencyMinutes: 360,
+  });
+  // The "Sync automatically" choice only enables scheduled periodic syncs; no
+  // immediate sync runs on create.
+  expect(sync).not.toHaveBeenCalled();
+  expect(api().connectorSettingsConnector?.id).toBe("wp-login-1");
+});
+
+test("handleAddSite rethrows a 409 without toasting", async () => {
+  create.mockRejectedValue(
+    new HttpClientError({
+      message: "exists",
+      status: 409,
+      statusText: "Conflict",
+      code: "CONNECTOR_ALREADY_EXISTS",
+    }),
+  );
+  await mountHook(baseInput("ws-site-dup"));
+
+  await expect(
+    api().handleAddSite({
+      access: "public",
+      siteUrl: "https://blog.example.com",
+      includeUnpublished: false,
+      name: "My blog",
+      periodicIndexingEnabled: false,
+    }),
+  ).rejects.toMatchObject({ code: "CONNECTOR_ALREADY_EXISTS" });
+
+  expect(toastSuccess).not.toHaveBeenCalled();
+});
+
+test("handleAddSite with no workspace toasts and does not create", async () => {
+  await mountHook(baseInput("", { workspaceId: null }));
+
+  await expect(
+    api().handleAddSite({
+      access: "public",
+      siteUrl: "https://blog.example.com",
+      includeUnpublished: false,
+      name: "My blog",
       periodicIndexingEnabled: false,
     }),
   ).rejects.toThrow("No workspace selected yet.");

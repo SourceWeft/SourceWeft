@@ -42,6 +42,7 @@ import { AddApiKeyDialog } from "./add-api-key-dialog";
 import { AddCredentialDialog } from "./add-credential-dialog";
 import { AddFeedDialog } from "./add-feed-dialog";
 import { AddForumDialog } from "./add-forum-dialog";
+import { AddWordpressDialog } from "./add-wordpress-dialog";
 import { GmailBrokerNoticeDialog } from "./gmail-broker-notice-dialog";
 import { needsGmailBrokerNotice, type GmailUsageMode } from "./gmail-mode";
 import {
@@ -68,6 +69,9 @@ import type {
   ForumAddInput,
   ForumCheckInput,
   ForumCheckResult,
+  SiteAddInput,
+  SiteCheckInput,
+  SiteCheckResult,
 } from "./types";
 
 export type ManageConnectorsTab = "all" | "active";
@@ -118,6 +122,7 @@ export function ManageConnectorsDialog({
   onCheckCredential,
   onCheckFeed,
   onCheckForum,
+  onCheckSite,
   onCreateConnector,
   onDisconnectConnector,
   onOpenChange,
@@ -125,6 +130,7 @@ export function ManageConnectorsDialog({
   onSubmitCredential,
   onSubmitFeed,
   onSubmitForum,
+  onSubmitSite,
   onSyncConnector,
   onToggleConnectorStatus,
   open,
@@ -152,6 +158,7 @@ export function ManageConnectorsDialog({
   ) => Promise<CredentialCheckResult>;
   onCheckFeed: (feedUrl: string) => Promise<FeedCheckResult>;
   onCheckForum: (input: ForumCheckInput) => Promise<ForumCheckResult>;
+  onCheckSite: (input: SiteCheckInput) => Promise<SiteCheckResult>;
   onCopyWebhook: (value: string) => void;
   onCreateConnector: (item: ConnectorCatalogItem) => void;
   onDisconnectConnector: (connector: ConnectorItem) => void;
@@ -160,6 +167,7 @@ export function ManageConnectorsDialog({
   onSubmitCredential: (input: CredentialAddInput) => Promise<void>;
   onSubmitFeed: (input: { name: string; feedUrl: string }) => Promise<void>;
   onSubmitForum: (input: ForumAddInput) => Promise<void>;
+  onSubmitSite: (input: SiteAddInput) => Promise<void>;
   onSyncConnector: (connector: ConnectorItem) => void;
   onToggleConnectorStatus: (connector: ConnectorItem) => void;
   open: boolean;
@@ -190,8 +198,14 @@ export function ManageConnectorsDialog({
     useState<ConnectorCatalogItem | null>(null);
   // Add-only forum catalog item (`addMode === "forum_url"`) whose forum
   // address dialog is open.
-  const [pendingForum, setPendingForum] =
-    useState<ConnectorCatalogItem | null>(null);
+  const [pendingForum, setPendingForum] = useState<ConnectorCatalogItem | null>(
+    null,
+  );
+  // Add-only WordPress catalog item (`addMode === "site_url"`) whose site
+  // address and access dialog is open.
+  const [pendingSite, setPendingSite] = useState<ConnectorCatalogItem | null>(
+    null,
+  );
   const activeConnectors = connectors.filter(
     (connector) => connector.status !== "disabled",
   );
@@ -387,6 +401,7 @@ export function ManageConnectorsDialog({
                                 onAddLoginFlow={onAddLoginFlow}
                                 onAddFeed={setPendingFeed}
                                 onAddForum={setPendingForum}
+                                onAddSite={setPendingSite}
                                 onCancelConnector={onCancelConnector}
                                 onConfigure={() => {
                                   if (connector) {
@@ -569,6 +584,14 @@ export function ManageConnectorsDialog({
           if (!nextOpen) setPendingForum(null);
         }}
         open={pendingForum !== null}
+      />
+      <AddWordpressDialog
+        onAdd={onSubmitSite}
+        onCheck={onCheckSite}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setPendingSite(null);
+        }}
+        open={pendingSite !== null}
       />
       <GmailBrokerNoticeDialog
         item={pendingGmailBrokerNotice}

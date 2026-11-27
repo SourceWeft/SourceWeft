@@ -1,0 +1,21 @@
+[
+  {
+    "id": 22114,
+    "date_gmt": "2026-11-24T15:53:15",
+    "modified_gmt": "2026-11-24T16:57:59",
+    "slug": "wordpress-7-2-release-candidate-3",
+    "status": "publish",
+    "type": "post",
+    "link": "https://wordpress.org/news/2026/11/wordpress-7-2-release-candidate-3/",
+    "title": {
+      "rendered": "WordPress 7.2 Release Candidate 3"
+    },
+    "content": {
+      "rendered": "\n<p class=\"wp-block-paragraph\">Release Candidate 3 (“RC3”) for WordPress 7.2 is ready for download and testing!</p>\n\n\n\n<p class=\"wp-block-paragraph\"><strong>This version of the WordPress software is still under development</strong>. Please do not install, run, or test this version of WordPress on production or mission-critical websites. Instead, it’s recommended to evaluate RC3 on a test server and site.</p>\n\n\n\n<p class=\"wp-block-paragraph\">Wait, what happened to 7.2 RC2? Changes in <a href=\"https://wordpress.org/news/2026/11/wordpress-7-1-5-release/\">WordPress 7.1.5</a> were simultaneously applied to WordPress 7.2 RC2.</p>\n\n\n\n<h2 class=\"wp-block-heading\">WordPress testing methods</h2>\n\n\n\n<figure class=\"wp-block-table\"><table class=\"has-fixed-layout\"><tbody><tr><td><strong>Plugin</strong></td><td>Install and activate the <a href=\"https://wordpress.org/plugins/wordpress-beta-tester/\" rel=\"noopener\" target=\"_blank\">WordPress Beta Tester</a> plugin on a WordPress install. Select the “Bleeding edge” channel and “Beta/RC Only” stream.</td></tr><tr><td><strong>Direct Download</strong></td><td>Download the <a href=\"https://wordpress.org/wordpress-7.2-RC3.zip\">RC3 version (zip)</a> and install it on a WordPress website.</td></tr><tr><td><strong>Command Line</strong></td><td>Use this <a href=\"https://make.wordpress.org/cli/\">WP-CLI</a> command: <br><code>wp core update --version=7.2-RC3</code></td></tr><tr><td><strong>WordPress Playground</strong></td><td>Use the <a href=\"http://playground.wordpress.net/release\" rel=\"noopener\" target=\"_blank\">WordPress Playground instance</a> to test the software directly in your browser. No setup required – just click and go!</td></tr></tbody></table></figure>\n\n\n\n<p class=\"wp-block-paragraph\">The scheduled release date for WordPress 7.2 is <strong>December 8, 2026</strong>. The full <a href=\"https://make.wordpress.org/core/2026/10/06/wordpress-7-2-release-party-schedule/\" rel=\"noopener\" target=\"_blank\">release schedule can be found here</a>. Your help testing Beta and RC versions is vital to making this release as stable and powerful as possible. Thank you to everyone who contributes by testing.</p>\n\n\n\n<p class=\"wp-block-paragraph\">Please continue checking the <a href=\"https://make.wordpress.org/core/\" rel=\"noopener\" target=\"_blank\">Make WordPress Core blog</a> for <a href=\"https://make.wordpress.org/core/tag/7-2\" rel=\"noopener\" target=\"_blank\">7.2-related posts</a> in the coming weeks for more information.</p>",
+      "protected": false
+    },
+    "author": 15049054,
+    "categories": [5, 14],
+    "tags": [649, 184, 409]
+  }
+]

@@ -39,6 +39,13 @@ export type ConnectorCatalogItem = {
   /** Hidden from the catalog until the backend reports the type as available.
    * Set for connectors that depend on backend rollout registration. */
   requiresBackendRegistration?: boolean;
+  /** Never shown as its own picker card, but still a catalog entry so existing
+   * rows of this type resolve their name, icon, readiness copy and rotate
+   * dialog. Used for the second connector of a product that ships one card and
+   * two backend types: WordPress registers `wordpress` (public) and
+   * `wordpress_login`, and the login type is hidden here while the public card
+   * creates either one. */
+  hiddenInPicker?: boolean;
   /** Add-only connector: there is no account to authorize, and each entry is
    * its own connector, so the card never reads as connected and its action
    * adds another one. `feed_url` asks for a feed URL; `credential` asks for an
@@ -46,8 +53,17 @@ export type ConnectorCatalogItem = {
    * member to the provider's own browser login and the backend collects the
    * credential (Nextcloud); `api_key` asks for a library ID and a read-only API
    * key (Zotero); `forum_url` asks for a public forum's address and the
-   * categories and topics are chosen after it exists (Discourse). */
-  addMode?: "feed_url" | "credential" | "login_flow" | "api_key" | "forum_url";
+   * categories and topics are chosen after it exists (Discourse); `site_url`
+   * asks for a WordPress site address and an access choice (a public site or an
+   * Application Password login), which decides which connector type is
+   * created. */
+  addMode?:
+    | "feed_url"
+    | "credential"
+    | "login_flow"
+    | "api_key"
+    | "forum_url"
+    | "site_url";
   isIndexable: boolean;
   supportsPeriodicSync: boolean;
   supportsActions: boolean;
@@ -122,6 +138,39 @@ export type ForumAddInput = ForumCheckInput & {
  * `selection_required`, which the dialog treats as success. */
 export type ForumCheckResult = ConnectorReadinessState & {
   ready: boolean;
+};
+
+/** The access choice in the WordPress add dialog: a public site (the
+ * `wordpress` connector, no credential) or an Application Password login (the
+ * `wordpress_login` connector, username + secret, self-hosted only). */
+export type WordpressAccess = "public" | "login";
+
+/** A readiness check or create for a WordPress site, built by its add dialog.
+ * The access choice decides the connector type and whether an Application
+ * Password travels with it; the secret lives only in the dialog's local state
+ * and is never persisted on the client. `includeUnpublished` applies to the
+ * login choice only (drafts and private posts become visible to every member). */
+export type SiteCheckInput =
+  | {
+      access: "public";
+      siteUrl: string;
+      includeUnpublished: boolean;
+    }
+  | {
+      access: "login";
+      siteUrl: string;
+      includeUnpublished: boolean;
+      credential: ConnectorCredentialInputValues;
+    };
+
+/** Outcome of the pre-create WordPress site check: the readiness verdict. An
+ * empty selection is ready (it means every published post and page), so a
+ * reachable site reports `ready: true`. */
+export type SiteCheckResult = ConnectorReadinessState & { ready: boolean };
+
+export type SiteAddInput = SiteCheckInput & {
+  name: string;
+  periodicIndexingEnabled: boolean;
 };
 
 /** The WebDAV credential check input: an endpoint and its username/password. */

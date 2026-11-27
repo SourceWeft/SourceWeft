@@ -254,7 +254,16 @@ function compactConnectorExecutionMeta(
  */
 const CONNECTOR_SCOPED_READINESS_TYPES: ReadonlySet<string> = new Set([
   "discourse",
+  "wordpress",
+  "wordpress_login",
 ]);
+
+/** The message namespace a connector type reads its scoped readiness copy from.
+ * The two WordPress connectors share one `connectors.wordpress.readiness.*`
+ * block, so `wordpress_login` resolves to `wordpress`. */
+function readinessCopyScope(connectorType: string): string {
+  return connectorType === "wordpress_login" ? "wordpress" : connectorType;
+}
 
 function connectorScopedSummaryKey(
   readiness: ConnectorReadinessState,
@@ -264,7 +273,7 @@ function connectorScopedSummaryKey(
   if (!connectorType || !CONNECTOR_SCOPED_READINESS_TYPES.has(connectorType)) {
     return null;
   }
-  const key = `connectors.${connectorType}.readiness.${readiness.reason}`;
+  const key = `connectors.${readinessCopyScope(connectorType)}.readiness.${readiness.reason}`;
   // `has` answers false for a reason the connector has no copy for, so the
   // shared table and the server message still apply.
   return t.has(key) ? key : null;
@@ -463,9 +472,11 @@ function getOAuthConnectorStatus(
           ? t("connectors.detail.availableAddApiKey")
           : input.item.addMode === "forum_url"
             ? t("connectors.detail.availableAddForum")
-            : input.item.addMode
-              ? t("connectors.detail.availableAddFeed")
-              : t("connectors.detail.available", { name: input.item.name }),
+            : input.item.addMode === "site_url"
+              ? t("connectors.detail.availableAddSite")
+              : input.item.addMode
+                ? t("connectors.detail.availableAddFeed")
+                : t("connectors.detail.available", { name: input.item.name }),
   };
 }
 
@@ -585,6 +596,7 @@ export const ConnectorCatalogCard = memoComponent(
     onAddLoginFlow,
     onAddFeed,
     onAddForum,
+    onAddSite,
     onCancelConnector,
     onConfigure,
     onConnectConnector,
@@ -602,6 +614,9 @@ export const ConnectorCatalogCard = memoComponent(
     /** Add-only forum cards (`item.addMode === "forum_url"`) call this instead
      * of starting OAuth, so Discourse opens its forum address dialog. */
     onAddForum: (item: ConnectorCatalogItem) => void;
+    /** Add-only site cards (`item.addMode === "site_url"`) call this instead of
+     * starting OAuth, so WordPress opens its site address and access dialog. */
+    onAddSite: (item: ConnectorCatalogItem) => void;
     /** Add-only credential cards (`item.addMode === "credential"`) call this
      * instead of starting OAuth, so WebDAV opens its endpoint/credential dialog. */
     onAddCredential: (item: ConnectorCatalogItem) => void;
@@ -643,7 +658,8 @@ export const ConnectorCatalogCard = memoComponent(
       : item.addMode === "credential" ||
           item.addMode === "login_flow" ||
           item.addMode === "api_key" ||
-          item.addMode === "forum_url"
+          item.addMode === "forum_url" ||
+          item.addMode === "site_url"
         ? t("connectors.cta.connect")
         : item.addMode
           ? t("connectors.cta.addFeed")
@@ -667,6 +683,10 @@ export const ConnectorCatalogCard = memoComponent(
       }
       if (item.addMode === "forum_url") {
         onAddForum(item);
+        return;
+      }
+      if (item.addMode === "site_url") {
+        onAddSite(item);
         return;
       }
       if (item.addMode === "login_flow") {
@@ -750,8 +770,8 @@ export const ConnectorCatalogCard = memoComponent(
               {connectorCatalogCapabilities(item, supportsIndexing)
                 .slice(0, 2)
                 .map((capability) => (
-                <TypeBadge key={capability} label={capability} />
-              ))}
+                  <TypeBadge key={capability} label={capability} />
+                ))}
             </div>
           </div>
         </div>

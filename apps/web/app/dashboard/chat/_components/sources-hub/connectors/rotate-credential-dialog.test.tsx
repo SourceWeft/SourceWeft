@@ -202,3 +202,51 @@ test("a failed Zotero rotate clears the key and never renders it", async () => {
   expect(document.body.innerHTML).not.toContain("NewKeyAbC9");
   expect(button("Reconnect").disabled).toBe(true);
 });
+
+function wordpressUsernameField() {
+  return document.querySelector<HTMLInputElement>(
+    'input[name="wordpressUsername"]',
+  )!;
+}
+function wordpressPasswordField() {
+  return document.querySelector<HTMLInputElement>(
+    'input[name="wordpressPassword"]',
+  )!;
+}
+
+test("a WordPress login connector asks for a username and a new Application Password", async () => {
+  const { onRotate } = await mountDialog({
+    connectorType: "wordpress_login",
+    connectorName: "My blog",
+  });
+
+  // WordPress copy, not WebDAV, and its own field names.
+  expect(document.body.textContent).toContain("Reconnect WordPress");
+  expect(document.body.textContent).toContain("Application Password");
+  expect(wordpressPasswordField().type).toBe("password");
+  expect(wordpressUsernameField().value).toBe("alice");
+
+  typeInto(wordpressPasswordField(), "wxyz 7890 wxyz 7890");
+  await flush(3);
+  await click(button("Reconnect"));
+  await flush(5);
+
+  expect(onRotate).toHaveBeenCalledWith({
+    username: "alice",
+    secret: "wxyz 7890 wxyz 7890",
+  });
+});
+
+test("a failed WordPress rotate clears the Application Password and never renders it", async () => {
+  const onRotate = vi.fn().mockRejectedValue(new Error("boom"));
+  await mountDialog({ onRotate, connectorType: "wordpress_login" });
+
+  typeInto(wordpressPasswordField(), "secret 0000 secret");
+  await flush(3);
+  await click(button("Reconnect"));
+  await flush(5);
+
+  expect(wordpressPasswordField().value).toBe("");
+  expect(document.body.innerHTML).not.toContain("secret 0000 secret");
+  expect(button("Reconnect").disabled).toBe(true);
+});
