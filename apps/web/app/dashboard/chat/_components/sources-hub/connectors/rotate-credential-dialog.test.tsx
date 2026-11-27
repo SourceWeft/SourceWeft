@@ -282,6 +282,16 @@ test("a Ghost connector asks for the Content API key only and sends the fixed us
   expect(onOpenChange).toHaveBeenCalledWith(false);
 });
 
+test("the Ghost key input is bound to a hint that does not refer to a missing URL field", async () => {
+  await mountDialog({ connectorType: "ghost" });
+  const hintId = ghostKeyField().getAttribute("aria-describedby");
+  expect(hintId).toBeTruthy();
+  const hint = document.getElementById(hintId!)?.textContent ?? "";
+  expect(hint).toContain("Ghost Admin");
+  expect(hint).toContain("Integrations");
+  expect(hint).not.toMatch(/\bsame\b/i);
+});
+
 test("a Ghost key with a space keeps Reconnect disabled", async () => {
   const { onRotate } = await mountDialog({ connectorType: "ghost" });
 

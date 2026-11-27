@@ -223,6 +223,7 @@ function RotateGhostKeyForm({
             {t("connectors.ghost.rotate.keyLabel")}
           </Label>
           <Input
+            aria-describedby="rotate-ghost-api-key-hint"
             aria-invalid={keyInvalid}
             autoComplete="new-password"
             id="rotate-ghost-api-key"
@@ -235,8 +236,11 @@ function RotateGhostKeyForm({
             type="password"
             value={secret}
           />
-          <p className="text-xs text-muted-foreground">
-            {t("connectors.ghost.apiKeyHint")}
+          <p
+            className="text-xs text-muted-foreground"
+            id="rotate-ghost-api-key-hint"
+          >
+            {t("connectors.ghost.rotate.keyHint")}
           </p>
         </div>
 
@@ -582,6 +586,9 @@ export function RotateCredentialDialog({
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent className="max-w-md">
         {/* Rendered inside the content so each open starts with a fresh form. */}
+        {/* Dispatch is by connector type, with the WebDAV form as the implicit
+            default: a further stored-credential connector needs its own entry
+            here or a catalog field naming its form. */}
         {connectorType === GHOST_CONNECTOR_TYPE ? (
           <RotateGhostKeyForm
             connectorName={connectorName}

@@ -3785,6 +3785,7 @@
           "title": "Reconnect Ghost",
           "description": "Enter the current Content API key for {name}. It replaces the stored key.",
           "keyLabel": "Content API key",
+          "keyHint": "Copy the Content API key from a custom integration in Ghost Admin (Settings, then Integrations). It gives read access to published content only.",
           "save": "Reconnect",
           "failed": "Could not update the Content API key. Try again."
         },

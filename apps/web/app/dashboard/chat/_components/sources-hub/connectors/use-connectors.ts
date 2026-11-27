@@ -72,9 +72,9 @@ import {
 } from "./wordpress-site-url";
 
 /** A catalog type whose add flow collects a stored credential: a username and
- * app password (WebDAV) or a library ID and API key (Zotero) or a Content API key (Ghost). Both the add
- * card and the reconnect path branch on this; reconnecting replaces the
- * credential in place. */
+ * app password (WebDAV), a library ID and API key (Zotero) or a Content API
+ * key (Ghost). Both the add card and the reconnect path branch on this;
+ * reconnecting replaces the credential in place. */
 function isCredentialConnectorType(connectorType: string): boolean {
   const addMode = connectorCatalog.find(
     (item) => item.id === connectorType,

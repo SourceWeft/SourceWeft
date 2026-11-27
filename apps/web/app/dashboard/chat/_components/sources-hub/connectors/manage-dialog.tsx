@@ -577,6 +577,9 @@ export function ManageConnectorsDialog({
         }}
         open={pendingCredential !== null}
       />
+      {/* The api_key dispatch is by catalog id, with Zotero as the implicit
+          default: a further api_key connector needs its own entry here (and in
+          RotateCredentialDialog) or a catalog field naming its dialog. */}
       <AddApiKeyDialog
         onAdd={onSubmitCredential}
         onCheck={onCheckCredential}

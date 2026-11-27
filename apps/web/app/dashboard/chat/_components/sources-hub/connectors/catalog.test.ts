@@ -1221,7 +1221,7 @@ describe("ghost catalog entry", () => {
       ]) {
         expect(copy.dialog[key]?.trim(), key).toBeTruthy();
       }
-      for (const key of ["title", "save", "failed"]) {
+      for (const key of ["title", "keyHint", "save", "failed"]) {
         expect(copy.rotate[key]?.trim(), key).toBeTruthy();
       }
       for (const reason of GHOST_READINESS_REASONS) {
