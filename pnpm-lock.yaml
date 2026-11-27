@@ -193,6 +193,9 @@ importers:
       '@sourceweft/builtin-connector-dropbox':
         specifier: workspace:*
         version: link:../../packages/builtin-connector-dropbox
+      '@sourceweft/builtin-connector-ghost':
+        specifier: workspace:*
+        version: link:../../packages/builtin-connector-ghost
       '@sourceweft/builtin-connector-github':
         specifier: workspace:*
         version: link:../../packages/builtin-connector-github
@@ -994,6 +997,9 @@ importers:
       '@sourceweft/builtin-connector-dropbox':
         specifier: workspace:*
         version: link:../builtin-connector-dropbox
+      '@sourceweft/builtin-connector-ghost':
+        specifier: workspace:*
+        version: link:../builtin-connector-ghost
       '@sourceweft/builtin-connector-github':
         specifier: workspace:*
         version: link:../builtin-connector-github
@@ -1156,6 +1162,28 @@ importers:
       '@sourceweft/contracts':
         specifier: workspace:*
         version: link:../contracts
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
+
+  packages/builtin-connector-ghost:
+    dependencies:
+      '@sourceweft/capability-contracts':
+        specifier: workspace:*
+        version: link:../capability-contracts
+      '@sourceweft/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@sourceweft/html-text':
+        specifier: workspace:*
+        version: link:../html-text
     devDependencies:
       '@types/node':
         specifier: ^22.20.1

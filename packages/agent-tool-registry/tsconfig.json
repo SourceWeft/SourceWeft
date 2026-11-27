@@ -39,6 +39,9 @@
       "@sourceweft/builtin-connector-confluence": [
         "../builtin-connector-confluence/src/index.ts"
       ],
+      "@sourceweft/builtin-connector-ghost": [
+        "../builtin-connector-ghost/src/index.ts"
+      ],
       "@sourceweft/builtin-connector-webdav": [
         "../builtin-connector-webdav/src/index.ts"
       ],

@@ -55,6 +55,8 @@ export const BUILTIN_CAPABILITY_MODULES: Record<
     import("@sourceweft/builtin-connector-jira"),
   "@sourceweft/builtin-connector-confluence": () =>
     import("@sourceweft/builtin-connector-confluence"),
+  "@sourceweft/builtin-connector-ghost": () =>
+    import("@sourceweft/builtin-connector-ghost"),
   "@sourceweft/builtin-connector-webdav": () =>
     import("@sourceweft/builtin-connector-webdav"),
   "@sourceweft/builtin-connector-zotero": () =>
