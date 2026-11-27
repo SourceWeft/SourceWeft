@@ -22,6 +22,7 @@ import {
   type LucideIcon,
   MessageSquare,
   SquareKanban,
+  Tag,
   Users,
 } from "lucide-react";
 import type {
@@ -80,6 +81,36 @@ const WORDPRESS_PRESENTER: SelectionPresenter = {
     externalIdFor(item) {
       return item.kind === "post" || item.kind === "page"
         ? `wordpress:${item.id}`
+        : null;
+    },
+    containerIndexedCount() {
+      return null;
+    },
+  },
+};
+
+/**
+ * Ghost indexes its published posts and pages. A selected post or page is its
+ * own source: its externalId is `ghost:<post|page>:<id>` — the item id is
+ * already the kind-qualified `post:<id>` / `page:<id>`, so prefixing `ghost:`
+ * yields the externalId the adapter emits. A content type (`type:post` /
+ * `type:page`) and a tag (`tag:<id>`) are containers: the items inside them are
+ * sources of their own, with no per-container count. `ghost.describe` omits an
+ * id it does not know (no tombstone), which the shared rows already show as the
+ * kind label with "name unavailable". Keep the `ghost:` prefix in sync with
+ * packages/builtin-connector-ghost.
+ */
+const GHOST_PRESENTER: SelectionPresenter = {
+  kindIcons: {
+    type: FileStack,
+    tag: Tag,
+    post: FileText,
+    page: File,
+  },
+  indexing: {
+    externalIdFor(item) {
+      return item.kind === "post" || item.kind === "page"
+        ? `ghost:${item.id}`
         : null;
     },
     containerIndexedCount() {
@@ -184,6 +215,7 @@ export const selectionPresenters: Record<string, SelectionPresenter> = {
   // The Application Password connector browses and indexes the same way; both
   // emit `wordpress:<post|page>:<id>` sources, so they share one presenter.
   wordpress_login: WORDPRESS_PRESENTER,
+  ghost: GHOST_PRESENTER,
 };
 
 const FALLBACK_PRESENTER: SelectionPresenter = { kindIcons: {} };

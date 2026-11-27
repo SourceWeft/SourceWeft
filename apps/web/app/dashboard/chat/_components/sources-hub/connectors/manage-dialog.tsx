@@ -42,6 +42,7 @@ import { AddApiKeyDialog } from "./add-api-key-dialog";
 import { AddCredentialDialog } from "./add-credential-dialog";
 import { AddFeedDialog } from "./add-feed-dialog";
 import { AddForumDialog } from "./add-forum-dialog";
+import { AddGhostDialog } from "./add-ghost-dialog";
 import { AddWordpressDialog } from "./add-wordpress-dialog";
 import { GmailBrokerNoticeDialog } from "./gmail-broker-notice-dialog";
 import { needsGmailBrokerNotice, type GmailUsageMode } from "./gmail-mode";
@@ -69,6 +70,9 @@ import type {
   ForumAddInput,
   ForumCheckInput,
   ForumCheckResult,
+  GhostAddInput,
+  GhostCheckInput,
+  GhostCheckResult,
   SiteAddInput,
   SiteCheckInput,
   SiteCheckResult,
@@ -122,6 +126,7 @@ export function ManageConnectorsDialog({
   onCheckCredential,
   onCheckFeed,
   onCheckForum,
+  onCheckGhost,
   onCheckSite,
   onCreateConnector,
   onDisconnectConnector,
@@ -130,6 +135,7 @@ export function ManageConnectorsDialog({
   onSubmitCredential,
   onSubmitFeed,
   onSubmitForum,
+  onSubmitGhost,
   onSubmitSite,
   onSyncConnector,
   onToggleConnectorStatus,
@@ -158,6 +164,7 @@ export function ManageConnectorsDialog({
   ) => Promise<CredentialCheckResult>;
   onCheckFeed: (feedUrl: string) => Promise<FeedCheckResult>;
   onCheckForum: (input: ForumCheckInput) => Promise<ForumCheckResult>;
+  onCheckGhost: (input: GhostCheckInput) => Promise<GhostCheckResult>;
   onCheckSite: (input: SiteCheckInput) => Promise<SiteCheckResult>;
   onCopyWebhook: (value: string) => void;
   onCreateConnector: (item: ConnectorCatalogItem) => void;
@@ -167,6 +174,7 @@ export function ManageConnectorsDialog({
   onSubmitCredential: (input: CredentialAddInput) => Promise<void>;
   onSubmitFeed: (input: { name: string; feedUrl: string }) => Promise<void>;
   onSubmitForum: (input: ForumAddInput) => Promise<void>;
+  onSubmitGhost: (input: GhostAddInput) => Promise<void>;
   onSubmitSite: (input: SiteAddInput) => Promise<void>;
   onSyncConnector: (connector: ConnectorItem) => void;
   onToggleConnectorStatus: (connector: ConnectorItem) => void;
@@ -192,8 +200,8 @@ export function ManageConnectorsDialog({
   // endpoint/credential dialog is open.
   const [pendingCredential, setPendingCredential] =
     useState<ConnectorCatalogItem | null>(null);
-  // Add-only API-key catalog item (`addMode === "api_key"`) whose library ID
-  // and key dialog is open.
+  // Add-only API-key catalog item (`addMode === "api_key"`) whose dialog is
+  // open: Zotero's library ID and key, or Ghost's API URL and Content API key.
   const [pendingApiKey, setPendingApiKey] =
     useState<ConnectorCatalogItem | null>(null);
   // Add-only forum catalog item (`addMode === "forum_url"`) whose forum
@@ -575,7 +583,15 @@ export function ManageConnectorsDialog({
         onOpenChange={(nextOpen) => {
           if (!nextOpen) setPendingApiKey(null);
         }}
-        open={pendingApiKey !== null}
+        open={pendingApiKey !== null && pendingApiKey.id !== "ghost"}
+      />
+      <AddGhostDialog
+        onAdd={onSubmitGhost}
+        onCheck={onCheckGhost}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setPendingApiKey(null);
+        }}
+        open={pendingApiKey?.id === "ghost"}
       />
       <AddForumDialog
         onAdd={onSubmitForum}

@@ -3491,7 +3491,8 @@
         "availableLoginFlow": "在瀏覽器中登入 {name} 以進行連接。",
         "availableAddApiKey": "使用唯讀 API 金鑰新增 Zotero 文庫。",
         "availableAddForum": "使用網址新增公開的 Discourse 論壇。",
-        "availableAddSite": "使用網址新增 WordPress 站點。"
+        "availableAddSite": "使用網址新增 WordPress 站點。",
+        "availableAddApiKey_ghost": "使用 API URL 和 Content API 金鑰新增 Ghost 站點。"
       },
       "syncBlock": {
         "pagesLimit": "頁數額度已用完。上次同步索引了 {count} 條內容後暫停，額度恢復後會自動繼續同步。",
@@ -3752,6 +3753,47 @@
           "reauth_required": "站點拒絕了該使用者名稱或應用程式密碼。請檢查後重試。如果密碼無誤，可能是網站主機遮蔽了 Authorization 請求標頭（某些主機的常見設定）——請諮詢主機服務商或檢查安全外掛的設定。",
           "insufficient_permission": "此帳戶無法讀取草稿和私密文章。請使用具有相應權限的帳戶，或關閉「包含草稿和私密文章」。",
           "blocked_endpoint": "無法使用此網址：此部署可能不允許連接該網址，或該站點會重新導向到其他網址。請填寫站點自身使用的網址（帶或不帶 www）。",
+          "rate_limited": "該站點目前正在限制請求。請稍等片刻後重試。"
+        }
+      },
+      "ghost": {
+        "siteUrlLabel": "API URL",
+        "siteUrlHint": "在 Ghost 管理介面（Ghost Admin）依次開啟「設定」、「整合」，再開啟一個自訂整合（custom integration），API URL 和 Content API 金鑰都顯示在那裡。請按原樣填寫 API URL，例如 https://demo.ghost.io。如果站點會重新導向，請填寫它實際使用的網址（帶或不帶 www）。",
+        "apiKeyLabel": "Content API 金鑰",
+        "apiKeyHint": "在 Ghost 管理介面同一個自訂整合中（設定，然後整合）複製 Content API 金鑰。它只能讀取已發布的內容。",
+        "contentNote": "只會讀取已發布的文章和頁面。僅限會員和付費文章會被跳過，不會被索引。不支援草稿。",
+        "nameLabel": "名稱（選填）",
+        "dialog": {
+          "title": "連接 Ghost 站點",
+          "description": "輸入 Ghost 站點的 API URL 和 Content API 金鑰。SourceWeft 會先檢查連接，然後你再選擇要索引的文章、頁面或標籤。",
+          "check": "檢查連接",
+          "checking": "檢查中…",
+          "reachable": "站點已驗證",
+          "reachableHint": "接下來新增該連接器，然後在其設定中選擇要索引的內容並開始同步。在此之前不會索引任何內容；如果未選擇任何內容，一次同步會索引該站點所有已發布的文章和頁面（最多 5000 個）。僅限會員和付費文章會被跳過。",
+          "add": "新增站點",
+          "autoSync": "自動同步",
+          "autoSyncHint": "定期檢查新增和變更的文章。預設關閉；開啟後只會安排日後的自動同步，不會立即索引。新增連接器不會索引任何內容——請在其設定中手動開始首次同步。",
+          "invalidUrl": "請輸入以 https:// 開頭的 API URL，不能帶使用者名稱、連接埠號、查詢字串或 # 片段，也不能是 IP 地址或 localhost；主機名含非英文字元時，請使用 ASCII（punycode）形式。",
+          "invalidApiKey": "請輸入不含空格的 Content API 金鑰。",
+          "checkFailed": "無法檢查該站點。請重試。",
+          "nameConflict": "此工作區中已存在同名連接器。請更改名稱，或使用現有連接器。",
+          "accountConflict": "此工作區中已存在該 Ghost 站點的連接器。",
+          "credentialNotAllowed": "此部署不允許使用此站點網址。",
+          "addFailed": "新增站點失敗。"
+        },
+        "rotate": {
+          "title": "重新連接 Ghost",
+          "description": "請為 {name} 輸入目前的 Content API 金鑰。新金鑰將替換已儲存的金鑰。",
+          "keyLabel": "Content API 金鑰",
+          "save": "重新連接",
+          "failed": "無法更新 Content API 金鑰。請重試。"
+        },
+        "readiness": {
+          "reauth_required": "Ghost 拒絕了該 Content API 金鑰。請檢查金鑰後重試。如果整合已被刪除或金鑰已更改，請從 Ghost 管理介面（設定，然後整合）複製目前的金鑰。",
+          "not_a_ghost_site": "此網址不是 Ghost 站點。請使用 Ghost 管理介面中自訂整合頁面上顯示的 API URL。",
+          "blocked_endpoint": "無法使用此網址：此部署可能不允許連接該網址，或該站點會重新導向到其他網址。請填寫站點自身使用的網址（帶或不帶 www）。",
+          "config_invalid": "API URL 無效。",
+          "unreachable": "無法存取該站點。請稍等片刻後重試。",
           "rate_limited": "該站點目前正在限制請求。請稍等片刻後重試。"
         }
       },
@@ -4040,6 +4082,24 @@
             "browser": {
               "description": "開啟內容類型或分類檢視其條目，然後勾選要索引的內容。",
               "root": "站點",
+              "emptyContainer": "這裡還沒有內容。"
+            }
+          },
+          "ghost": {
+            "itemsTitle": "文章和頁面",
+            "itemsDescription": "選擇要索引的內容類型、標籤、文章或頁面。標籤會包含其下所有文章和頁面。開啟自動同步後，所選內容會按連接器的同步排程保持同步。僅限會員和付費文章不會被索引。",
+            "choose": "選擇要索引的內容",
+            "empty": "未選擇任何內容，因此會索引所有已發布的文章和頁面。選擇內容類型、標籤、文章或頁面可僅索引這些內容。僅限會員和付費文章不會被索引。",
+            "kinds": {
+              "type": "內容類型",
+              "tag": "標籤",
+              "post": "文章",
+              "page": "頁面"
+            },
+            "browser": {
+              "description": "勾選要索引的內容類型或標籤，或按標題搜尋單篇文章或頁面。",
+              "root": "站點",
+              "note": "僅限會員和付費文章不會被索引，即使已選中也一樣。",
               "emptyContainer": "這裡還沒有內容。"
             }
           }

@@ -1,4 +1,5 @@
 import type { SourceConnector } from "@sourceweft/sdk";
+import { createTranslator } from "next-intl";
 import { describe, expect, test } from "vitest";
 import {
   connectorCatalog,
@@ -1076,4 +1077,185 @@ describe("nextcloud catalog entry", () => {
       }
     });
   }
+});
+
+describe("ghost catalog entry", () => {
+  const ghost = connectorCatalog.find((item) => item.id === "ghost")!;
+
+  test("one picker card, shown only once the backend registers the type", () => {
+    expect(
+      connectorCatalogForAvailableTypes(["notion", "rss"]).map((i) => i.id),
+    ).not.toContain("ghost");
+    const ids = connectorCatalogForAvailableTypes(["notion", "ghost"]).map(
+      (i) => i.id,
+    );
+    expect(ids.filter((id) => id === "ghost")).toEqual(["ghost"]);
+    expect(ids).toContain("notion");
+  });
+
+  test("is the add-only api key entry", () => {
+    expect(ghost).toMatchObject({
+      id: "ghost",
+      name: "Ghost",
+      category: "Knowledge & Docs",
+      requiresBackendRegistration: true,
+      isIndexable: true,
+      supportsActions: false,
+      supportsPeriodicSync: true,
+      supportsWebhook: false,
+      addMode: "api_key",
+      capabilities: ["Posts and pages", "Tags", "Scheduled sync"],
+    });
+    expect(ghost.icon).toBeDefined();
+    expect(ghost.hiddenInPicker).toBeUndefined();
+    expect(ghost.postOAuthMode).toBeUndefined();
+    // No Ghost artwork is shipped, so the lucide icon shows instead.
+    expect(ghost.logoIconName).toBeUndefined();
+  });
+
+  test("never shows as connected, however many connectors exist", () => {
+    const connectors = ["g1", "g2"].map((id) => ({
+      id,
+      name: `Ghost ${id}`,
+      status: "active" as const,
+      meta: "",
+      raw: {
+        id,
+        connectorType: "ghost",
+        status: "active",
+        configJson: { siteUrl: "https://demo.ghost.io", items: [] },
+        lastError: null,
+        lastIndexedAt: null,
+      } as unknown as SourceConnector,
+    }));
+    expect(getCatalogConnector(ghost, connectors)).toBeNull();
+  });
+
+  test("the card detail says Ghost, not Zotero", () => {
+    const t = createTranslator({
+      locale: "en",
+      messages: en,
+      namespace: "dashboardSourcesHub",
+    }) as unknown as Parameters<typeof getCatalogStatus>[0]["t"];
+    const status = getCatalogStatus(
+      {
+        item: ghost,
+        connectors: [],
+        accounts: [],
+        connectorBusyById: {},
+        connectorWaitingByType: {},
+        webhookConfigsById: {},
+        t,
+      },
+      "en",
+    );
+    expect(status.kind).toBe("available");
+    expect(status.detail).toContain("Ghost");
+    expect(status.detail).not.toContain("Zotero");
+  });
+
+  const GHOST_READINESS_REASONS = [
+    "reauth_required",
+    "not_a_ghost_site",
+    "blocked_endpoint",
+    "config_invalid",
+    "unreachable",
+    "rate_limited",
+  ];
+
+  for (const catalogName of ["en", "zh-CN"] as const) {
+    const messages = (catalogName === "en" ? en : zhCN) as unknown as {
+      dashboardSourcesHub: {
+        connectors: {
+          ghost: {
+            dialog: Record<string, string>;
+            readiness: Record<string, string>;
+            rotate: Record<string, string>;
+            siteUrlLabel: string;
+            siteUrlHint: string;
+            apiKeyLabel: string;
+            apiKeyHint: string;
+            contentNote: string;
+          };
+          detail: Record<string, string>;
+          selection: {
+            byType: Record<
+              string,
+              {
+                kinds: Record<string, string>;
+                itemsDescription: string;
+                browser: Record<string, string>;
+              }
+            >;
+          };
+        };
+      };
+    };
+
+    test(`${catalogName} has the Ghost copy keys`, () => {
+      const {
+        ghost: copy,
+        detail,
+        selection,
+      } = messages.dashboardSourcesHub.connectors;
+      for (const key of [
+        "siteUrlLabel",
+        "siteUrlHint",
+        "apiKeyLabel",
+        "apiKeyHint",
+        "contentNote",
+      ] as const) {
+        expect(copy[key]?.trim(), key).toBeTruthy();
+      }
+      for (const key of [
+        "title",
+        "description",
+        "check",
+        "add",
+        "invalidUrl",
+        "invalidApiKey",
+        "checkFailed",
+        "accountConflict",
+        "reachableHint",
+        "autoSyncHint",
+      ]) {
+        expect(copy.dialog[key]?.trim(), key).toBeTruthy();
+      }
+      for (const key of ["title", "save", "failed"]) {
+        expect(copy.rotate[key]?.trim(), key).toBeTruthy();
+      }
+      for (const reason of GHOST_READINESS_REASONS) {
+        expect(copy.readiness[reason]?.trim(), reason).toBeTruthy();
+      }
+      expect(detail.availableAddApiKey_ghost?.trim()).toBeTruthy();
+      const byType = selection.byType.ghost!;
+      for (const kind of ["type", "tag", "post", "page"]) {
+        expect(byType.kinds[kind]?.trim(), kind).toBeTruthy();
+      }
+      expect(byType.browser.note?.trim()).toBeTruthy();
+      expect(byType.itemsDescription?.trim()).toBeTruthy();
+    });
+  }
+
+  test("the English copy says where the URL and key are found and what is not read", () => {
+    const copy = en.dashboardSourcesHub.connectors.ghost;
+    const hint = `${copy.siteUrlHint} ${copy.apiKeyHint}`;
+    expect(hint).toContain("Ghost Admin");
+    expect(hint).toContain("Settings");
+    expect(hint).toContain("Integrations");
+    expect(hint).toMatch(/custom integration/i);
+    expect(hint).not.toMatch(/admin api/i);
+    expect(copy.contentNote).toMatch(/published/i);
+    expect(copy.contentNote).toMatch(/members-only and paid/i);
+    expect(copy.contentNote).toMatch(/drafts are not supported/i);
+    expect(copy.readiness.blocked_endpoint).toMatch(
+      /address the site itself uses/i,
+    );
+    expect(
+      en.dashboardSourcesHub.connectors.selection.byType.ghost.browser.note,
+    ).toMatch(/members-only and paid/i);
+    expect(
+      en.dashboardSourcesHub.connectors.selection.byType.ghost.itemsDescription,
+    ).toMatch(/members-only and paid/i);
+  });
 });

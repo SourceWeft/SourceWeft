@@ -12,6 +12,7 @@ import {
   LibraryBig,
   MessageSquare,
   SquareKanban,
+  Tag,
   Users,
 } from "lucide-react";
 import {
@@ -371,5 +372,72 @@ describe("selectionIconFor", () => {
   test("falls back to File for a non-expandable entry with no presenter icon", () => {
     const presenter = selectionPresenterFor("unknown");
     expect(selectionIconFor(presenter, "ticket", false)).toBe(File);
+  });
+});
+
+describe("selectionPresenters.ghost", () => {
+  const presenter = selectionPresenters.ghost!;
+  const POST = "5f5a0e0b5e1c2a0001a2b3c4";
+  const PAGE = "5f5a0e0b5e1c2a0001a2b3c5";
+  const TAG = "5f5a0e0b5e1c2a0001a2b3c6";
+  const entry = (id: string, kind: string) =>
+    ({
+      id,
+      kind,
+      name: id,
+      detail: null,
+      selectable: true,
+      expandable: false,
+      disabledReason: null,
+      size: null,
+      modifiedAt: null,
+    }) as never;
+
+  test("registers an icon for every selection kind", () => {
+    expect(presenter.kindIcons.type).toBe(FileStack);
+    expect(presenter.kindIcons.tag).toBe(Tag);
+    expect(presenter.kindIcons.post).toBe(FileText);
+    expect(presenter.kindIcons.page).toBe(File);
+  });
+
+  test("is indexed, so saving a selection triggers a sync", () => {
+    expect(presenter.indexing).toBeDefined();
+  });
+
+  test("a post or page maps to its own source; a type or tag maps to none", () => {
+    expect(
+      presenter.indexing?.externalIdFor(entry(`post:${POST}`, "post")),
+    ).toBe(`ghost:post:${POST}`);
+    expect(
+      presenter.indexing?.externalIdFor(entry(`page:${PAGE}`, "page")),
+    ).toBe(`ghost:page:${PAGE}`);
+    expect(
+      presenter.indexing?.externalIdFor(entry("type:post", "type")),
+    ).toBeNull();
+    expect(
+      presenter.indexing?.externalIdFor(entry("type:page", "type")),
+    ).toBeNull();
+    expect(
+      presenter.indexing?.externalIdFor(entry(`tag:${TAG}`, "tag")),
+    ).toBeNull();
+  });
+
+  test("a container's indexed sources cannot be counted, with or without a describe answer", () => {
+    for (const described of [
+      null,
+      { id: `tag:${TAG}`, kind: "tag", name: "News", exists: true, meta: {} },
+    ]) {
+      expect(
+        presenter.indexing?.containerIndexedCount({
+          item: entry(`tag:${TAG}`, "tag"),
+          described: described as never,
+          sources: [],
+        }),
+      ).toBeNull();
+    }
+  });
+
+  test("an unknown kind has no icon of its own, so the generic fallback applies", () => {
+    expect(selectionIconFor(presenter, "author", false)).toBe(File);
   });
 });
