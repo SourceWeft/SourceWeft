@@ -254,8 +254,36 @@ test("the item cap counts distinct items across lists", async () => {
 
 test("the request cap ends the scan incomplete before the next request", async () => {
   const { fake, run } = harness();
-  assertIncomplete(await run({ limits: { MAX_REQUESTS: 1 } }));
+  // One call may need its request plus two retries: 3 + 1 > 3 stops the scan
+  // before the second list.
+  assertIncomplete(await run({ limits: { MAX_REQUESTS: 3 } }));
   assert.equal(fake.requests.length, 1);
+});
+
+test("a retry sequence near the end of the budget ends gracefully, never TOO_LARGE", async () => {
+  const { fake, run } = harness(
+    { items: manyPosts(400), tags: [], authors: [] },
+    { maxRequests: 5 },
+  );
+  // Page 3 is rate limited once (a retry), page 4 would be rate limited again.
+  fake.failNext(
+    { status: 429, headers: { "retry-after": "0" }, body: "" },
+    1,
+    (r) => r.query.page === "3",
+  );
+  fake.failNext(
+    { status: 429, headers: { "retry-after": "0" }, body: "" },
+    5,
+    (r) => r.query.page === "4",
+  );
+  const page = await run({
+    items: [{ id: "type:post", kind: "type" }],
+    limits: { MAX_REQUESTS: 5 },
+  });
+  assertIncomplete(page);
+  // Pages 1, 2, 3 and the retry of 3: the fourth page was never started.
+  assert.equal(fake.requests.length, 4);
+  assert.ok(fake.requests.every((r) => r.query.page !== "4"));
 });
 
 test("the client's own request ceiling is an incomplete scan, not TOO_LARGE", async () => {
@@ -371,4 +399,96 @@ test("the key appears in no result", async () => {
   for (const page of [complete, incomplete]) {
     assert.ok(!JSON.stringify(page).includes(DEFAULT_KEY));
   }
+});
+
+test("a members-only single is skipped, counted, and the scan still reconciles", async () => {
+  const { run } = harness();
+  const page = await run({
+    items: [{ id: `post:${hexId(4)}`, kind: "post" }],
+  });
+  assert.deepEqual(page.items, []);
+  assert.equal(page.complete, true);
+  assert.equal(page.reconcileMissing, true);
+  assert.equal(page.warnings.length, 1);
+  assert.match(page.warnings[0] as string, /\b1\b/);
+});
+
+test("restarts are counted per list", async () => {
+  const items: FakeItem[] = [
+    ...manyPosts(150),
+    ...manyPosts(150, 5_000).map((i) => ({ ...i, type: "page" as const })),
+  ];
+  const { fake, run } = harness({ items, tags: [], authors: [] });
+  const grown = new Set<string>();
+  let next = 9_000;
+  fake.onBeforeRequest((request, f) => {
+    if (request.query.page !== "2" || grown.has(request.path)) return;
+    grown.add(request.path);
+    const type = request.path.endsWith("/pages/") ? "page" : "post";
+    f.state.items.push({ id: hexId(next++), type });
+  });
+  const page = await run({ limits: { MAX_SCAN_RESTARTS: 1 } });
+  assert.equal(page.reconcileMissing, true);
+  assert.equal(page.items.length, 302);
+  assert.equal(grown.size, 2);
+});
+
+test("a whole type with a tag reads that type unfiltered and the other by tag", async () => {
+  const state = sampleState();
+  state.items.push(
+    { id: hexId(5), type: "page", title: "Tagged", tags: [hexId(0x101)] },
+    { id: hexId(6), type: "page", title: "Untagged" },
+  );
+  const { fake, run } = harness(state);
+  const page = await run({
+    items: [
+      { id: "type:post", kind: "type" },
+      { id: `tag:${hexId(0x101)}`, kind: "tag" },
+    ],
+  });
+  assert.deepEqual(ids(page), [
+    `ghost:page:${hexId(5)}`,
+    `ghost:post:${hexId(1)}`,
+    `ghost:post:${hexId(2)}`,
+  ]);
+  const posts = fake.requests.filter((r) => r.path.endsWith("/posts/"));
+  const pages = fake.requests.filter((r) => r.path.endsWith("/pages/"));
+  assert.ok(posts.every((r) => r.query.filter === undefined));
+  assert.ok(pages.every((r) => r.query.filter === `tags.id:[${hexId(0x101)}]`));
+});
+
+test("an item that turns members-only between two lists is read from the accessible copy", async () => {
+  const { fake, run } = harness();
+  fake.onBeforeRequest((request, f) => {
+    if ((request.query.filter ?? "").startsWith("id:[")) {
+      f.state.items[0]!.visibility = "members";
+    }
+  });
+  const page = await run({
+    items: [
+      { id: `tag:${hexId(0x101)}`, kind: "tag" },
+      { id: `post:${hexId(1)}`, kind: "post" },
+    ],
+  });
+  assert.ok(ids(page).includes(`ghost:post:${hexId(1)}`));
+  assert.deepEqual(page.warnings, []);
+});
+
+test("an item that turns public between two lists is emitted", async () => {
+  const state = sampleState();
+  state.items[0]!.visibility = "members";
+  const { fake, run } = harness(state);
+  fake.onBeforeRequest((request, f) => {
+    if ((request.query.filter ?? "").startsWith("id:[")) {
+      f.state.items[0]!.visibility = "public";
+    }
+  });
+  const page = await run({
+    items: [
+      { id: `tag:${hexId(0x101)}`, kind: "tag" },
+      { id: `post:${hexId(1)}`, kind: "post" },
+    ],
+  });
+  assert.ok(ids(page).includes(`ghost:post:${hexId(1)}`));
+  assert.deepEqual(page.warnings, []);
 });

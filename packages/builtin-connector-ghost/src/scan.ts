@@ -8,6 +8,7 @@ import {
   ID_BATCH,
   MAX_ITEMS,
   MAX_REQUESTS,
+  MAX_RETRIES,
   MAX_SCAN_RESTARTS,
   SCAN_TIMEOUT_MS,
 } from "./limits";
@@ -112,11 +113,13 @@ export async function scanSite(input: ScanSiteInput): Promise<GhostScanPage> {
   const scope = resolveScope(input.items);
   const deadline = now() + limits.SCAN_TIMEOUT_MS;
 
-  /** Checked before every client call so the caps bound the whole scan. */
+  /** Checked before every client call so the caps bound the whole scan. One
+   * call may send its request plus {@link MAX_RETRIES} retries, so that much
+   * headroom is kept: the client's own hard ceiling is never reached mid-call. */
   function budget(): void {
     signal?.throwIfAborted();
     if (now() >= deadline) throw new ScanIncomplete("timeout");
-    if (client.requestCount() >= limits.MAX_REQUESTS) {
+    if (client.requestCount() + MAX_RETRIES + 1 > limits.MAX_REQUESTS) {
       throw new ScanIncomplete("too_large");
     }
   }
@@ -147,7 +150,10 @@ export async function scanSite(input: ScanSiteInput): Promise<GhostScanPage> {
   const found = new Map<string, GhostListItem>();
   function admit(item: GhostListItem): void {
     const key = `ghost:${item.type}:${item.id}`;
-    if (found.has(key)) return;
+    const existing = found.get(key);
+    // Seen twice: keep the accessible copy, so an item that changed visibility
+    // between two lists is never dropped on a stale members-only reading.
+    if (existing && (existing.access || !item.access)) return;
     found.set(key, item);
     if (found.size > limits.MAX_ITEMS) throw new ScanIncomplete("too_large");
   }
