@@ -254,6 +254,7 @@ function compactConnectorExecutionMeta(
  */
 const CONNECTOR_SCOPED_READINESS_TYPES: ReadonlySet<string> = new Set([
   "discourse",
+  "ghost",
   "wordpress",
   "wordpress_login",
 ]);
@@ -469,7 +470,11 @@ function getOAuthConnectorStatus(
       input.item.addMode === "login_flow"
         ? t("connectors.detail.availableLoginFlow", { name: input.item.name })
         : input.item.addMode === "api_key"
-          ? t("connectors.detail.availableAddApiKey")
+          ? // A per-type card line when the type has one (Ghost), else the
+            // library-key line Zotero was built with.
+            t.has(`connectors.detail.availableAddApiKey_${input.item.id}`)
+            ? t(`connectors.detail.availableAddApiKey_${input.item.id}`)
+            : t("connectors.detail.availableAddApiKey")
           : input.item.addMode === "forum_url"
             ? t("connectors.detail.availableAddForum")
             : input.item.addMode === "site_url"

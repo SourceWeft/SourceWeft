@@ -2301,3 +2301,141 @@ test("handleAddSite with no workspace toasts and does not create", async () => {
 
   expect(create).not.toHaveBeenCalled();
 });
+
+function ghostConnector(overrides: Partial<SourceConnector> = {}) {
+  return fakeConnector({
+    id: "ghost-1",
+    connectorType: "ghost",
+    name: "Ghost",
+    configJson: { siteUrl: "https://demo.ghost.io", items: [] },
+    ...overrides,
+  });
+}
+
+test("handleCheckGhost checks the ghost type with an empty selection and the key as the credential", async () => {
+  checkConfig.mockResolvedValue({
+    ready: false,
+    reason: "reauth_required",
+    message: "rejected",
+  });
+  await mountHook(baseInput("ws-ghost-check"));
+
+  const result = await api().handleCheckGhost({
+    siteUrl: "https://demo.ghost.io",
+    secret: "22444f78447824223cefc48062",
+  });
+
+  expect(checkConfig).toHaveBeenCalledWith("ws-ghost-check", {
+    connectorType: "ghost",
+    configJson: { siteUrl: "https://demo.ghost.io", items: [] },
+    credential: {
+      username: "content-api",
+      secret: "22444f78447824223cefc48062",
+    },
+  });
+  expect(result).toEqual({
+    ready: false,
+    reason: "reauth_required",
+    message: "rejected",
+  });
+});
+
+test("handleCheckGhost with no workspace toasts and does not call the API", async () => {
+  await mountHook(baseInput("", { workspaceId: null }));
+
+  const result = await api().handleCheckGhost({
+    siteUrl: "https://demo.ghost.io",
+    secret: "22444f78447824223cefc48062",
+  });
+
+  expect(checkConfig).not.toHaveBeenCalled();
+  expect(toastError).toHaveBeenCalledWith("No workspace selected yet.");
+  expect(result.ready).toBe(false);
+});
+
+test("handleAddGhost creates the connector with the key, opens its settings and does not sync", async () => {
+  const created = ghostConnector();
+  create.mockResolvedValue({ connector: created });
+  list.mockResolvedValue({ items: [created] });
+  await mountHook(baseInput("ws-ghost-add"));
+
+  await act(async () => {
+    await api().handleAddGhost({
+      siteUrl: "https://demo.ghost.io",
+      secret: "22444f78447824223cefc48062",
+      name: "Ghost",
+      periodicIndexingEnabled: true,
+    });
+  });
+  await flush(25);
+
+  expect(create).toHaveBeenCalledWith("ws-ghost-add", {
+    connectorType: "ghost",
+    name: "Ghost",
+    configJson: { siteUrl: "https://demo.ghost.io", items: [] },
+    credential: {
+      username: "content-api",
+      secret: "22444f78447824223cefc48062",
+    },
+    periodicIndexingEnabled: true,
+    indexingFrequencyMinutes: 360,
+  });
+  // An empty selection means the whole site (up to the cap), so the first sync
+  // is the member's own choice from the connector's settings.
+  expect(sync).not.toHaveBeenCalled();
+  expect(api().connectorSettingsConnector?.id).toBe("ghost-1");
+  expect(toastSuccess).toHaveBeenCalledWith("Ghost connected.");
+});
+
+test("handleAddGhost rethrows a 409 without toasting or opening settings", async () => {
+  create.mockRejectedValue(
+    new HttpClientError({
+      message: "exists",
+      status: 409,
+      statusText: "Conflict",
+      code: "CONNECTOR_CREDENTIAL_ACCOUNT_EXISTS",
+    }),
+  );
+  await mountHook(baseInput("ws-ghost-dup"));
+
+  await expect(
+    api().handleAddGhost({
+      siteUrl: "https://demo.ghost.io",
+      secret: "22444f78447824223cefc48062",
+      name: "Ghost",
+      periodicIndexingEnabled: false,
+    }),
+  ).rejects.toMatchObject({ code: "CONNECTOR_CREDENTIAL_ACCOUNT_EXISTS" });
+
+  expect(api().connectorSettingsConnector).toBeNull();
+  expect(toastSuccess).not.toHaveBeenCalled();
+});
+
+test("handleAddGhost with no workspace toasts and does not create", async () => {
+  await mountHook(baseInput("", { workspaceId: null }));
+
+  await expect(
+    api().handleAddGhost({
+      siteUrl: "https://demo.ghost.io",
+      secret: "22444f78447824223cefc48062",
+      name: "Ghost",
+      periodicIndexingEnabled: false,
+    }),
+  ).rejects.toThrow("No workspace selected yet.");
+
+  expect(create).not.toHaveBeenCalled();
+});
+
+test("reconnecting a ghost connector opens the rotate-credential dialog", async () => {
+  const connector = ghostConnector();
+  list.mockResolvedValue({ items: [connector] });
+  await mountHook(baseInput("ws-ghost-reconnect"));
+  await flush(25);
+
+  const item = api().connectors.find((entry) => entry.id === "ghost-1")!;
+  await act(async () => {
+    api().handleReconnectConnector(item);
+  });
+
+  expect(api().rotateCredentialConnector?.id).toBe("ghost-1");
+});

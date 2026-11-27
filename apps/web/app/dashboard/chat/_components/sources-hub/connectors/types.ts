@@ -52,7 +52,8 @@ export type ConnectorCatalogItem = {
    * endpoint, a username and an app password (WebDAV); `login_flow` sends the
    * member to the provider's own browser login and the backend collects the
    * credential (Nextcloud); `api_key` asks for a library ID and a read-only API
-   * key (Zotero); `forum_url` asks for a public forum's address and the
+   * key (Zotero) or a Ghost site address and Content API key (Ghost, told apart
+   * by catalog id); `forum_url` asks for a public forum's address and the
    * categories and topics are chosen after it exists (Discourse); `site_url`
    * asks for a WordPress site address and an access choice (a public site or an
    * Application Password login), which decides which connector type is
@@ -169,6 +170,23 @@ export type SiteCheckInput =
 export type SiteCheckResult = ConnectorReadinessState & { ready: boolean };
 
 export type SiteAddInput = SiteCheckInput & {
+  name: string;
+  periodicIndexingEnabled: boolean;
+};
+
+/** A readiness check for a Ghost site, built by its add dialog: the API URL
+ * and the Content API key. The key lives only in the dialog's local state and
+ * the request body; it is never persisted on the client. */
+export type GhostCheckInput = {
+  siteUrl: string;
+  secret: string;
+};
+
+/** Outcome of the pre-create Ghost check: the readiness verdict. An empty
+ * selection is ready (it means every published post and page). */
+export type GhostCheckResult = ConnectorReadinessState & { ready: boolean };
+
+export type GhostAddInput = GhostCheckInput & {
   name: string;
   periodicIndexingEnabled: boolean;
 };

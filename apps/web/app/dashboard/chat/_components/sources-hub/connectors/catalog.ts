@@ -5,6 +5,7 @@ import {
   Cloud,
   FileText,
   FolderGit2,
+  Ghost,
   HardDrive,
   ListChecks,
   Mail,
@@ -264,6 +265,22 @@ export const connectorCatalog: ConnectorCatalogItem[] = [
     supportsPeriodicSync: true,
     supportsWebhook: false,
     addMode: "credential",
+  },
+  {
+    id: "ghost",
+    name: "Ghost",
+    category: "Knowledge & Docs",
+    description:
+      "Index the published posts and pages of a Ghost site, by type, tag or single item, with its Content API key, and keep them in sync.",
+    capabilities: ["Posts and pages", "Tags", "Scheduled sync"],
+    requiresBackendRegistration: true,
+    // A generic Lucide mark, per the icon rules: no Ghost artwork is shipped.
+    icon: Ghost,
+    isIndexable: true,
+    supportsActions: false,
+    supportsPeriodicSync: true,
+    supportsWebhook: false,
+    addMode: "api_key",
   },
 ];
 

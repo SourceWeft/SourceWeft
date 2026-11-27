@@ -55,19 +55,26 @@ import type {
   ForumCheckResult,
   GenericCredentialAddInput,
   GenericCredentialCheckInput,
+  GhostAddInput,
+  GhostCheckInput,
+  GhostCheckResult,
   SiteAddInput,
   SiteCheckInput,
   SiteCheckResult,
 } from "./types";
+import {
+  GHOST_CONNECTOR_TYPE,
+  GHOST_CREDENTIAL_USERNAME,
+} from "./ghost-site-url";
 import {
   WORDPRESS_CONNECTOR_TYPE,
   WORDPRESS_LOGIN_CONNECTOR_TYPE,
 } from "./wordpress-site-url";
 
 /** A catalog type whose add flow collects a stored credential: a username and
- * app password (WebDAV) or a library ID and API key (Zotero). Both the add
- * card and the reconnect path branch on this; reconnecting replaces the
- * credential in place. */
+ * app password (WebDAV), a library ID and API key (Zotero) or a Content API
+ * key (Ghost). Both the add card and the reconnect path branch on this;
+ * reconnecting replaces the credential in place. */
 function isCredentialConnectorType(connectorType: string): boolean {
   const addMode = connectorCatalog.find(
     (item) => item.id === connectorType,
@@ -1716,6 +1723,72 @@ export function useConnectors(input: {
     [displayLocale, openConnectorSettings, refreshConnectors, workspaceId, t],
   );
 
+  // Pre-create readiness check for a Ghost site: the API URL and the Content
+  // API key go to the check endpoint in the request body only (never a URL or
+  // a cache), with an empty selection (it means every published post and page).
+  const handleCheckGhost = useCallback(
+    async (input: GhostCheckInput): Promise<GhostCheckResult> => {
+      if (!workspaceId) {
+        toast.error(t("toasts.connectors.noWorkspace"));
+        return { ready: false, reason: "no_workspace", message: "" };
+      }
+      const result = await connectorsClient.checkConfig(workspaceId, {
+        connectorType: GHOST_CONNECTOR_TYPE,
+        configJson: { siteUrl: input.siteUrl, items: [] },
+        credential: {
+          username: GHOST_CREDENTIAL_USERNAME,
+          secret: input.secret,
+        },
+      });
+      return {
+        ready: result.ready,
+        reason: result.reason ?? "",
+        message: result.message ?? "",
+      };
+    },
+    [workspaceId, t],
+  );
+
+  // Create a Ghost connector with the Content API key as its credential.
+  // Creating a connector never indexes anything: an empty selection means every
+  // published post and page (up to the cap), a sync that large must be a
+  // deliberate choice, so — like the WordPress add flow — this opens the new
+  // connector's settings (the selection browser) and leaves the first sync to
+  // the member's own "Sync now". "Sync automatically" only schedules future
+  // syncs. Rejects on any create failure (a second connector for the same site
+  // is a 409) so the dialog stays open and shows the reason.
+  const handleAddGhost = useCallback(
+    async (input: GhostAddInput) => {
+      if (!workspaceId) {
+        const message = t("toasts.connectors.noWorkspace");
+        toast.error(message);
+        throw new Error(message);
+      }
+      const created = await connectorsClient.create(workspaceId, {
+        connectorType: GHOST_CONNECTOR_TYPE,
+        name: input.name,
+        configJson: { siteUrl: input.siteUrl, items: [] },
+        credential: {
+          username: GHOST_CREDENTIAL_USERNAME,
+          secret: input.secret,
+        },
+        periodicIndexingEnabled: input.periodicIndexingEnabled,
+        indexingFrequencyMinutes: 360,
+      });
+      trackConnectorConnected({ connectorType: GHOST_CONNECTOR_TYPE });
+      await refreshConnectors();
+      openConnectorSettings(
+        mapConnectorToUi(created.connector, t, displayLocale),
+      );
+      toast.success(
+        t("toasts.connectors.connectedFallback", {
+          name: created.connector.name,
+        }),
+      );
+    },
+    [displayLocale, openConnectorSettings, refreshConnectors, workspaceId, t],
+  );
+
   // Pre-create readiness check for a credential connector. A WebDAV input runs
   // the adapter's check against the whole-endpoint root; a generic input (the
   // Zotero dialog) brings its own connector type, config and credential. It
@@ -2094,6 +2167,8 @@ export function useConnectors(input: {
     handleAddForum,
     handleCheckSite,
     handleAddSite,
+    handleCheckGhost,
+    handleAddGhost,
     handleCheckCredential,
     handleAddCredential,
     rotateCredentialConnector,

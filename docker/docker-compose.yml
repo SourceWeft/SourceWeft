@@ -100,6 +100,10 @@ x-sourceweft-env: &sourceweft-env
   # Zotero (auth kind "credential"): a stored API key, no OAuth app.
   # Restart api, worker and scheduler together after changing it; off hides it.
   ZOTERO_CONNECTOR_ENABLED: ${ZOTERO_CONNECTOR_ENABLED:-false}
+  # Ghost (auth kind "credential"): a stored Content API key, no OAuth app and no
+  # credential in this variable. Restart api, worker and scheduler together after
+  # changing it; off hides it.
+  GHOST_CONNECTOR_ENABLED: ${GHOST_CONNECTOR_ENABLED:-false}
   BLOG_ASSET_MAX_BYTES: ${BLOG_ASSET_MAX_BYTES:-15728640}
   SOURCEWEFT_SANDBOX_ENABLED: ${SOURCEWEFT_SANDBOX_ENABLED:-false}
   SOURCEWEFT_SANDBOX_TOOL_APPROVAL_ENABLED: ${SOURCEWEFT_SANDBOX_TOOL_APPROVAL_ENABLED:-false}

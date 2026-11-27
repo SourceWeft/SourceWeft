@@ -1,0 +1,145 @@
+{
+  "schemaVersion": 1,
+  "id": "sourceweft/ghost",
+  "kind": "connector",
+  "name": "Ghost Connector",
+  "version": "0.1.0",
+  "entry": "./src/index.ts",
+  "connectors": [
+    {
+      "id": "ghost",
+      "title": "Ghost",
+      "auth": {
+        "kind": "credential",
+        "scheme": "api_key"
+      },
+      "sync": {
+        "supportsIncremental": false,
+        "defaultFrequencyMinutes": 360,
+        "minFrequencyMinutes": 60,
+        "resources": [
+          {
+            "type": "ghost_content",
+            "title": "Post or page",
+            "supportsDeleteDetection": true
+          }
+        ]
+      },
+      "actions": [
+        {
+          "id": "ghost.browse",
+          "title": "Browse Ghost",
+          "description": "List the content types and tags of a Ghost site so the user can choose what to index.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "internal",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "containerId": {
+                "type": "null"
+              },
+              "cursor": {
+                "type": "string",
+                "maxLength": 4096
+              }
+            }
+          }
+        },
+        {
+          "id": "ghost.search",
+          "title": "Search Ghost",
+          "description": "Search the posts and pages of a Ghost site by title so the user can choose which to index.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "internal",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["query"],
+            "properties": {
+              "query": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "cursor": {
+                "type": "string",
+                "maxLength": 4096
+              }
+            }
+          }
+        },
+        {
+          "id": "ghost.describe",
+          "title": "Describe Ghost items",
+          "description": "Return the name, kind and existence of the selected Ghost content types, tags, posts and pages, identified by kind-qualified ids such as type:post or tag:<id>.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "internal",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["ids"],
+            "properties": {
+              "ids": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 100,
+                "items": {
+                  "type": "string",
+                  "pattern": "^(type:(post|page)|tag:[0-9a-f]{24}|(post|page):[0-9a-f]{24})$"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["siteUrl"],
+        "properties": {
+          "siteUrl": {
+            "type": "string",
+            "pattern": "^https://[A-Za-z0-9.-]{1,253}(/[A-Za-z0-9._~/-]{0,300})?$"
+          },
+          "items": {
+            "type": "array",
+            "default": [],
+            "maxItems": 500,
+            "uniqueItems": true,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "kind"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^(type:(post|page)|tag:[0-9a-f]{24}|(post|page):[0-9a-f]{24})$"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": ["type", "tag", "post", "page"]
+                }
+              }
+            }
+          }
+        }
+      },
+      "selection": {
+        "actions": {
+          "browse": "ghost.browse",
+          "search": "ghost.search",
+          "describe": "ghost.describe"
+        },
+        "kinds": ["type", "tag", "post", "page"],
+        "maxItems": 500
+      }
+    }
+  ]
+}

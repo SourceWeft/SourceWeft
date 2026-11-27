@@ -590,3 +590,57 @@ test("keeps other config keys when the selection changes", async () => {
     configJson: { items: [], liveSearchEnabled: true },
   });
 });
+
+const ghostSpec: ConnectorSelectionSpec = {
+  actions: {
+    browse: "ghost.browse",
+    search: "ghost.search",
+    describe: "ghost.describe",
+  },
+  kinds: ["type", "tag", "post", "page"],
+  maxItems: 500,
+};
+
+test("a Ghost id that describe omits keeps a placeholder, never the raw id or a missing mark", async () => {
+  const tag = "5f5a0e0b5e1c2a0001a2b3c6";
+  const post = "5f5a0e0b5e1c2a0001a2b3c4";
+  const page = "5f5a0e0b5e1c2a0001a2b3c5";
+  listSources.mockResolvedValue({
+    items: [source(`ghost:post:${post}`, { title: "Hello world" })],
+  });
+  // ghost.describe omits ids it does not know: no `exists: false` tombstone.
+  selectionDescribe.mockResolvedValue({
+    items: [
+      describeItem("type:post", { kind: "type", name: "All posts" }),
+      describeItem(`tag:${tag}`, { kind: "tag", name: "News" }),
+    ],
+  });
+  const { container } = await mountItems({
+    connector: connectorFor("ghost", [
+      { id: "type:post", kind: "type" },
+      { id: `tag:${tag}`, kind: "tag" },
+      { id: `post:${post}`, kind: "post" },
+      { id: `page:${page}`, kind: "page" },
+      { id: "tag:ffffffffffffffffffffffff", kind: "tag" },
+    ]),
+    spec: ghostSpec,
+  });
+
+  const text = container.textContent ?? "";
+  // The omitted tag and the omitted page keep a kind label, not an id, and
+  // never claim the item no longer exists.
+  expect(rows(group(container, "Tags"))).toEqual([
+    "News",
+    "Tags · Name unavailable",
+  ]);
+  expect(rows(group(container, "Content types"))).toEqual(["All posts"]);
+  expect(group(container, "Posts")!.textContent).toContain("Hello world");
+  expect(group(container, "Pages")!.textContent).toContain(
+    "Pages · Name unavailable",
+  );
+  expect(text).not.toContain("No longer exists");
+  expect(text).not.toContain(page);
+  expect(text).not.toContain("ffffffffffffffffffffffff");
+  // Members-only and paid posts are not indexed: the section says so.
+  expect(text).toMatch(/members-only and paid/i);
+});

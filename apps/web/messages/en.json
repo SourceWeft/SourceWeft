@@ -3491,7 +3491,8 @@
         "availableLoginFlow": "Sign in to {name} in your browser to connect.",
         "availableAddApiKey": "Add a Zotero library with a read-only API key.",
         "availableAddForum": "Add a public Discourse forum by its address.",
-        "availableAddSite": "Add a WordPress site by its address."
+        "availableAddSite": "Add a WordPress site by its address.",
+        "availableAddApiKey_ghost": "Add a Ghost site with its API URL and a Content API key."
       },
       "syncBlock": {
         "pagesLimit": "Ingestion pages are used up. The last run indexed {count} items before pausing; syncing resumes automatically when pages are available.",
@@ -3752,6 +3753,48 @@
           "reauth_required": "The site rejected the username or Application Password. Check them and try again. If the password is correct, the web host may be blocking the Authorization header, a common setting on some hosts — check with the host's support or a security plugin's settings.",
           "insufficient_permission": "This account cannot read drafts and private posts. Use an account with those permissions, or turn off \"Include drafts and private posts\".",
           "blocked_endpoint": "This address can't be used: this deployment may not allow connections to it, or the site redirects to a different address. Enter the address the site itself uses (with or without www).",
+          "rate_limited": "The site is limiting requests right now. Wait a moment and try again."
+        }
+      },
+      "ghost": {
+        "siteUrlLabel": "API URL",
+        "siteUrlHint": "In Ghost Admin, open Settings, then Integrations, then a custom integration. Both the API URL and the Content API key are shown there. Enter the API URL as shown, for example https://demo.ghost.io. If the site redirects, enter the address it actually uses (with or without www).",
+        "apiKeyLabel": "Content API key",
+        "apiKeyHint": "Copy the Content API key from the same custom integration in Ghost Admin (Settings, then Integrations). It gives read access to published content only.",
+        "contentNote": "Only published posts and pages are read. Members-only and paid posts are skipped and not indexed. Drafts are not supported.",
+        "nameLabel": "Name (optional)",
+        "dialog": {
+          "title": "Connect a Ghost site",
+          "description": "Enter your Ghost site's API URL and Content API key. SourceWeft checks the connection first, then you choose the posts, pages or tags to index.",
+          "check": "Check connection",
+          "checking": "Checking...",
+          "reachable": "Site verified",
+          "reachableHint": "Next, add the connector, then choose what to index and start a sync in its settings. Nothing is indexed until you do; with nothing chosen, a sync indexes all the site's published posts and pages (up to 5,000). Members-only and paid posts are skipped.",
+          "add": "Add site",
+          "autoSync": "Sync automatically",
+          "autoSyncHint": "Check for new and changed posts on a schedule. Off by default; turning it on only schedules future syncs. Adding the connector does not index anything — start the first sync in its settings.",
+          "invalidUrl": "Enter the API URL starting with https://, without a username, port, query or #fragment. IP addresses and localhost are not allowed. A host name with non-ASCII characters must be written in its ASCII (punycode) form.",
+          "invalidApiKey": "Enter the Content API key without spaces.",
+          "checkFailed": "Could not check the site. Try again.",
+          "nameConflict": "A connector with this name already exists in this workspace. Change the name, or use the existing one.",
+          "accountConflict": "A connector for this Ghost site already exists in this workspace.",
+          "credentialNotAllowed": "This site address is not allowed by this deployment.",
+          "addFailed": "Failed to add the site."
+        },
+        "rotate": {
+          "title": "Reconnect Ghost",
+          "description": "Enter the current Content API key for {name}. It replaces the stored key.",
+          "keyLabel": "Content API key",
+          "keyHint": "Copy the Content API key from a custom integration in Ghost Admin (Settings, then Integrations). It gives read access to published content only.",
+          "save": "Reconnect",
+          "failed": "Could not update the Content API key. Try again."
+        },
+        "readiness": {
+          "reauth_required": "Ghost rejected this Content API key. Check the key and try again. If the integration was deleted or its key changed, copy the current key from Ghost Admin (Settings, then Integrations).",
+          "not_a_ghost_site": "This address is not a Ghost site. Use the API URL shown on the custom integration page in Ghost Admin.",
+          "blocked_endpoint": "This address can't be used: this deployment may not allow connections to it, or the site redirects to a different address. Enter the address the site itself uses (with or without www).",
+          "config_invalid": "The API URL is not valid.",
+          "unreachable": "The site could not be reached. Try again in a moment.",
           "rate_limited": "The site is limiting requests right now. Wait a moment and try again."
         }
       },
@@ -4040,6 +4083,24 @@
             "browser": {
               "description": "Open a content type or category to see its items, then tick what to index.",
               "root": "Site",
+              "emptyContainer": "Nothing here yet."
+            }
+          },
+          "ghost": {
+            "itemsTitle": "Posts and pages",
+            "itemsDescription": "Choose the content types, tags, posts or pages to index. A tag includes all of its posts and pages. Everything selected is kept in sync on the connector's schedule when automatic sync is on. Members-only and paid posts are not indexed.",
+            "choose": "Choose content to index",
+            "empty": "Nothing chosen, so all published posts and pages are indexed. Choose content types, tags, posts or pages to index only those. Members-only and paid posts are not indexed.",
+            "kinds": {
+              "type": "Content types",
+              "tag": "Tags",
+              "post": "Posts",
+              "page": "Pages"
+            },
+            "browser": {
+              "description": "Tick the content types or tags to index, or search by title to find a single post or page.",
+              "root": "Site",
+              "note": "Members-only and paid posts are not indexed, even when selected.",
               "emptyContainer": "Nothing here yet."
             }
           }

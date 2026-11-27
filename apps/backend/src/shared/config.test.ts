@@ -243,6 +243,30 @@ test("Docker and backend examples default the Zotero connector switch to false",
   );
 });
 
+test("Docker and backend examples default the Ghost connector switch to false", () => {
+  const backend = readFileSync(
+    new URL("../../.env.example", import.meta.url),
+    "utf8",
+  );
+  const docker = readFileSync(
+    new URL("../../../../docker/.env.example", import.meta.url),
+    "utf8",
+  );
+  const compose = readFileSync(
+    new URL("../../../../docker/docker-compose.yml", import.meta.url),
+    "utf8",
+  );
+  const line = /^GHOST_CONNECTOR_ENABLED=false$/m;
+  assert.match(backend, line, "apps/backend/.env.example");
+  assert.match(docker, line, "docker/.env.example");
+  assert.ok(
+    compose.includes(
+      "GHOST_CONNECTOR_ENABLED: ${GHOST_CONNECTOR_ENABLED:-false}",
+    ),
+    "docker-compose.yml",
+  );
+});
+
 test("Docker and backend examples default the Discourse connector switch to false", () => {
   const backend = readFileSync(
     new URL("../../.env.example", import.meta.url),

@@ -41,6 +41,7 @@ function baseProps(
     onCheckCredential: vi.fn(),
     onCheckFeed: vi.fn(),
     onCheckForum: vi.fn(),
+    onCheckGhost: vi.fn(),
     onCheckSite: vi.fn(),
     onConnectConnector: vi.fn(),
     onCopyWebhook: vi.fn(),
@@ -51,6 +52,7 @@ function baseProps(
     onSubmitCredential: vi.fn(),
     onSubmitFeed: vi.fn(),
     onSubmitForum: vi.fn(),
+    onSubmitGhost: vi.fn(),
     onSubmitSite: vi.fn(),
     onSyncConnector: vi.fn(),
     onToggleConnectorStatus: vi.fn(),
@@ -391,4 +393,70 @@ test("the Discourse card opens the forum dialog and its callbacks reach the hook
   });
   expect(handlers.onConnectConnector).not.toHaveBeenCalled();
   expect(document.querySelector('input[name="forumUrl"]')).toBeNull();
+});
+
+test("the Ghost card opens the Ghost dialog, never the Zotero one, and its callbacks reach the hook", async () => {
+  const { props, handlers } = baseProps({
+    availableConnectorTypes: ["ghost", "zotero"],
+  });
+  handlers.onCheckGhost.mockResolvedValue({
+    ready: true,
+    reason: "",
+    message: "",
+  });
+  handlers.onSubmitGhost.mockResolvedValue(undefined);
+  await mountWithIntl(createElement(ManageConnectorsDialog, props));
+  const card = Array.from(document.querySelectorAll("article")).find(
+    (node) => node.querySelector("h4")?.textContent?.trim() === "Ghost",
+  )!;
+  // The card line names Ghost, not the Zotero library line.
+  expect(card.textContent).toContain("Add a Ghost site");
+
+  expect(document.querySelector('input[name="ghostSiteUrl"]')).toBeNull();
+  await click(buttonWithText(card, "Connect"));
+
+  expect(document.querySelector('input[name="zoteroLibraryId"]')).toBeNull();
+  const urlField = document.querySelector<HTMLInputElement>(
+    'input[name="ghostSiteUrl"]',
+  )!;
+  expect(urlField).not.toBeNull();
+  typeInto(urlField, "https://demo.ghost.io");
+  typeInto(
+    document.querySelector<HTMLInputElement>('input[name="ghostApiKey"]')!,
+    "22444f78447824223cefc48062",
+  );
+  await flush(3);
+  await click(buttonWithText(document.body, "Check connection"));
+  await flush(5);
+  expect(handlers.onCheckGhost).toHaveBeenCalledWith({
+    siteUrl: "https://demo.ghost.io",
+    secret: "22444f78447824223cefc48062",
+  });
+
+  await click(buttonWithText(document.body, "Add site"));
+  await flush(5);
+  expect(handlers.onSubmitGhost).toHaveBeenCalledWith({
+    siteUrl: "https://demo.ghost.io",
+    secret: "22444f78447824223cefc48062",
+    name: "Ghost",
+    periodicIndexingEnabled: false,
+  });
+  expect(handlers.onSubmitCredential).not.toHaveBeenCalled();
+  expect(handlers.onConnectConnector).not.toHaveBeenCalled();
+  expect(document.querySelector('input[name="ghostSiteUrl"]')).toBeNull();
+});
+
+test("the Zotero card still opens the Zotero dialog, not the Ghost one", async () => {
+  const { props } = baseProps({ availableConnectorTypes: ["ghost", "zotero"] });
+  await mountWithIntl(createElement(ManageConnectorsDialog, props));
+  const card = Array.from(document.querySelectorAll("article")).find(
+    (node) => node.querySelector("h4")?.textContent?.trim() === "Zotero",
+  )!;
+  expect(card.textContent).toContain("Add a Zotero library");
+  await click(buttonWithText(card, "Connect"));
+
+  expect(
+    document.querySelector('input[name="zoteroLibraryId"]'),
+  ).not.toBeNull();
+  expect(document.querySelector('input[name="ghostSiteUrl"]')).toBeNull();
 });

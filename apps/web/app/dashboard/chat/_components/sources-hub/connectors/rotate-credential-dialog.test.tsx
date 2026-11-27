@@ -250,3 +250,73 @@ test("a failed WordPress rotate clears the Application Password and never render
   expect(document.body.innerHTML).not.toContain("secret 0000 secret");
   expect(button("Reconnect").disabled).toBe(true);
 });
+
+function ghostKeyField() {
+  return document.querySelector<HTMLInputElement>('input[name="ghostApiKey"]')!;
+}
+
+test("a Ghost connector asks for the Content API key only and sends the fixed username", async () => {
+  const { onRotate, onOpenChange } = await mountDialog({
+    connectorName: "Company blog",
+    connectorType: "ghost",
+    configJson: { siteUrl: "https://demo.ghost.io", items: [] },
+    initialUsername: "content-api",
+  });
+
+  expect(usernameField()).toBeNull();
+  expect(document.body.textContent).toContain("Reconnect Ghost");
+  expect(document.body.textContent).toContain("Company blog");
+  expect(ghostKeyField().type).toBe("password");
+  expect(ghostKeyField().getAttribute("autocomplete")).toBe("new-password");
+  expect(button("Reconnect").disabled).toBe(true);
+
+  typeInto(ghostKeyField(), "22444f78447824223cefc48062");
+  await flush(3);
+  await click(button("Reconnect"));
+  await flush(5);
+
+  expect(onRotate).toHaveBeenCalledWith({
+    username: "content-api",
+    secret: "22444f78447824223cefc48062",
+  });
+  expect(onOpenChange).toHaveBeenCalledWith(false);
+});
+
+test("the Ghost key input is bound to a hint that does not refer to a missing URL field", async () => {
+  await mountDialog({ connectorType: "ghost" });
+  const hintId = ghostKeyField().getAttribute("aria-describedby");
+  expect(hintId).toBeTruthy();
+  const hint = document.getElementById(hintId!)?.textContent ?? "";
+  expect(hint).toContain("Ghost Admin");
+  expect(hint).toContain("Integrations");
+  expect(hint).not.toMatch(/\bsame\b/i);
+});
+
+test("a Ghost key with a space keeps Reconnect disabled", async () => {
+  const { onRotate } = await mountDialog({ connectorType: "ghost" });
+
+  typeInto(ghostKeyField(), "bad key");
+  await flush(3);
+  expect(button("Reconnect").disabled).toBe(true);
+  await click(button("Reconnect"));
+  await flush(5);
+  expect(onRotate).not.toHaveBeenCalled();
+});
+
+test("a failed Ghost rotate clears the key and never renders it", async () => {
+  // An error with no message shows the Ghost fallback copy.
+  const onRotate = vi.fn().mockRejectedValue(new Error(""));
+  await mountDialog({ onRotate, connectorType: "ghost" });
+
+  typeInto(ghostKeyField(), "SecretKey777");
+  await flush(3);
+  await click(button("Reconnect"));
+  await flush(5);
+
+  expect(ghostKeyField().value).toBe("");
+  expect(document.body.innerHTML).not.toContain("SecretKey777");
+  expect(document.body.textContent).toContain(
+    "Could not update the Content API key",
+  );
+  expect(button("Reconnect").disabled).toBe(true);
+});
