@@ -200,6 +200,9 @@ describe.skipIf(!skillDatabaseEnabled)(
         slug: skill.slug,
         flags: ["binary:executable"],
       });
+      expect(await autoList.countSkillListingQueue()).toBe(
+        (await autoList.listSkillListingQueue()).length,
+      );
 
       // The admin's decision either way takes it out of the queue.
       await listing.listSkillPublicly({
