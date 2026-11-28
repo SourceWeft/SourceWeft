@@ -524,6 +524,24 @@ export const skillVersions = pgTable(
     isCurrent: boolean("is_current").notNull().default(false),
     contentHash: text("content_hash").notNull(),
     manifestJson: jsonb("manifest_json").$type<SkillManifestJson>().notNull(),
+    // Copies of the three manifest values the admin listing queue compares
+    // across the whole public catalogue (`modules/skills/market/auto-list.ts`).
+    // A manifest is large and stored out of line; reading every one on each
+    // page load took seconds. The database derives them, so no writer can
+    // leave them stale.
+    scanFlags: jsonb("scan_flags")
+      .$type<string[]>()
+      .generatedAlwaysAs(
+        sql`coalesce("manifest_json"->'registry'->'scan'->'flags', '[]'::jsonb)`,
+      ),
+    scriptPaths: jsonb("script_paths")
+      .$type<string[]>()
+      .generatedAlwaysAs(
+        sql`jsonb_path_query_array("manifest_json", '$.registry.fileManifest[*] ? (@.role == "script").path')`,
+      ),
+    listingAcknowledged: boolean("listing_acknowledged").generatedAlwaysAs(
+      sql`"manifest_json"->'market'->>'acknowledgedAt' is not null`,
+    ),
     // `object` versions keep only SKILL.md in the database — it is what the
     // catalog shows and what a turn loads up front. Every file, SKILL.md
     // included, lives in object storage as a content-addressed blob, and the

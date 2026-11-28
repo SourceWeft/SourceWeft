@@ -24,7 +24,7 @@ vi.mock("../../modules/skills/registry/review", () => ({
   countRegistryReviewQueue: async () => 3,
 }));
 vi.mock("../../modules/skills/market/auto-list", () => ({
-  listSkillListingQueue: mocks.listing,
+  countSkillListingQueue: mocks.listing,
   acknowledgeSkillVersion: vi.fn(),
 }));
 vi.mock("../../modules/skills/market/reports", () => ({
@@ -45,7 +45,7 @@ const createTestApp = () => createRouteTestApp(registerAdminOverviewRoutes);
 beforeEach(() => {
   mocks.session.mockReset().mockResolvedValue({ user: { id: "admin_1" } });
   mocks.admin = true;
-  mocks.listing.mockReset().mockResolvedValue([{}, {}, {}, {}, {}]);
+  mocks.listing.mockReset().mockResolvedValue(5);
 });
 
 test("an admin gets every section's number, uncached", async () => {

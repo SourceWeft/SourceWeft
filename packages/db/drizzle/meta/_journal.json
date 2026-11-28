@@ -610,6 +610,13 @@
       "when": 1795520123741,
       "tag": "0086_assistant_feed_ticket_event",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1795881091267,
+      "tag": "0087_skill_listing_queue_columns",
+      "breakpoints": true
     }
   ]
 }

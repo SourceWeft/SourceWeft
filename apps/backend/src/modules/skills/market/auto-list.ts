@@ -1,5 +1,4 @@
-import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
-import type { SQLWrapper } from "drizzle-orm";
+import { and, asc, count, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { SkillListingQueueReason } from "@sourceweft/contracts";
 import { db, skillDefinitions, skillVersions } from "@sourceweft/db";
@@ -144,26 +143,61 @@ export async function listSkillListingQueue(): Promise<
   return [...unlisted, ...updated];
 }
 
+/**
+ * How many entries `listSkillListingQueue` would return, without building
+ * them: the admin navigation asks on every admin page.
+ */
+export async function countSkillListingQueue(): Promise<number> {
+  const unlisted = db
+    .select({ id: skillDefinitions.id })
+    .from(skillDefinitions)
+    .innerJoin(skillVersions, currentVersionOfSkill())
+    .where(isFlaggedUnlisted())
+    .limit(AUTO_LIST_BATCH_SIZE)
+    .as("unlisted");
+  const updated = db
+    .select({ id: skillDefinitions.id })
+    .from(skillDefinitions)
+    .innerJoin(skillVersions, currentPublishedVersionOfSkill())
+    .innerJoin(previousVersion, isPreviousVersion())
+    .where(isEscalatedPublic())
+    .limit(AUTO_LIST_BATCH_SIZE)
+    .as("updated");
+  const [[first], [second]] = await Promise.all([
+    db.select({ total: count() }).from(unlisted),
+    db.select({ total: count() }).from(updated),
+  ]);
+  return (first?.total ?? 0) + (second?.total ?? 0);
+}
+
+const isFlaggedUnlisted = () =>
+  and(
+    eq(skillDefinitions.sourceType, "registry_github"),
+    eq(skillDefinitions.status, "active"),
+    eq(skillDefinitions.visibility, "restricted"),
+    eq(skillDefinitions.listingHold, false),
+    publishedCurrentVersion("held"),
+  );
+
+const currentVersionOfSkill = () =>
+  and(
+    eq(skillVersions.skillId, skillDefinitions.id),
+    eq(skillVersions.isCurrent, true),
+  );
+
+/** The columns an entry is built from; a version's SKILL.md is not one. */
+const entryVersionColumns = {
+  id: skillVersions.id,
+  manifestJson: skillVersions.manifestJson,
+  createdAt: skillVersions.createdAt,
+};
+
 async function listFlaggedUnlistedSkills(): Promise<SkillListingQueueEntry[]> {
   const rows = await db
-    .select({ definition: skillDefinitions, version: skillVersions })
+    .select({ definition: skillDefinitions, version: entryVersionColumns })
     .from(skillDefinitions)
-    .innerJoin(
-      skillVersions,
-      and(
-        eq(skillVersions.skillId, skillDefinitions.id),
-        eq(skillVersions.isCurrent, true),
-      ),
-    )
-    .where(
-      and(
-        eq(skillDefinitions.sourceType, "registry_github"),
-        eq(skillDefinitions.status, "active"),
-        eq(skillDefinitions.visibility, "restricted"),
-        eq(skillDefinitions.listingHold, false),
-        publishedCurrentVersion("held"),
-      ),
-    )
+    .innerJoin(skillVersions, currentVersionOfSkill())
+    .where(isFlaggedUnlisted())
     .orderBy(asc(skillDefinitions.createdAt), asc(skillDefinitions.id))
     .limit(AUTO_LIST_BATCH_SIZE);
   return rows.map(({ definition, version }) => {
@@ -189,11 +223,34 @@ async function listFlaggedUnlistedSkills(): Promise<SkillListingQueueEntry[]> {
 
 const previousVersion = alias(skillVersions, "previous_version");
 
-type ManifestColumn = typeof skillVersions.manifestJson;
-const flagsOf = (manifest: ManifestColumn | SQLWrapper) =>
-  sql`coalesce(${manifest}->'registry'->'scan'->'flags', '[]'::jsonb)`;
-const filesOf = (manifest: ManifestColumn | SQLWrapper) =>
-  sql`coalesce(${manifest}->'registry'->'fileManifest', '[]'::jsonb)`;
+const currentPublishedVersionOfSkill = () =>
+  and(currentVersionOfSkill(), eq(skillVersions.status, "published"));
+
+/** The latest published version created before the current one. */
+const isPreviousVersion = () =>
+  sql`${previousVersion.id} = (
+    select earlier.id from ${skillVersions} earlier
+    where earlier.skill_id = ${skillDefinitions.id}
+      and earlier.status = 'published'
+      and earlier.id <> ${skillVersions.id}
+      and earlier.created_at < ${skillVersions.createdAt}
+    order by earlier.created_at desc, earlier.id desc
+    limit 1
+  )`;
+
+// Reads only the generated columns, never `manifest_json`: this runs against
+// every public skill that has a previous version.
+const isEscalatedPublic = () =>
+  and(
+    eq(skillDefinitions.sourceType, "registry_github"),
+    eq(skillDefinitions.status, "active"),
+    eq(skillDefinitions.visibility, "public"),
+    eq(skillVersions.listingAcknowledged, false),
+    sql`(
+      not ${previousVersion.scanFlags} @> ${skillVersions.scanFlags}
+      or not ${previousVersion.scriptPaths} @> ${skillVersions.scriptPaths}
+    )`,
+  );
 
 /**
  * Public community skills whose current version carries a scan flag or ships a
@@ -206,56 +263,19 @@ async function listEscalatedPublicSkills(): Promise<SkillListingQueueEntry[]> {
   const rows = await db
     .select({
       definition: skillDefinitions,
-      version: skillVersions,
+      version: {
+        ...entryVersionColumns,
+        storagePointer: skillVersions.storagePointer,
+      },
       previous: {
         storagePointer: previousVersion.storagePointer,
         manifestJson: previousVersion.manifestJson,
       },
     })
     .from(skillDefinitions)
-    .innerJoin(
-      skillVersions,
-      and(
-        eq(skillVersions.skillId, skillDefinitions.id),
-        eq(skillVersions.isCurrent, true),
-        eq(skillVersions.status, "published"),
-      ),
-    )
-    .innerJoin(
-      previousVersion,
-      sql`${previousVersion.id} = (
-        select earlier.id from ${skillVersions} earlier
-        where earlier.skill_id = ${skillDefinitions.id}
-          and earlier.status = 'published'
-          and earlier.id <> ${skillVersions.id}
-          and earlier.created_at < ${skillVersions.createdAt}
-        order by earlier.created_at desc, earlier.id desc
-        limit 1
-      )`,
-    )
-    .where(
-      and(
-        eq(skillDefinitions.sourceType, "registry_github"),
-        eq(skillDefinitions.status, "active"),
-        eq(skillDefinitions.visibility, "public"),
-        sql`${skillVersions.manifestJson}->'market'->>'acknowledgedAt' is null`,
-        sql`(
-          exists (
-            select 1 from jsonb_array_elements_text(${flagsOf(skillVersions.manifestJson)}) as flag(name)
-            where not (${flagsOf(previousVersion.manifestJson)} @> jsonb_build_array(flag.name))
-          )
-          or exists (
-            select 1 from jsonb_array_elements(${filesOf(skillVersions.manifestJson)}) as file(entry)
-            where file.entry->>'role' = 'script'
-              and not exists (
-                select 1 from jsonb_array_elements(${filesOf(previousVersion.manifestJson)}) as earlier(entry)
-                where earlier.entry->>'role' = 'script'
-                  and earlier.entry->>'path' = file.entry->>'path'
-              )
-          )
-        )`,
-      ),
-    )
+    .innerJoin(skillVersions, currentPublishedVersionOfSkill())
+    .innerJoin(previousVersion, isPreviousVersion())
+    .where(isEscalatedPublic())
     .orderBy(asc(skillVersions.createdAt), asc(skillVersions.id))
     .limit(AUTO_LIST_BATCH_SIZE);
   return rows.map(({ definition, version, previous }) => {
